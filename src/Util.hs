@@ -115,16 +115,17 @@ container suffix image =
             }
       }
 
-namedPort :: Text -> Int -> Record _
-namedPort name port =
+namedContainerPort :: Text -> Int -> Record _
+namedContainerPort name port =
   ANON{containerPort = port, name = name}
+
+httpGet :: Int -> Text -> Record ["port" := Int, "path" := Text]
+httpGet port path = ANON{port = port, path = path}
 
 namespace ::
   (?name :: Text, ?namespace :: Text) =>
-  ToJSON spec =>
-  spec ->
   Record _
-namespace = setSpecTo $ object "Namespace"
+namespace = object "Namespace"
 
 persistentVolumeClaim :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
 persistentVolumeClaim = setSpecTo (object "PersistentVolumeClaim")
@@ -156,6 +157,10 @@ service =
     setSpecTo
       (object "Service")
       ANON{selector = ANON{api = ?name}}
+
+namedServicePort :: Text -> Int -> Record _
+namedServicePort name port =
+  ANON{port = port, name = name}
 
 configMapVolume :: (?name :: Text) => Record _
 configMapVolume = merge named ANON{configMap = named}

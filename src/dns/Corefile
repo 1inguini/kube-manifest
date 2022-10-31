@@ -1,0 +1,28 @@
+.:53 {
+  errors
+  health :8080 {
+    lameduck 5s
+  }
+  ready :8081
+  prometheus :9153
+  forward . 172.16.232.1
+  cache 30
+  loop
+  loadbalance
+
+
+  template IN ANY 1inguini.com {
+    answer "{{ .Name }} 60 IN CNAME allspice"
+    fallthrough
+  }
+
+  template IN A allspice {
+    answer "{{ .Name }} 60 IN A 172.16.232.16"
+    fallthrough
+  }
+
+  template IN AAAA allspice {
+    answer "{{ .Name }} 60 IN AAAA fd04:a2f9:c41e::"
+    fallthrough
+  }
+}

@@ -4,105 +4,78 @@ import Control.Monad.State.Strict (MonadState, execState, modify)
 import Data.Aeson (toJSON)
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Optics (AsJSON (_JSON), key, _Value)
+import Data.FileEmbed (embedStringFile)
+import qualified Data.Map as Map
 import Data.Record.Anon
-import Data.Record.Anon.Simple (Record)
+import Data.Record.Anon.Simple (Record, merge)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Optics (review, set, (%))
 
 import Secret (externalIp)
+import TH (embedYamlFile)
 import Util
 
--- -- config for coredns
--- dns :: App
--- dns =
---   let ?namespace = "dns"
---       ?name = "dns"
---    in let mountPath = "/etc/coredns/"
---           dns = "dns"
---        in mkApp
---             { yamlsManifests =
---                 [ toJSON namespace,
---                   toJSON $
---                     deployment $
---                       ( mkIoK8sApiCoreV1PodSpec
---                           [ over
---                               (ioK8sApiCoreV1ContainerSecurityContextL . _Just)
---                               ( set
---                                   ioK8sApiCoreV1SecurityContextCapabilitiesL
---                                   ( Just $
---                                       mkIoK8sApiCoreV1Capabilities
---                                         { ioK8sApiCoreV1CapabilitiesAdd = Just ["NET_BIND_SERVICE"],
---                                           ioK8sApiCoreV1CapabilitiesDrop = Just ["all"]
---                                         }
---                                   )
---                                   . set ioK8sApiCoreV1SecurityContextReadOnlyRootFilesystemL (Just True)
---                               )
---                               $ (container "coredns" "registry.k8s.io/coredns/coredns:ioK8sApiCoreV1.9.3")
---                                 { ioK8sApiCoreV1ContainerCommand = Just ["/coredns"],
---                                   ioK8sApiCoreV1ContainerArgs =
---                                     Just
---                                       [ "-conf",
---                                         mountPath <> "Corefile"
---                                       ],
---                                   ioK8sApiCoreV1ContainerVolumeMounts =
---                                     Just [mkIoK8sApiCoreV1VolumeMount mountPath ?name],
---                                   ioK8sApiCoreV1ContainerPorts =
---                                     Just
---                                       [ (namedPort dns 53)
---                                           { ioK8sApiCoreV1ContainerPortProtocol = Just E'Protocol'UDP
---                                           },
---                                         namedPort "metrics" 9153
---                                       ],
---                                   ioK8sApiCoreV1ContainerLivenessProbe =
---                                     Just $
---                                       mkIoK8sApiCoreV1Probe
---                                         { ioK8sApiCoreV1ProbeHttpGet =
---                                             Just
---                                               (mkIoK8sApiCoreV1HTTPGetAction "8080")
---                                                 { ioK8sApiCoreV1HTTPGetActionPath = Just "health"
---                                                 },
---                                           ioK8sApiCoreV1ProbeInitialDelaySeconds = Just 60,
---                                           ioK8sApiCoreV1ProbeTimeoutSeconds = Just 5,
---                                           ioK8sApiCoreV1ProbeSuccessThreshold = Just 1,
---                                           ioK8sApiCoreV1ProbeFailureThreshold = Just 5
---                                         },
---                                   ioK8sApiCoreV1ContainerReadinessProbe =
---                                     Just $
---                                       mkIoK8sApiCoreV1Probe
---                                         { ioK8sApiCoreV1ProbeHttpGet =
---                                             Just
---                                               (mkIoK8sApiCoreV1HTTPGetAction "8081")
---                                                 { ioK8sApiCoreV1HTTPGetActionPath = Just "ready"
---                                                 }
---                                         }
---                                 }
---                           ]
---                       )
---                         { ioK8sApiCoreV1PodSpecPriorityClassName = Just systemClusterCritical,
---                           ioK8sApiCoreV1PodSpecVolumes = Just [configMapVolume]
---                         },
---                   toJSON $
---                     configMap (Map.singleton "Corefile" $ (embedStringFile "src/dns/Corefile")),
---                   toJSON $
---                     service $
---                       serviceSpec
---                         { ioK8sApiCoreV1ServiceSpecExternalIps = Just [externalIp],
---                           ioK8sApiCoreV1ServiceSpecPorts =
---                             Just
---                               [ (servicePort dns 53)
---                                   { ioK8sApiCoreV1ServicePortProtocol = Just E'Protocol'UDP
---                                   }
---                               ]
---                         }
---                 ]
---             }
-
-configMapTest :: Aeson.Value
-configMapTest =
+-- config for coredns
+dns :: Manifest
+dns =
   let ?namespace = "dns"
       ?name = "dns"
-   in toJSON $ configMap ANON{externalIps = externalIp}
+   in let mountPath = "/etc/coredns/"
+          dns = "dns"
+       in manifest
+            [ toJSON namespace
+            , toJSON $
+                deployment
+                  ( ANON
+                      { containers =
+                          [ container "coredns" "registry.k8s.io/coredns/coredns:ioK8sApiCoreV1.9.3"
+                              `merge` ANON
+                                { args = ["-conf", mountPath <> "Corefile"] :: [Text]
+                                , command = ["/coredns"] :: [Text]
+                                , livenessProbe =
+                                    ANON
+                                      { httpGet = httpGet 8080 "health"
+                                      , initialDelaySeconds = 60 :: Scientific
+                                      , timeoutSeconds = 5 :: Scientific
+                                      , successThreshold = 1 :: Int
+                                      , failureThreshold = 5 :: Int
+                                      }
+                                , ports =
+                                    [ toJSON $ namedContainerPort dns 53 `merge` ANON{protocol = "UDP" :: Text}
+                                    , toJSON $ namedContainerPort "metrics" 9153
+                                    ]
+                                , priorityClassName = systemClusterCritical
+                                , readinessProbe = ANON{httpGet = httpGet 8081 "ready"}
+                                , securityContext =
+                                    ANON
+                                      { capabilities =
+                                          ANON
+                                            { add = ["NET_BIND_SERVICE"] :: [Text]
+                                            , drop = ["all"] :: [Text]
+                                            }
+                                      , readOnlyRootFilesystem = True
+                                      }
+                                , volumes = [configMapVolume]
+                                , volumeMounts = [merge named ANON{mountPath = mountPath}]
+                                }
+                          ]
+                      }
+                  )
+            , toJSON $
+                configMap (Map.singleton ("Corefile" :: Text) ($(embedStringFile "src/dns/Corefile") :: Text))
+            , toJSON $
+                service $
+                  ANON
+                    { externalIps = [externalIp]
+                    , ports =
+                        [ toJSON $
+                            namedServicePort dns 53
+                              `merge` ANON{protocol = "UDP" :: Text}
+                        ]
+                    }
+            ]
 
 -- ingressNginx :: App
 -- ingressNginx =
@@ -264,5 +237,5 @@ configMapTest =
 --         { yamlsManifests = [$ (embedYamlFile "src/openebs/storage-class.yaml")]
 --         }
 
--- apps :: [App]
--- apps = [dns, ingressNginx, openebs, dockerRegistry]
+manifests :: [Manifest]
+manifests = [dns]
