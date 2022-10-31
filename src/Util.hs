@@ -37,9 +37,6 @@ addSuffix suffix x = let ?name = ?name <> "-" <> suffix in x
 systemClusterCritical :: Text
 systemClusterCritical = "system-cluster-critical"
 
-primaryLabelKey :: Text
-primaryLabelKey = "app"
-
 v1 :: Text
 v1 = "v1"
 
@@ -138,26 +135,22 @@ openebsLvmClaim :: (?name :: Text, ?namespace :: Text) => Text -> Record _
 openebsLvmClaim size =
   persistentVolumeClaim
     ANON
-      { spec =
+      { storageClassName = openebsLvmProvisioner
+      , accessModes = [readWriteOnce]
+      , resources =
           ANON
-            { storageClassName = openebsLvmProvisioner
-            , accessModes = [readWriteOnce]
-            , resources =
-                ANON
-                  { requirementsRequests = ANON{storage = size}
-                  }
+            { requests = ANON{storage = size}
             }
       }
  where
   openebsLvmProvisioner :: Text
   openebsLvmProvisioner = "openebs-lvmpv"
 
-service :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
-service =
-  setSpecTo $
-    setSpecTo
-      (object "Service")
-      ANON{selector = ANON{api = ?name}}
+service :: (?name :: Text, ?namespace :: Text) => Record _ -> Record _
+service spec =
+  setSpecTo
+    (object "Service")
+    $ merge ANON{selector = ANON{app = ?name}} spec
 
 namedServicePort :: Text -> Int -> Record _
 namedServicePort name port =
@@ -181,6 +174,9 @@ persistentVolumeClaimVolume =
             }
       }
 
+volumeMount :: (?name :: Text) => Text -> Record _
+volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
+
 deployment :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
 deployment spec =
   object "Deployment"
@@ -200,10 +196,8 @@ deployment spec =
 
 ingress ::
   (?name :: Text, ?namespace :: Text) =>
-  Record
-    [ "host" := Text
-    , "paths" := [Aeson.Value]
-    ] ->
+  ToJSON rules =>
+  rules ->
   Record _
 ingress rules =
   setSpecTo
