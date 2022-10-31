@@ -28,47 +28,48 @@ dns =
             [ toJSON namespace
             , toJSON $
                 deployment
-                  ( ANON
-                      { containers =
-                          [ container "coredns" "registry.k8s.io/coredns/coredns:ioK8sApiCoreV1.9.3"
-                              `merge` ANON
-                                { args = ["-conf", mountPath <> "Corefile"] :: [Text]
-                                , command = ["/coredns"] :: [Text]
-                                , livenessProbe =
-                                    ANON
-                                      { httpGet = httpGet 8080 "health"
-                                      , initialDelaySeconds = 60 :: Scientific
-                                      , timeoutSeconds = 5 :: Scientific
-                                      , successThreshold = 1 :: Int
-                                      , failureThreshold = 5 :: Int
-                                      }
-                                , ports =
-                                    [ toJSON $ namedContainerPort dns 53 `merge` ANON{protocol = "UDP" :: Text}
-                                    , toJSON $ namedContainerPort "metrics" 9153
-                                    ]
-                                , priorityClassName = systemClusterCritical
-                                , readinessProbe = ANON{httpGet = httpGet 8081 "ready"}
-                                , securityContext =
-                                    ANON
-                                      { capabilities =
-                                          ANON
-                                            { add = ["NET_BIND_SERVICE"] :: [Text]
-                                            , drop = ["all"] :: [Text]
-                                            }
-                                      , readOnlyRootFilesystem = True
-                                      }
-                                , volumes = [configMapVolume]
-                                , volumeMounts = [merge named ANON{mountPath = mountPath}]
-                                }
-                          ]
-                      }
-                  )
+                  ANON
+                    { containers =
+                        [ container
+                            "coredns"
+                            "registry.k8s.io/coredns/coredns:ioK8sApiCoreV1.9.3"
+                            ANON
+                              { args = ["-conf", mountPath <> "Corefile"] :: [Text]
+                              , command = ["/coredns"] :: [Text]
+                              , livenessProbe =
+                                  ANON
+                                    { httpGet = httpGet 8080 "health"
+                                    , initialDelaySeconds = 60 :: Scientific
+                                    , timeoutSeconds = 5 :: Scientific
+                                    , successThreshold = 1 :: Int
+                                    , failureThreshold = 5 :: Int
+                                    }
+                              , ports =
+                                  [ toJSON $ namedContainerPort dns 53 `merge` ANON{protocol = "UDP" :: Text}
+                                  , toJSON $ namedContainerPort "metrics" 9153
+                                  ]
+                              , readinessProbe = ANON{httpGet = httpGet 8081 "ready"}
+                              , securityContext =
+                                  ANON
+                                    { capabilities =
+                                        ANON
+                                          { add = ["NET_BIND_SERVICE"] :: [Text]
+                                          , drop = ["all"] :: [Text]
+                                          }
+                                    , readOnlyRootFilesystem = True
+                                    }
+                              , volumeMounts = [merge named ANON{mountPath = mountPath}]
+                              }
+                        ]
+                    , priorityClassName = systemClusterCritical
+                    , volumes = [configMapVolume]
+                    }
             , toJSON $
                 configMap (Map.singleton ("Corefile" :: Text) ($(embedStringFile "src/dns/Corefile") :: Text))
             , toJSON $
                 service $
                   ANON
-                    { externalIps = [externalIp]
+                    { externalIPs = [externalIp]
                     , ports =
                         [ toJSON $
                             namedServicePort dns 53

@@ -9,7 +9,7 @@ import qualified Data.Aeson as Aeson
 import Data.Aeson.Optics (AsValue, key)
 import Data.Record.Anon
 import qualified Data.Record.Anon.Advanced as A (Record)
-import Data.Record.Anon.Simple (Record, inject, merge)
+import Data.Record.Anon.Simple (Record, inject, insert, merge)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Optics (
@@ -68,7 +68,7 @@ named = ANON{name = ?name}
 type ObjectMeta =
   [ "name" := Text
   , "namespace" := Text
-  , "label" := Record '["app" := Text]
+  , "labels" := Record '["app" := Text]
   ]
 
 meta :: (?name :: Text, ?namespace :: Text) => Record ObjectMeta
@@ -76,7 +76,7 @@ meta =
   ANON
     { name = ?name
     , namespace = ?namespace
-    , label =
+    , labels =
         ANON
           { app = ?name
           }
@@ -98,13 +98,13 @@ object kind =
 
 configMap ::
   (?name :: Text, ?namespace :: Text) =>
-  ToJSON spec =>
-  spec ->
+  ToJSON d =>
+  d ->
   Record _
-configMap = setSpecTo (object "ConfigMap" `merge` ANON{immutable = True})
+configMap d = insert #data d $ object "ConfigMap" `merge` ANON{immutable = True}
 
-container :: (?name :: Text) => Text -> Text -> Record _
-container suffix image =
+container :: (?name :: Text) => Text -> Text -> Record _ -> Record _
+container suffix image rest =
   addSuffix suffix $
     ANON
       { name = ?name
@@ -114,6 +114,7 @@ container suffix image =
             { allowPrivilegeEscalation = False
             }
       }
+      `merge` rest
 
 namedContainerPort :: Text -> Int -> Record _
 namedContainerPort name port =
@@ -181,22 +182,21 @@ persistentVolumeClaimVolume =
       }
 
 deployment :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
-deployment =
-  setSpecTo $
-    setSpecTo
-      (object "Deployment")
-      ANON
-        { apiVersion = "apps/v1" :: Text
-        , spec =
-            ANON
-              { replicas = 1 :: Int
-              , selector = ANON{matchLabels = ANON{app = ?name}}
-              , template =
-                  ANON
-                    { metadata = meta
-                    }
-              }
-        }
+deployment spec =
+  object "Deployment"
+    `merge` ANON
+      { apiVersion = "apps/v1" :: Text
+      , spec =
+          ANON
+            { replicas = 1 :: Int
+            , selector = ANON{matchLabels = ANON{app = ?name}}
+            , template =
+                ANON
+                  { metadata = meta
+                  , spec = spec
+                  }
+            }
+      }
 
 ingress ::
   (?name :: Text, ?namespace :: Text) =>
