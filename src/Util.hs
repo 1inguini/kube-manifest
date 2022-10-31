@@ -208,15 +208,11 @@ ingress rules =
       , rules = rules
       }
 
--- data App = App
---   { yamlsPath :: FilePath,
---     yamlsManifests :: ![Yaml.Value]
---   }
---   deriving (Show, TH.Lift)
+type Manifest = Record ["path" := FilePath, "objects" := [Aeson.Value]]
 
--- mkApp :: (?name :: Text) => App
--- mkApp =
---   App
---     { yamlsPath = "./manifests/" <> Text.unpack ?name <> ".yaml",
---       yamlsManifests = []
---     }
+manifest :: (?name :: Text) => [Aeson.Value] -> Manifest
+manifest objects =
+  ANON
+    { path = "manifest/" <> Text.unpack ?name <> ".yaml"
+    , objects = objects
+    }

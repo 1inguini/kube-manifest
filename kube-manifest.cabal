@@ -45,7 +45,7 @@ common option
     -Wall -Wcompat -Widentities -Wincomplete-record-updates
     -Wincomplete-uni-patterns -Wmissing-export-lists
     -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
-    -fplugin=Data.Record.Anon.Plugin
+    -fplugin=Data.Record.Anon.Plugin -fconstraint-solver-iterations=10
 
 executable kube-manifest
   import:           option
