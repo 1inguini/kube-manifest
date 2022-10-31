@@ -3,22 +3,27 @@ module Util where
 -- import Data.Map.Strict (Map)
 -- import qualified Data.Map.Strict as Map
 
-import Control.Monad.State.Strict (execState)
+import Control.Monad.State.Strict (MonadState, execState, modify)
+import Data.Aeson (FromJSON, ToJSON (toJSON), fromJSON)
+import qualified Data.Aeson as Aeson
+import Data.Aeson.Optics (AsValue, key)
+import Data.Record.Anon
+import qualified Data.Record.Anon.Advanced as A (Record)
+import Data.Record.Anon.Simple (Record, inject, merge)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import GHC.Records (HasField)
+import Optics (
+  A_Setter,
+  Is,
+  Optic',
+  over,
+  set,
+  (%),
+ )
 
+-- import Data.
 -- import Manifest.Io.K8s.Api.Core.V1 (Namespace)
 -- import Manifest.Io.K8s.Apimachinery.Pkg.Apis.Meta.V1 (ObjectMeta (..))
-import Optics (
-  A_Prism,
-  A_Setter,
-  LabelOptic',
-  assign,
-  review,
-  (%),
-  _Just,
- )
 
 mirror :: (a -> a -> b) -> a -> b
 mirror f a = f a a
@@ -29,223 +34,179 @@ name = (,) ?name
 addSuffix :: (?name :: Text) => Text -> ((?name :: Text) => a) -> a
 addSuffix suffix x = let ?name = ?name <> "-" <> suffix in x
 
+systemClusterCritical :: Text
+systemClusterCritical = "system-cluster-critical"
+
 primaryLabelKey :: Text
 primaryLabelKey = "app"
 
--- meta ::
---   (?name :: Text, ?namespace :: Text) => ObjectMeta
--- meta =
---   ObjectMeta
---     { annotations = Nothing,
---       creationTimestamp = Nothing,
---       deletionGracePeriodSeconds = Nothing,
---       deletionTimestamp = Nothing,
---       finalizers = Nothing,
---       generateName = Nothing,
---       generation = Nothing,
---       labels = Nothing,
---       managedFields = Nothing,
---       name = Just ?name,
---       namespace = Just ?namespace,
---       ownerReferences = Nothing,
---       resourceVersion = Nothing,
---       selfLink = Nothing,
---       uid = Nothing
---     }
+v1 :: Text
+v1 = "v1"
 
--- meta ::
---   (?name :: Text, ?namespace :: Text) =>
---   ( -- LabelOptic' "metadata" A_Prism object (Maybe meta),
---     LabelOptic' "namespace" A_Prism meta (Maybe Text)
---   ) =>
---   meta
--- meta = review (#namespace % _Just) ?namespace
+setJSON ::
+  (Is k A_Setter, ToJSON a) =>
+  Optic' k is Aeson.Value Aeson.Value ->
+  a ->
+  Aeson.Value ->
+  Aeson.Value
+setJSON l x = set l (toJSON x)
 
--- metaTest :: Namespace.Metadata
--- metaTest =
---   let ?name = ""
---       ?namespace = "hello"
---    in meta
+setSpecTo :: Record object -> spec -> Record (Merge object '["spec" := spec])
+setSpecTo object spec = merge object ANON{spec = spec}
 
--- meta :: (?name :: Text, ?namespace :: Text) => IoK8sApimachineryPkgApisMetaV1ObjectMeta
--- meta =
---   mkIoK8sApimachineryPkgApisMetaV1ObjectMeta
---     { ioK8sApimachineryPkgApisMetaV1ObjectMetaNamespace = Just ?namespace,
---       ioK8sApimachineryPkgApisMetaV1ObjectMetaName = Just ?name,
---       ioK8sApimachineryPkgApisMetaV1ObjectMetaLabels =
---         Just $
---           Map.fromList
---             [ (primaryLabelKey, ?name)
---             ]
---     }
+assignJSON ::
+  (Is k A_Setter, ToJSON a) =>
+  MonadState Aeson.Value m =>
+  Optic' k is Aeson.Value Aeson.Value ->
+  a ->
+  m ()
+assignJSON l = modify . setJSON l
 
--- namespace :: (?name :: Text, ?namespace :: Text) => IoK8sApiCoreV1Namespace
--- namespace =
---   mkIoK8sApiCoreV1Namespace
---     { ioK8sApiCoreV1NamespaceApiVersion = Just "v1",
---       ioK8sApiCoreV1NamespaceKind = Just "Namespace",
---       ioK8sApiCoreV1NamespaceMetadata = Just meta
---     }
+named :: (?name :: Text) => Record _
+named = ANON{name = ?name}
 
--- deployment :: (?name :: Text, ?namespace :: Text) => IoK8sApiCoreV1PodSpec -> IoK8sApiAppsV1Deployment
--- deployment spec =
---   mkIoK8sApiAppsV1Deployment
---     { ioK8sApiAppsV1DeploymentApiVersion = Just "apps/v1",
---       ioK8sApiAppsV1DeploymentKind = Just "Deployment",
---       ioK8sApiAppsV1DeploymentMetadata = Just meta,
---       ioK8sApiAppsV1DeploymentSpec =
---         Just $
---           ( mkIoK8sApiAppsV1DeploymentSpec
---               ( mkIoK8sApimachineryPkgApisMetaV1LabelSelector
---                   { ioK8sApimachineryPkgApisMetaV1LabelSelectorMatchLabels = Just $ Map.singleton primaryLabelKey ?name
---                   }
---               )
---               $ mkIoK8sApiCoreV1PodTemplateSpec
---                 { ioK8sApiCoreV1PodTemplateSpecMetadata = Just meta,
---                   ioK8sApiCoreV1PodTemplateSpecSpec = Just spec
---                 }
---           )
---             { ioK8sApiAppsV1DeploymentSpecReplicas = Just 1
---             }
---     }
+type ObjectMeta =
+  [ "name" := Text
+  , "namespace" := Text
+  , "label" := Record '["app" := Text]
+  ]
 
--- type PriorityClassName = Text
+meta :: (?name :: Text, ?namespace :: Text) => Record ObjectMeta
+meta =
+  ANON
+    { name = ?name
+    , namespace = ?namespace
+    , label =
+        ANON
+          { app = ?name
+          }
+    }
 
--- systemClusterCritical :: PriorityClassName
--- systemClusterCritical = "system-cluster-critical"
+type Object =
+  [ "apiVersion" := Text
+  , "kind" := Text
+  , "metadata" := Record ObjectMeta
+  ]
 
--- container :: (?name :: Text) => Text -> Text -> IoK8sApiCoreV1Container
--- container suffix image =
---   addSuffix suffix $
---     (mkIoK8sApiCoreV1Container ?name)
---       { ioK8sApiCoreV1ContainerImage = Just image,
---         ioK8sApiCoreV1ContainerSecurityContext =
---           Just $
---             mkIoK8sApiCoreV1SecurityContext
---               { ioK8sApiCoreV1SecurityContextAllowPrivilegeEscalation = Just False
---               }
---       }
+object :: (?name :: Text, ?namespace :: Text) => Text -> Record Object
+object kind =
+  ANON
+    { apiVersion = v1
+    , kind = kind
+    , metadata = meta
+    }
 
--- namedVolume :: (?name :: Text) => IoK8sApiCoreV1Volume
--- namedVolume =
---   (mkIoK8sApiCoreV1Volume ?name)
---     { ioK8sApiCoreV1VolumePersistentVolumeClaim =
---         Just
---           IoK8sApiCoreV1PersistentVolumeClaimVolumeSource
---             { ioK8sApiCoreV1PersistentVolumeClaimVolumeSourceClaimName = ?name,
---               ioK8sApiCoreV1PersistentVolumeClaimVolumeSourceReadOnly = Just False
---             }
---     }
+configMap ::
+  (?name :: Text, ?namespace :: Text) =>
+  ToJSON spec =>
+  spec ->
+  Record _
+configMap = setSpecTo (object "ConfigMap" `merge` ANON{immutable = True})
 
--- hostPath :: (?name :: Text) => Text -> IoK8sApiCoreV1Volume
--- hostPath path =
---   (mkIoK8sApiCoreV1Volume ?name)
---     { ioK8sApiCoreV1VolumeHostPath = Just $ mkIoK8sApiCoreV1HostPathVolumeSource path
---     }
+container :: (?name :: Text) => Text -> Text -> Record _
+container suffix image =
+  addSuffix suffix $
+    ANON
+      { name = ?name
+      , image = image
+      , securityContext =
+          ANON
+            { allowPrivilegeEscalation = False
+            }
+      }
 
--- configMapVolume :: (?name :: Text) => IoK8sApiCoreV1Volume
--- configMapVolume =
---   (mkIoK8sApiCoreV1Volume ?name)
---     { ioK8sApiCoreV1VolumeConfigMap =
---         Just $
---           mkIoK8sApiCoreV1ConfigMapVolumeSource
---             { ioK8sApiCoreV1ConfigMapVolumeSourceName = Just ?name
---             }
---     }
+namedPort :: Text -> Int -> Record _
+namedPort name port =
+  ANON{containerPort = port, name = name}
 
--- persistentVolumeClaimVolume :: (?name :: Text) => IoK8sApiCoreV1Volume
--- persistentVolumeClaimVolume =
---   (mkIoK8sApiCoreV1Volume ?name)
---     { ioK8sApiCoreV1VolumePersistentVolumeClaim =
---         Just $
---           mkIoK8sApiCoreV1PersistentVolumeClaimVolumeSource ?name
---     }
+namespace ::
+  (?name :: Text, ?namespace :: Text) =>
+  ToJSON spec =>
+  spec ->
+  Record _
+namespace = setSpecTo $ object "Namespace"
 
--- -- port :: Int -> Int -> ioK8sApiCoreV1ContainerPort
--- -- port hostPort containerPort =
--- --   (mkIoK8sApiCoreV1ContainerPort containerPort)
--- --     { ioK8sApiCoreV1ContainerPortHostPort = Just hostPort
--- --     }
+persistentVolumeClaim :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
+persistentVolumeClaim = setSpecTo (object "PersistentVolumeClaim")
 
--- namedPort :: Text -> Int -> IoK8sApiCoreV1ContainerPort
--- namedPort name =
---   set ioK8sApiCoreV1ContainerPortNameL (Just name) . mkIoK8sApiCoreV1ContainerPort
+readWriteOnce :: Text
+readWriteOnce = "ReadWriteOnce"
 
--- configMap :: (?name :: Text, ?namespace :: Text) => Map String Text -> IoK8sApiCoreV1ConfigMap
--- configMap configMapData =
---   mkIoK8sApiCoreV1ConfigMap
---     { ioK8sApiCoreV1ConfigMapApiVersion = Just "v1",
---       ioK8sApiCoreV1ConfigMapKind = Just "ConfigMap",
---       ioK8sApiCoreV1ConfigMapMetadata = Just meta,
---       ioK8sApiCoreV1ConfigMapData = Just configMapData,
---       ioK8sApiCoreV1ConfigMapImmutable = Just True
---     }
+openebsLvmClaim :: (?name :: Text, ?namespace :: Text) => Text -> Record _
+openebsLvmClaim size =
+  persistentVolumeClaim
+    ANON
+      { spec =
+          ANON
+            { storageClassName = openebsLvmProvisioner
+            , accessModes = [readWriteOnce]
+            , resources =
+                ANON
+                  { requirementsRequests = ANON{storage = size}
+                  }
+            }
+      }
+ where
+  openebsLvmProvisioner :: Text
+  openebsLvmProvisioner = "openebs-lvmpv"
 
--- openebsLvmProvisioner :: Text
--- openebsLvmProvisioner = "openebs-lvmpv"
+service :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
+service =
+  setSpecTo $
+    setSpecTo
+      (object "Service")
+      ANON{selector = ANON{api = ?name}}
 
--- readWriteOnce :: Text
--- readWriteOnce = "ReadWriteOnce"
+configMapVolume :: (?name :: Text) => Record _
+configMapVolume = merge named ANON{configMap = named}
 
--- persistentVolumeClaim ::
---   (?name :: Text, ?namespace :: Text) =>
---   IoK8sApiCoreV1PersistentVolumeClaimSpec ->
---   IoK8sApiCoreV1PersistentVolumeClaim
--- persistentVolumeClaim spec =
---   mkIoK8sApiCoreV1PersistentVolumeClaim
---     { ioK8sApiCoreV1PersistentVolumeClaimApiVersion = Just "v1",
---       ioK8sApiCoreV1PersistentVolumeClaimKind = Just "PersistentVolumeClaim",
---       ioK8sApiCoreV1PersistentVolumeClaimMetadata = Just meta,
---       ioK8sApiCoreV1PersistentVolumeClaimSpec = Just spec
---     }
+hostPathVolume :: (?name :: Text) => Text -> Record _
+hostPathVolume path = merge named ANON{hostPath = ANON{path = path}}
 
--- openebsLvmClaim ::
---   (?name :: Text, ?namespace :: Text) =>
---   Text ->
---   IoK8sApiCoreV1PersistentVolumeClaim
--- openebsLvmClaim size =
---   persistentVolumeClaim $
---     mkIoK8sApiCoreV1PersistentVolumeClaimSpec
---       { ioK8sApiCoreV1PersistentVolumeClaimSpecStorageClassName = Just openebsLvmProvisioner,
---         ioK8sApiCoreV1PersistentVolumeClaimSpecAccessModes = Just [readWriteOnce],
---         ioK8sApiCoreV1PersistentVolumeClaimSpecResources =
---           Just $
---             mkIoK8sApiCoreV1ResourceRequirements
---               { ioK8sApiCoreV1ResourceRequirementsRequests = Just $ Map.singleton "storage" size
---               }
---       }
+persistentVolumeClaimVolume :: (?name :: Text) => Record _
+persistentVolumeClaimVolume =
+  merge
+    named
+    ANON
+      { persistentVolumeClaim =
+          ANON
+            { claimName = ?name
+            , readOnly = False
+            }
+      }
 
--- service :: (?name :: Text, ?namespace :: Text) => IoK8sApiCoreV1ServiceSpec -> IoK8sApiCoreV1Service
--- service spec =
---   mkIoK8sApiCoreV1Service
---     { ioK8sApiCoreV1ServiceApiVersion = Just "v1",
---       ioK8sApiCoreV1ServiceKind = Just "Service",
---       ioK8sApiCoreV1ServiceMetadata = Just meta,
---       ioK8sApiCoreV1ServiceSpec = Just spec
---     }
+deployment :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
+deployment =
+  setSpecTo $
+    setSpecTo
+      (object "Deployment")
+      ANON
+        { apiVersion = "apps/v1" :: Text
+        , spec =
+            ANON
+              { replicas = 1 :: Int
+              , selector = ANON{matchLabels = ANON{app = ?name}}
+              , template =
+                  ANON
+                    { metadata = meta
+                    }
+              }
+        }
 
--- serviceSpec :: (?name :: Text) => IoK8sApiCoreV1ServiceSpec
--- serviceSpec =
---   mkIoK8sApiCoreV1ServiceSpec
---     { ioK8sApiCoreV1ServiceSpecSelector = Just $ Map.singleton primaryLabelKey ?name
---     }
-
--- servicePort :: Text -> Int -> IoK8sApiCoreV1ServicePort
--- servicePort name = set ioK8sApiCoreV1ServicePortTargetPortL (Just name) . mkIoK8sApiCoreV1ServicePort
-
--- ingress :: (?name :: Text, ?namespace :: Text) => [IoK8sApiNetworkingV1IngressRule] -> IoK8sApiNetworkingV1Ingress
--- ingress rules =
---   mkIoK8sApiNetworkingV1Ingress
---     { ioK8sApiNetworkingV1IngressApiVersion = Just "networking.k8s.io/v1",
---       ioK8sApiNetworkingV1IngressKind = Just "Ingress",
---       ioK8sApiNetworkingV1IngressMetadata = Just meta,
---       ioK8sApiNetworkingV1IngressSpec =
---         Just $
---           mkIoK8sApiNetworkingV1IngressSpec
---             { ioK8sApiNetworkingV1IngressSpecIngressClassName = Just "nginx",
---               ioK8sApiNetworkingV1IngressSpecRules = Just rules
---             }
---     }
+ingress ::
+  (?name :: Text, ?namespace :: Text) =>
+  Record
+    [ "host" := Text
+    , "paths" := [Aeson.Value]
+    ] ->
+  Record _
+ingress rules =
+  setSpecTo
+    (inject ANON{apiVersion = "networking.k8s.io/v1" :: Text} $ object "Ingress")
+    ANON
+      { ingressClassName = "nginx" :: Text
+      , rules = rules
+      }
 
 -- data App = App
 --   { yamlsPath :: FilePath,

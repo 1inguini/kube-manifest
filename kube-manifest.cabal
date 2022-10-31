@@ -30,13 +30,16 @@ common option
     ImplicitParams
     MultiParamTypeClasses
     NamedFieldPuns
+    OverloadedLabels
     OverloadedStrings
+    PartialTypeSignatures
     RankNTypes
     ScopedTypeVariables
     StandaloneDeriving
     TemplateHaskell
     TypeApplications
     TypeFamilies
+    TypeOperators
 
   ghc-options:
     -Wall -Wcompat -Widentities -Wincomplete-record-updates
@@ -47,6 +50,11 @@ common option
 executable kube-manifest
   import:           option
   main-is:          Main.hs
+  other-modules:
+    Manifest
+    Secret
+    TH
+    Util
 
   -- Modules included in this executable, other than Main.
   -- other-modules:

@@ -1,33 +1,25 @@
-module TH where
+module TH (
+  embedFromYamlFile,
+  embedYamlFile,
+  embedModifedYamlFile,
+) where
 
-import Data.List.Optics qualified as Optics
-import Data.Maybe (fromMaybe)
 import qualified Data.Yaml as Yaml
 import qualified Language.Haskell.TH as TH
-import qualified Language.Haskell.TH.Syntax as TH
-import Optics
-  ( DefName (TopName),
-    FieldNamer,
-    LensRules,
-    fieldLabelsRules,
-    lensField,
-    makeFieldLabelsWith,
-    preview,
-    set,
-  )
+import Language.Haskell.TH.Syntax (Lift (lift), qAddDependentFile)
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =
-  TH.qAddDependentFile path
+  qAddDependentFile path
     >> TH.runIO (Yaml.decodeFileThrow path :: IO a)
 
 embedFromYamlFile ::
   forall a b.
-  (Yaml.FromJSON a, TH.Lift b) =>
+  (Yaml.FromJSON a, Lift b) =>
   FilePath ->
   (a -> TH.Q b) ->
   TH.Q TH.Exp
-embedFromYamlFile path conv = getYamlFile path >>= conv >>= TH.lift
+embedFromYamlFile path conv = getYamlFile path >>= conv >>= lift
 
 embedYamlFile :: FilePath -> TH.Q TH.Exp
 embedYamlFile path = embedFromYamlFile @Yaml.Value path pure

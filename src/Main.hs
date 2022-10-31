@@ -9,6 +9,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Yaml as Yaml (encode)
 
+import Manifest
 import Util
 
 -- import Utils (App (..))
