@@ -23,7 +23,6 @@ dns =
   let ?namespace = "dns"
       ?name = "dns"
    in let mountPath = "/etc/coredns/"
-          dns = "dns"
        in manifest
             [ toJSON namespace
             , toJSON $
@@ -45,8 +44,8 @@ dns =
                                     , failureThreshold = 5 :: Int
                                     }
                               , ports =
-                                  [ toJSON $ namedContainerPort dns 53 `merge` ANON{protocol = "UDP" :: Text}
-                                  , toJSON $ namedContainerPort "metrics" 9153
+                                  [ toJSON $ containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
+                                  , toJSON $ addSuffix "metrics" $ containerPort 9153
                                   ]
                               , readinessProbe = ANON{httpGet = httpGet 8081 "ready"}
                               , securityContext =
@@ -58,7 +57,7 @@ dns =
                                           }
                                     , readOnlyRootFilesystem = True
                                     }
-                              , volumeMounts = [merge named ANON{mountPath = mountPath}]
+                              , volumeMounts = [volumeMount mountPath]
                               }
                         ]
                     , priorityClassName = systemClusterCritical
@@ -72,14 +71,14 @@ dns =
                     { externalIPs = [externalIp]
                     , ports =
                         [ toJSON $
-                            namedServicePort dns 53
+                            servicePort 53
                               `merge` ANON{protocol = "UDP" :: Text}
                         ]
                     }
             ]
 
-ingressNginx :: Manifest
-ingressNginx =
+nginxIngressController :: Manifest
+nginxIngressController =
   let ?namespace = "ingress-nginx"
       ?name = "ingress-nginx-controller"
    in manifest
@@ -88,38 +87,6 @@ ingressNginx =
             (KeyMap.insert "externalIPs" $ toJSON [externalIp])
             $(embedYamlFile "src/ingress-nginx/ingress-nginx-controller.yaml")
         ]
-
--- -- reverseProxy :: App
--- -- reverseProxy =
--- --   let ?namespace = defaultNamespace
--- --       ?name = "reverse-proxy"
--- --    in let mountPath = "/etc/caddy/"
--- --        in mkApp
--- --             { yamlsManifests =
--- --                 [ toJSON $
--- --                     deployment $
--- --                       ( mkIoK8sApiCoreV1PodSpec
--- --                           [ (container "caddy" $ registry <> "caddy")
--- --                               { ioK8sApiCoreV1ContainerPorts = Just [port 80 8000, port 443 4430],
--- --                                 ioK8sApiCoreV1ContainerCommand = Just ["/usr/bin/caddy"],
--- --                                 ioK8sApiCoreV1ContainerArgs =
--- --                                   Just
--- --                                     [ "run",
--- --                                       "--config",
--- --                                       mountPath <> "Caddyfile"
--- --                                     ],
--- --                                 ioK8sApiCoreV1ContainerVolumeMounts =
--- --                                   Just [mkIoK8sApiCoreV1VolumeMount mountPath ?name]
--- --                               }
--- --                           ]
--- --                       )
--- --                         { ioK8sApiCoreV1PodSpecVolumes = Just [configMapVolume]
--- --                         },
--- --                   toJSON $
--- --                     configMap $
--- --                       Map.singleton "Caddyfile" $(embedStringFile "src/reverse-proxy/Caddyfile")
--- --                 ]
--- --             }
 
 dockerRegistry :: Manifest
 dockerRegistry =
@@ -135,7 +102,7 @@ dockerRegistry =
                     { containers =
                         [ mirror container "registry" $
                             ANON
-                              { ports = [namedContainerPort ?name 5000]
+                              { ports = [containerPort 5000]
                               , volumeMounts =
                                   [ volumeMount "/var/lib/registry"
                                   , config $ volumeMount "/etc/docker/registry"
@@ -155,25 +122,9 @@ dockerRegistry =
             , toJSON $
                 service $
                   ANON
-                    { ports = [namedServicePort ?name 5000]
-                    , externalIPs = [externalIp]
+                    { ports = [servicePort 5000]
                     }
-            , toJSON $
-                ingress
-                  [ ANON
-                      { host = "registry." <> host
-                      , http =
-                          ANON
-                            { paths =
-                                [ ANON
-                                    { backend = ANON{service = ANON{name = ?name, port = named}}
-                                    , path = "/" :: Text
-                                    , pathType = "Prefix" :: Text
-                                    }
-                                ]
-                            }
-                      }
-                  ]
+            , toJSON $ ingressNginxTls [ingressRule $ "registry." <> host]
             ]
 
 openebs :: Manifest
@@ -185,6 +136,6 @@ manifests :: [Manifest]
 manifests =
   [ dns
   , dockerRegistry
-  , ingressNginx
+  , nginxIngressController
   , openebs
   ]

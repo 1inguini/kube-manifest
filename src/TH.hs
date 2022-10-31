@@ -2,8 +2,11 @@ module TH (
   embedFromYamlFile,
   embedYamlFile,
   embedModifedYamlFile,
+  deriveJSON,
 ) where
 
+import Data.Aeson (Options (sumEncoding))
+import qualified Data.Aeson.TH as Aeson
 import qualified Data.Yaml as Yaml
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax (Lift (lift), qAddDependentFile)
@@ -26,3 +29,6 @@ embedYamlFile path = embedFromYamlFile @Yaml.Value path pure
 
 embedModifedYamlFile :: forall a b. (Yaml.FromJSON a, Yaml.ToJSON b) => FilePath -> (a -> b) -> TH.Q TH.Exp
 embedModifedYamlFile path f = embedFromYamlFile @a path (pure . Yaml.toJSON . f)
+
+deriveJSON :: TH.Name -> TH.Q [TH.Dec]
+deriveJSON = Aeson.deriveJSON Aeson.defaultOptions{sumEncoding = Aeson.UntaggedValue}

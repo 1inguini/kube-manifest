@@ -9,7 +9,7 @@ import qualified Data.Aeson as Aeson
 import Data.Aeson.Optics (AsValue, key)
 import Data.Record.Anon
 import qualified Data.Record.Anon.Advanced as A (Record)
-import Data.Record.Anon.Simple (Record, inject, insert, merge)
+import Data.Record.Anon.Simple (Record, inject, insert, merge, project)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Optics (
@@ -18,8 +18,11 @@ import Optics (
   Optic',
   over,
   set,
+  view,
   (%),
  )
+
+import TH (deriveJSON)
 
 -- import Data.
 -- import Manifest.Io.K8s.Api.Core.V1 (Namespace)
@@ -113,9 +116,9 @@ container suffix image rest =
       }
       `merge` rest
 
-namedContainerPort :: Text -> Int -> Record _
-namedContainerPort name port =
-  ANON{containerPort = port, name = name}
+containerPort :: (?name :: Text) => Int -> Record _
+containerPort port =
+  ANON{containerPort = port, name = ?name}
 
 httpGet :: Int -> Text -> Record ["port" := Int, "path" := Text]
 httpGet port path = ANON{port = port, path = path}
@@ -152,9 +155,9 @@ service spec =
     (object "Service")
     $ merge ANON{selector = ANON{app = ?name}} spec
 
-namedServicePort :: Text -> Int -> Record _
-namedServicePort name port =
-  ANON{port = port, name = name}
+servicePort :: (?name :: Text) => Int -> Record _
+servicePort port =
+  ANON{port = port, name = ?name}
 
 configMapVolume :: (?name :: Text) => Record _
 configMapVolume = merge named ANON{configMap = named}
@@ -194,18 +197,83 @@ deployment spec =
             }
       }
 
-ingress ::
+ingressNginx ::
   (?name :: Text, ?namespace :: Text) =>
-  ToJSON rules =>
-  rules ->
+  (AllFields backend ToJSON) =>
+  [ Record
+      [ "host" := Text
+      , "http"
+          := Record
+              '[ "paths"
+                  := [ Record
+                        [ "backend" := Record backend
+                        , "path" := Text
+                        , "pathType" := PathType
+                        ]
+                     ]
+               ]
+      ]
+  ] ->
   Record _
-ingress rules =
+ingressNginx rules =
   setSpecTo
     (inject ANON{apiVersion = "networking.k8s.io/v1" :: Text} $ object "Ingress")
     ANON
       { ingressClassName = "nginx" :: Text
       , rules = rules
       }
+
+data PathType
+  = Exact
+  | Prefix
+  | ImplementationSpecific
+  deriving (Show)
+
+ingressNginxTls ::
+  (?name :: Text, ?namespace :: Text) =>
+  (AllFields back ToJSON) =>
+  [ Record
+      [ "host" := Text
+      , "http"
+          := Record
+              '[ "paths"
+                  := [ Record
+                        [ "backend" := Record back
+                        , "path" := Text
+                        , "pathType" := PathType
+                        ]
+                     ]
+               ]
+      ]
+  ] ->
+  Record _
+ingressNginxTls rules =
+  setSpecTo
+    (inject ANON{apiVersion = "networking.k8s.io/v1" :: Text} $ object "Ingress")
+    ANON
+      { ingressClassName = "nginx" :: Text
+      , rules = rules
+      , tls = [ANON{hosts = view #host <$> rules}]
+      }
+
+ingressRule :: (?name :: Text) => Text -> Record _
+ingressRule host =
+  ANON
+    { host = host
+    , http =
+        ANON
+          { paths =
+              [ ANON
+                  { backend = backend
+                  , path = "/" :: Text
+                  , pathType = Prefix
+                  }
+              ]
+          }
+    }
+
+backend :: (?name :: Text) => Record _
+backend = ANON{service = ANON{name = ?name, port = named}}
 
 type Manifest = Record ["path" := FilePath, "objects" := [Aeson.Value]]
 
@@ -215,3 +283,5 @@ manifest objects =
     { path = "manifest/" <> Text.unpack ?name <> ".yaml"
     , objects = objects
     }
+
+$(deriveJSON ''PathType)

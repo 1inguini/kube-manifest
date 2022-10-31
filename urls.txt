@@ -1,0 +1,4 @@
+https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+https://openebs.github.io/charts/lvm-operator.yaml
+https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.4.0/deploy/static/provider/baremetal/deploy.yaml
+https://github.com/cert-manager/cert-manager/releases/download/v1.9.1/cert-manager.yaml
