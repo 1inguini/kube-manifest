@@ -1,0 +1,21 @@
+FROM docker.io/library/archlinux:base-devel
+
+RUN sed -i /etc/pacman.conf -e 's/NoProgress/#NoProgress/' -e '/NoExtract.*locale/d'
+# && \
+# printf '%s\n%s\n' 'NoExtract = !usr/share/locale/ja/*' 'NoExtract = !usr/share/i18n/locales/ja_JP/*' >> /etc/pacman.conf
+
+COPY --chmod=644 mirrorlist /etc/pacman.d/mirrorlist
+
+RUN pacman -Syu --noconfirm glibc git moreutils
+
+COPY --chmod=644 locale.gen /etc/locale.gen
+RUN locale-gen
+
+RUN useradd -d / -s /usr/bin/nologin user && \
+  printf '%s\n' 'user ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
+USER user
+
+RUN cd /tmp && git clone https://aur.archlinux.org/paru-bin /tmp/paru && \
+  cd /tmp/paru && makepkg -sir --noconfirm
+
+RUN rm -rf /tmp/*
