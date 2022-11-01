@@ -1,0 +1,10 @@
+# podman build containers/php-fpm --rm --tag registry.1inguini.com/library/php-fpm:$(date --utc +%Y%m%d)
+FROM registry.1inguini.com/library/builder:latest as builder
+
+RUN files.sh php-fpm
+
+FROM gcr.io/distroless/static
+
+COPY --from=builder /tmp/files/ /
+
+USER nonroot

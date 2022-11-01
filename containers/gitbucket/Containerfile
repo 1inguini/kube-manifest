@@ -1,4 +1,4 @@
-FROM builder:latest as builder
+FROM registry.1inguini.com/library/builder:latest as builder
 
 # tag 4.38.3
 RUN curl -L -o /tmp/gitbucket.war \ 
