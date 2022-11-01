@@ -60,3 +60,23 @@ metadata:
   namespace: ingress-nginx
   # resourceVersion: "982783"
   # uid: 63caf46b-1a6a-489d-86a1-7e89d830b372
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  # annotations:
+  # kubectl.kubernetes.io/last-applied-configuration: |
+  #   {"apiVersion":"networking.k8s.io/v1","kind":"IngressClass","metadata":{"annotations":{},"labels":{"app.kubernetes.io/component":"controller","app.kubernetes.io/instance":"ingress-nginx","app.kubernetes.io/name":"ingress-nginx","app.kubernetes.io/part-of":"ingress-nginx","app.kubernetes.io/version":"1.4.0"},"name":"nginx"},"spec":{"controller":"k8s.io/ingress-nginx"}}
+  # creationTimestamp: "2022-10-14T14:13:00Z"
+  # generation: 1
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/version: 1.4.0
+  name: nginx
+  # resourceVersion: "982819"
+  # uid: 8577f09e-d780-436a-a9c6-e24c5810993d
+spec:
+  controller: k8s.io/ingress-nginx

@@ -10,11 +10,14 @@ import Data.Aeson.Optics (AsValue, key)
 import Data.Record.Anon
 import qualified Data.Record.Anon.Advanced as A (Record)
 import Data.Record.Anon.Simple (Record, inject, insert, merge, project)
+import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Optics (
   A_Setter,
   Is,
+  LabelOptic',
+  NoIx,
   Optic',
   over,
   set,
@@ -125,8 +128,10 @@ httpGet port path = ANON{port = port, path = path}
 
 namespace ::
   (?name :: Text, ?namespace :: Text) =>
-  Record _
-namespace = object "Namespace"
+  Record Object
+namespace =
+  set ((#metadata :: Optic' _ _ _ _) % (#name :: Optic' _ _ _ _)) ?namespace $
+    object "Namespace"
 
 persistentVolumeClaim :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
 persistentVolumeClaim = setSpecTo (object "PersistentVolumeClaim")
@@ -284,11 +289,15 @@ manifest objects =
     , objects = objects
     }
 
-value :: (?name :: Text) => [Aeson.Value] -> Manifest
-value objects =
+type HelmValues = Record ["chart" := String, "namespace" := Text, "name" := Text, "values" := Aeson.Value]
+
+helmValues :: (?name :: Text, ?namespace :: Text) => String -> Aeson.Value -> HelmValues
+helmValues chart values =
   ANON
-    { path = "value/" <> Text.unpack ?name <> ".yaml"
-    , objects = objects
+    { chart = chart
+    , namespace = ?namespace
+    , name = ?name
+    , values = values
     }
 
 $(deriveJSON ''PathType)

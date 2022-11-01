@@ -73,6 +73,7 @@ executable kube-manifest
     , mtl
     , optics
     , optics-th
+    , process
     , scientific
     , template-haskell
     , text

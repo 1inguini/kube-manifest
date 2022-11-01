@@ -13,9 +13,10 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Optics (ix, over, review, set, (%))
 
+import qualified Data.Aeson.KeyMap as KeyMap
 import Secret (externalIp, host)
 import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile)
-import Util (Manifest)
+import Util (HelmValues, Manifest)
 import qualified Util
 
 -- config for coredns
@@ -82,7 +83,8 @@ nginxIngressController :: Manifest
 nginxIngressController =
   let ?namespace = "ingress-nginx"
       ?name = "ingress-nginx-controller"
-   in let [service, configMap] = $(embedYamlAllFile "src/ingress-nginx/ingress-nginx-controller.yaml")
+   in let [service, configMap, ingressClass] =
+            $(embedYamlAllFile "src/ingress-nginx/ingress-nginx-controller.yaml")
        in Util.manifest
             [ over
                 (key "spec" % _Object)
@@ -92,6 +94,13 @@ nginxIngressController =
                 (key "data" % _Object)
                 (KeyMap.insert "proxy-body-size" $ toJSON ("50g" :: Text))
                 configMap
+            , over
+                (key "metadata" % _Object)
+                ( KeyMap.insert "annotations" $
+                    toJSON $
+                      KeyMap.singleton @Text "ingressclass.kubernetes.io/is-default-class" "true"
+                )
+                ingressClass
             ]
 
 dockerRegistry :: Manifest
@@ -133,11 +142,27 @@ dockerRegistry =
             , toJSON $ Util.ingressNginxTls [Util.ingressRule $ "registry." <> host]
             ]
 
-harbor :: Manifest
+harbor :: HelmValues
 harbor =
   let ?namespace = "registry"
       ?name = "harbor"
-   in Util.value []
+   in let url = "registry." <> host
+       in Util.helmValues "harbor/harbor" $
+            toJSON
+              ANON
+                { expose =
+                    ANON
+                      { ingress =
+                          ANON
+                            { hosts =
+                                ANON
+                                  { core = url
+                                  , notary = "notary." <> url
+                                  }
+                            }
+                      }
+                , externalURL = url
+                }
 
 openebs :: Manifest
 openebs =
@@ -147,7 +172,11 @@ openebs =
 manifests :: [Manifest]
 manifests =
   [ dns
-  , dockerRegistry
   , nginxIngressController
   , openebs
+  ]
+
+helmValuess :: [HelmValues]
+helmValuess =
+  [ harbor
   ]
