@@ -15,7 +15,8 @@ import Optics (ix, over, review, set, (%))
 
 import Secret (externalIp, host)
 import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile)
-import Util
+import Util (Manifest)
+import qualified Util
 
 -- config for coredns
 dns :: Manifest
@@ -23,13 +24,13 @@ dns =
   let ?namespace = "dns"
       ?name = "dns"
    in let mountPath = "/etc/coredns/"
-       in manifest
-            [ toJSON namespace
+       in Util.manifest
+            [ toJSON Util.namespace
             , toJSON $
-                deployment
+                Util.deployment
                   ANON
                     { containers =
-                        [ container
+                        [ Util.container
                             "coredns"
                             "registry.k8s.io/coredns/coredns:v1.9.3"
                             ANON
@@ -37,17 +38,17 @@ dns =
                               , command = ["/coredns"] :: [Text]
                               , livenessProbe =
                                   ANON
-                                    { httpGet = httpGet 8080 "health"
+                                    { httpGet = Util.httpGet 8080 "health"
                                     , initialDelaySeconds = 60 :: Scientific
                                     , timeoutSeconds = 5 :: Scientific
                                     , successThreshold = 1 :: Int
                                     , failureThreshold = 5 :: Int
                                     }
                               , ports =
-                                  [ toJSON $ containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
-                                  , toJSON $ addSuffix "metrics" $ containerPort 9153
+                                  [ toJSON $ Util.containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
+                                  , toJSON $ Util.addSuffix "metrics" $ Util.containerPort 9153
                                   ]
-                              , readinessProbe = ANON{httpGet = httpGet 8081 "ready"}
+                              , readinessProbe = ANON{httpGet = Util.httpGet 8081 "ready"}
                               , securityContext =
                                   ANON
                                     { capabilities =
@@ -57,21 +58,21 @@ dns =
                                           }
                                     , readOnlyRootFilesystem = True
                                     }
-                              , volumeMounts = [volumeMount mountPath]
+                              , volumeMounts = [Util.volumeMount mountPath]
                               }
                         ]
-                    , priorityClassName = systemClusterCritical
-                    , volumes = [configMapVolume]
+                    , priorityClassName = Util.systemClusterCritical
+                    , volumes = [Util.configMapVolume]
                     }
             , toJSON $
-                configMap (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
+                Util.configMap (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
             , toJSON $
-                service $
+                Util.service $
                   ANON
                     { externalIPs = [externalIp]
                     , ports =
                         [ toJSON $
-                            servicePort 53
+                            Util.servicePort 53
                               `merge` ANON{protocol = "UDP" :: Text}
                         ]
                     }
@@ -82,7 +83,7 @@ nginxIngressController =
   let ?namespace = "ingress-nginx"
       ?name = "ingress-nginx-controller"
    in let [service, configMap] = $(embedYamlAllFile "src/ingress-nginx/ingress-nginx-controller.yaml")
-       in manifest
+       in Util.manifest
             [ over
                 (key "spec" % _Object)
                 (KeyMap.insert "externalIPs" $ toJSON [externalIp])
@@ -98,44 +99,50 @@ dockerRegistry =
   -- can be run by user
   let ?namespace = "docker-registry"
       ?name = "docker-registry"
-   in let config = addSuffix "config"
-       in manifest
-            [ toJSON namespace
+   in let config = Util.addSuffix "config"
+       in Util.manifest
+            [ toJSON Util.namespace
             , toJSON $
-                deployment $
+                Util.deployment $
                   ANON
                     { containers =
-                        [ mirror container "registry" $
+                        [ Util.mirror Util.container "registry" $
                             ANON
-                              { ports = [containerPort 5000]
+                              { ports = [Util.containerPort 5000]
                               , volumeMounts =
-                                  [ volumeMount "/var/lib/registry"
-                                  , config $ volumeMount "/etc/docker/registry"
+                                  [ Util.volumeMount "/var/lib/registry"
+                                  , config $ Util.volumeMount "/etc/docker/registry"
                                   ]
                               }
                         ]
                     , volumes =
-                        [ toJSON persistentVolumeClaimVolume
-                        , toJSON $ config configMapVolume
+                        [ toJSON Util.persistentVolumeClaimVolume
+                        , toJSON $ config Util.configMapVolume
                         ]
                     }
-            , toJSON $ openebsLvmClaim "5Gi"
+            , toJSON $ Util.openebsLvmClaim "5Gi"
             , toJSON $
                 config $
-                  configMap $
+                  Util.configMap $
                     KeyMap.singleton "config.yml" ($(embedStringFile "src/registry/config.yml") :: Text)
             , toJSON $
-                service $
+                Util.service $
                   ANON
-                    { ports = [servicePort 5000]
+                    { ports = [Util.servicePort 5000]
                     }
-            , toJSON $ ingressNginxTls [ingressRule $ "registry." <> host]
+            , toJSON $ Util.ingressNginxTls [Util.ingressRule $ "registry." <> host]
             ]
+
+harbor :: Manifest
+harbor =
+  let ?namespace = "registry"
+      ?name = "harbor"
+   in Util.value []
 
 openebs :: Manifest
 openebs =
   let ?name = "openebs"
-   in manifest [$(embedYamlFile "src/openebs/storage-class.yaml")]
+   in Util.manifest [$(embedYamlFile "src/openebs/storage-class.yaml")]
 
 manifests :: [Manifest]
 manifests =
