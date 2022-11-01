@@ -30,13 +30,16 @@ writeManifest manifest = case view #objects manifest of
 runHelm :: HelmValues -> IO ()
 runHelm values = do
   let yaml = Text.unpack (view #name values) <> ".yaml"
+      valuesPath = "values/" <> yaml
       path = "manifest/" <> yaml
+  putStrLn $ "# writing to: " <> valuesPath
+  ByteString.writeFile valuesPath $ Yaml.encode $ view #values values
   aesons <-
     readProcess
       "helm"
       [ "template"
       , "--values"
-      , "values/" <> yaml
+      , valuesPath
       , view #chart values
       ]
       ""

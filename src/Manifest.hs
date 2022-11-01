@@ -161,7 +161,7 @@ harbor =
                                   }
                             }
                       }
-                , externalURL = url
+                , externalURL = "https://" <> url
                 }
 
 openebs :: Manifest
