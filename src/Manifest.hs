@@ -11,10 +11,10 @@ import Data.Record.Anon.Simple (Record, inject, merge, project)
 import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Optics (over, review, set, (%))
+import Optics (ix, over, review, set, (%))
 
 import Secret (externalIp, host)
-import TH (embedModifedYamlFile, embedYamlFile)
+import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile)
 import Util
 
 -- config for coredns
@@ -81,12 +81,17 @@ nginxIngressController :: Manifest
 nginxIngressController =
   let ?namespace = "ingress-nginx"
       ?name = "ingress-nginx-controller"
-   in manifest
-        [ over
-            (key "spec" % _Object)
-            (KeyMap.insert "externalIPs" $ toJSON [externalIp])
-            $(embedYamlFile "src/ingress-nginx/ingress-nginx-controller.yaml")
-        ]
+   in let [service, configMap] = $(embedYamlAllFile "src/ingress-nginx/ingress-nginx-controller.yaml")
+       in manifest
+            [ over
+                (key "spec" % _Object)
+                (KeyMap.insert "externalIPs" $ toJSON [externalIp])
+                service
+            , over
+                (key "data" % _Object)
+                (KeyMap.insert "proxy-body-size" $ toJSON ("50g" :: Text))
+                configMap
+            ]
 
 dockerRegistry :: Manifest
 dockerRegistry =
@@ -114,7 +119,7 @@ dockerRegistry =
                         , toJSON $ config configMapVolume
                         ]
                     }
-            , toJSON $ openebsLvmClaim "1Gi"
+            , toJSON $ openebsLvmClaim "5Gi"
             , toJSON $
                 config $
                   configMap $
