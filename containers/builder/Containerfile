@@ -1,4 +1,4 @@
-FROM allspice:5000/archlinux:latest
+FROM localhost/archlinux:latest
 
 RUN paru -S --noconfirm busybox
 # RUN paru -S --noconfirm rsync

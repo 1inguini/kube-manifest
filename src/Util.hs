@@ -284,4 +284,11 @@ manifest objects =
     , objects = objects
     }
 
+value :: (?name :: Text) => [Aeson.Value] -> Manifest
+value objects =
+  ANON
+    { path = "value/" <> Text.unpack ?name <> ".yaml"
+    , objects = objects
+    }
+
 $(deriveJSON ''PathType)
