@@ -1,6 +1,3 @@
-/secret
-/manifest
-
 dist
 dist-*
 cabal-dev
