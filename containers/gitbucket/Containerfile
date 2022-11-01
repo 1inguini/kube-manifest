@@ -1,12 +1,17 @@
 FROM builder:latest as builder
 
 # tag 4.38.3
-RUN curl -O 'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gitbucket.war' 'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gitbucket.war.sha256'
+RUN curl -L -o /tmp/gitbucket.war \ 
+  'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gitbucket.war'
+RUN curl -L -o /tmp/gitbucket.war.sha256 \
+  'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gitbucket.war.sha256'
 
-RUN sha256sum -c /gitbucket.war.sha256
+RUN sha256sum /tmp/gitbucket.war
 
 FROM gcr.io/distroless/java11-debian11
 
-COPY --from=builder --chown=nonroot:nonroot /gitbucket.war /home/nonroot/gitbucket.war
+COPY --from=builder --chown=nonroot:nonroot /tmp/gitbucket.war /home/nonroot/gitbucket.war
+
+CMD ["/home/nonroot/gitbucket.war"]
 
 USER nonroot
