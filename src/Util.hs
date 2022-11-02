@@ -3,7 +3,7 @@ module Util where
 -- import Data.Map.Strict (Map)
 -- import qualified Data.Map.Strict as Map
 
-import Control.Monad.State.Strict (MonadState, execState, modify)
+import Control.Monad.State.Strict (MonadState, State, execState, modify)
 import Data.Aeson (FromJSON, ToJSON (toJSON), fromJSON)
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Optics (AsValue, key)
@@ -127,11 +127,14 @@ httpGet :: Int -> Text -> Record ["port" := Int, "path" := Text]
 httpGet port path = ANON{port = port, path = path}
 
 namespace ::
-  (?name :: Text, ?namespace :: Text) =>
-  Record Object
+  (?namespace :: Text) =>
+  Record _
 namespace =
-  set ((#metadata :: Optic' _ _ _ _) % (#name :: Optic' _ _ _ _)) ?namespace $
-    object "Namespace"
+  let ?name = ?namespace
+   in object "Namespace"
+        `merge` ANON
+          { metadata = project meta :: Record ["name" := Text, "labels" := Record '["app" := Text]]
+          }
 
 persistentVolumeClaim :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
 persistentVolumeClaim = setSpecTo (object "PersistentVolumeClaim")
@@ -283,36 +286,44 @@ backend = ANON{service = ANON{name = ?name, port = named}}
 type Manifest = Record ["path" := FilePath, "objects" := [Aeson.Value]]
 
 data YamlType
-  = Manifest
-  | HelmValues String -- name of chart, like "harbor/harbor"
+  = ManifestNoNamespace
+  | Manifest (Record '["namespace" := Text])
+  | HelmValues (Record ["namespace" := Text, "chart" := String {- name of chart, like "harbor/harbor"-}])
 
 type Yaml =
   Record
     [ "yamlType" := YamlType
-    , "namespace" := Text
     , "name" := Text
     , "value" := Aeson.Value
     ]
 
-mkYaml :: (?name :: Text, ?namespace :: Text) => Yaml
+mkYaml :: (?name :: Text) => Yaml
 mkYaml =
   ANON
-    { yamlType = Manifest
-    , namespace = ?namespace
+    { yamlType = ManifestNoNamespace
     , name = ?name
     , value = Aeson.Null
     }
 
+mkYamlAndModify :: (?name :: Text) => State Yaml () -> Yaml
+mkYamlAndModify = flip execState mkYaml
+
 manifest :: (?namespace :: Text, ?name :: Text) => [Aeson.Value] -> [Yaml]
 manifest =
-  fmap (\object -> Anon.set #value object mkYaml)
+  fmap
+    ( \object -> mkYamlAndModify $ do
+        modify $ Anon.set #yamlType $ Manifest ANON{namespace = ?namespace}
+        modify $ Anon.set #value object
+    )
 
-type HelmValues = Record ["chart" := String, "namespace" := Text, "name" := Text, "values" := Aeson.Value]
+manifestNoNamespace :: (?name :: Text) => [Aeson.Value] -> [Yaml]
+manifestNoNamespace =
+  fmap (\object -> Anon.set #value object mkYaml)
 
 helmValues :: (?name :: Text, ?namespace :: Text) => String -> Aeson.Value -> Yaml
 helmValues chart values =
-  flip execState mkYaml $ do
-    modify $ Anon.set #yamlType $ HelmValues chart
+  mkYamlAndModify $ do
+    modify $ Anon.set #yamlType $ HelmValues ANON{namespace = ?namespace, chart = chart}
     modify $ Anon.set #value values
 
 $(deriveJSON ''PathType)
