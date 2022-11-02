@@ -177,7 +177,7 @@ service spec =
 
 servicePort :: (?name :: Text) => Int -> Record _
 servicePort port =
-  ANON{port = port, name = ?name}
+  ANON{name = ?name, port = port, targetPort = ?name}
 
 configMapVolume :: (?name :: Text) => Record _
 configMapVolume = merge named ANON{configMap = named}
@@ -276,6 +276,33 @@ ingressNginxTls rules =
       , tls = [ANON{hosts = view #host <$> rules}]
       }
 
+ingressContourTls ::
+  (?name :: Text, ?namespace :: Text) =>
+  (AllFields back ToJSON) =>
+  [ Record
+      [ "host" := Text
+      , "http"
+          := Record
+              '[ "paths"
+                  := [ Record
+                        [ "backend" := Record back
+                        , "path" := Text
+                        , "pathType" := PathType
+                        ]
+                     ]
+               ]
+      ]
+  ] ->
+  Record _
+ingressContourTls rules =
+  setSpecTo
+    (inject ANON{apiVersion = "networking.k8s.io/v1" :: Text} $ object "Ingress")
+    ANON
+      { ingressClassName = "contour" :: Text
+      , rules = rules
+      , tls = [ANON{hosts = view #host <$> rules}]
+      }
+
 ingressRule :: (?name :: Text) => Text -> Record _
 ingressRule host =
   ANON
@@ -338,14 +365,14 @@ manifest object =
     modify $ Anon.set #yamlType $ Manifest ANON{namespace = ?namespace}
     modify $ Anon.set #value $ toJSON object
 
-manifestNoNamespace :: (?name :: Text) => Aeson.Value -> Yaml
+manifestNoNamespace :: (?name :: Text) => ToJSON json => json -> Yaml
 manifestNoNamespace object =
-  Anon.set #value object mkYaml
+  Anon.set #value (toJSON object) mkYaml
 
-helmValues :: (?name :: Text, ?namespace :: Text) => String -> Aeson.Value -> Yaml
+helmValues :: (?name :: Text, ?namespace :: Text) => ToJSON json => String -> json -> Yaml
 helmValues chart values =
   mkYamlAndModify $ do
     modify $ Anon.set #yamlType $ HelmValues ANON{namespace = ?namespace, chart = chart}
-    modify $ Anon.set #value values
+    modify $ Anon.set #value $ toJSON values
 
 $(deriveJSON ''PathType)

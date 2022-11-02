@@ -2,4 +2,4 @@ https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-f
 https://openebs.github.io/charts/lvm-operator.yaml
 https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.4.0/deploy/static/provider/baremetal/deploy.yaml
 https://github.com/cert-manager/cert-manager/releases/download/v1.10.0//cert-manager.yaml
-https://projectcontour.io/quickstart/contour.yaml
+https://raw.githubusercontent.com/projectcontour/contour/v1.23.0/examples/render/contour-deployment.yaml

@@ -88,9 +88,7 @@ contour :: [Yaml]
 contour =
   let ?namespace = "projectcontour"
       ?name = "contour"
-   in [ Util.manifest
-          $(embedYamlFile "src/projectcontour/gateway-class.yaml")
-      , Util.manifest $
+   in [ Util.manifest $
           let ?name = "envoy"
            in Util.service
                 ANON
@@ -101,32 +99,12 @@ contour =
                       ]
                   , selector = ANON{app = ?name}
                   }
-      , Util.manifest $
-          Util.gateway
-            ANON
-              { listeners =
-                  [ toJSON
-                      ANON
-                        { name = "http" :: Text
-                        , port = 80 :: Int
-                        , protocol = "HTTP" :: Text
-                        , allowedRoutes = ANON{namespaces = ANON{from = "All" :: Text}}
-                        }
-                        -- , toJSON
-                        --     ANON
-                        --       { name = "https" :: Text
-                        --       , hostname = "*." <> host
-                        --       , port = 443 :: Int
-                        --       , protocol = "HTTPS" :: Text
-                        --       , allowedRoutes = ANON{namespaces = ANON{from = "All" :: Text}}
-                        --       , tls =
-                        --           ANON
-                        --             { mode = "Terminate" :: Text
-                        --             , certificateRefs = [Util.named]
-                        --             }
-                        --       }
-                  ]
-              }
+      , Util.manifestNoNamespace
+          $ Util.annotate
+            (KeyMap.singleton "ingressclass.kubernetes.io/is-default-class" "true")
+          $ Util.setSpecTo
+            (inject ANON{apiVersion = "networking.k8s.io/v1" :: Text} $ Util.object "IngressClass")
+            ANON{controller = "projectcontour.io/contour" :: Text}
       ]
 
 nginxIngressController :: [Yaml]
@@ -196,12 +174,12 @@ harbor =
   let ?namespace = "repositry" :: Text
       ?name = "harbor" :: Text
    in let domain = ?namespace <> "." <> host
-       in Util.helmValues
-            "harbor/harbor"
-            ( toJSON
-                ANON
-                  { expose =
-                      Anon.insert #type ("ignore" :: Text) $ -- "ignore" is invalid value, so no ingress will be made
+       in [ Util.helmValues
+              "harbor/harbor"
+              ( toJSON
+                  ANON
+                    { expose =
+                        -- Anon.insert #type ("ignore" :: Text) $ -- "ignore" is invalid value, so no ingress will be made
                         ANON
                           { ingress =
                               ANON
@@ -213,10 +191,10 @@ harbor =
                                 }
                           , tls = ANON{auto = ANON{commonName = domain}}
                           }
-                  , externalURL = "https://" <> domain
-                  }
-            )
-            : []
+                    , externalURL = "https://" <> domain
+                    }
+              )
+          ]
 
 openebs :: [Yaml]
 openebs =
