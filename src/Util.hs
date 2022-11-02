@@ -6,6 +6,7 @@ module Util where
 import Control.Monad.State.Strict (MonadState, State, execState, modify)
 import Data.Aeson (FromJSON, ToJSON (toJSON), fromJSON)
 import qualified Data.Aeson as Aeson
+import Data.Aeson.KeyMap (KeyMap)
 import Data.Aeson.Optics (AsValue, key)
 import Data.Record.Anon
 import qualified Data.Record.Anon.Advanced as A (Record)
@@ -25,6 +26,7 @@ import Optics (
   (%),
  )
 
+import qualified Data.Aeson.KeyMap as KeyMap
 import TH (deriveJSON)
 
 -- import Data.
@@ -98,6 +100,16 @@ object kind =
     , kind = kind
     , metadata = meta
     }
+
+annotate ::
+  RowHasField "metadata" r (Record ObjectMeta) =>
+  KeyMap Text ->
+  Record r ->
+  Record _
+annotate annotations object =
+  merge
+    object
+    ANON{metadata = Anon.get #metadata object `merge` ANON{annotations = annotations}}
 
 configMap ::
   (?name :: Text, ?namespace :: Text) =>
@@ -283,6 +295,18 @@ ingressRule host =
 backend :: (?name :: Text) => Record _
 backend = ANON{service = ANON{name = ?name, port = named}}
 
+gateway :: (?namespace :: Text, ?name :: Text) => Record _ -> Record _
+gateway spec =
+  setSpecTo
+    ( Util.annotate
+        (KeyMap.singleton "cert-manager.io/cluster-issuer" "selfsigned-cluster-issuer")
+        $ inject ANON{apiVersion = "gateway.networking.k8s.io/v1alpha2" :: Text}
+        $ object "Gateway"
+    )
+    $ ANON{gatewayClassName = "contour" :: Text} `merge` spec
+
+-- httpRoute
+
 type Manifest = Record ["path" := FilePath, "objects" := [Aeson.Value]]
 
 data YamlType
@@ -308,17 +332,15 @@ mkYaml =
 mkYamlAndModify :: (?name :: Text) => State Yaml () -> Yaml
 mkYamlAndModify = flip execState mkYaml
 
-manifest :: (?namespace :: Text, ?name :: Text) => [Aeson.Value] -> [Yaml]
-manifest =
-  fmap
-    ( \object -> mkYamlAndModify $ do
-        modify $ Anon.set #yamlType $ Manifest ANON{namespace = ?namespace}
-        modify $ Anon.set #value object
-    )
+manifest :: (?namespace :: Text, ?name :: Text) => ToJSON json => json -> Yaml
+manifest object =
+  mkYamlAndModify $ do
+    modify $ Anon.set #yamlType $ Manifest ANON{namespace = ?namespace}
+    modify $ Anon.set #value $ toJSON object
 
-manifestNoNamespace :: (?name :: Text) => [Aeson.Value] -> [Yaml]
-manifestNoNamespace =
-  fmap (\object -> Anon.set #value object mkYaml)
+manifestNoNamespace :: (?name :: Text) => Aeson.Value -> Yaml
+manifestNoNamespace object =
+  Anon.set #value object mkYaml
 
 helmValues :: (?name :: Text, ?namespace :: Text) => String -> Aeson.Value -> Yaml
 helmValues chart values =
