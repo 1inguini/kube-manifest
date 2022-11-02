@@ -7,17 +7,15 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (key, _Object)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
-import Data.Foldable (foldlM, traverse_)
-import Data.Record.Anon
-import Data.Record.Anon.Simple (Record)
+import Data.Foldable (foldlM)
 import Data.String (IsString (fromString))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Yaml as Yaml (decodeAllThrow, encode)
 import Manifest (yamls)
-import Optics (over, review, view, (%))
+import Optics (over, view, (%))
 import System.Directory (createDirectoryIfMissing)
-import System.Process (callCommand, callProcess, readProcess)
+import System.Process (readProcess)
 import Util (Yaml, YamlType (..))
 import qualified Util
 
@@ -25,15 +23,13 @@ processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 processYaml written yaml =
   let ?name = view #name yaml
    in case view #yamlType yaml of
-        ManifestNoNamespace -> do
-          manifestWrite ANON{namespace = ""} (view #name yaml) (Yaml.encode $ view #value yaml)
-        Manifest r -> do
-          manifestWrite r (view #name yaml) (Yaml.encode $ view #value yaml)
+        Manifest -> do
+          manifestWrite (view #name yaml) (Yaml.encode $ view #value yaml)
         HelmValues r ->
           let ?namespace = view #namespace r
               ?name = view #name yaml
            in do
-                valuesPath <- path "values/" r ?name
+                valuesPath <- path "values/" ?name
                 putStrLn $ "# writing to: " <> valuesPath
                 ByteString.writeFile valuesPath $ Yaml.encode $ view #value yaml
                 aesons <-
@@ -54,23 +50,17 @@ processYaml written yaml =
                 let ns = Yaml.encode Util.namespace
                 let manifest =
                       foldl (\acc -> ((acc <> "---\n") <>)) ns $ Yaml.encode <$> objects
-                manifestWrite r ?name manifest
+                manifestWrite ?name manifest
  where
-  path prefix r name = do
-    let namespace = view #namespace r
-    let dir =
-          Text.unpack $
-            prefix <> if Text.null namespace then mempty else namespace <> "/"
+  path dir name = do
     createDirectoryIfMissing True dir
     pure $ dir <> Text.unpack name <> ".yaml"
   manifestWrite ::
-    RowHasField "namespace" r Text =>
-    Record r ->
     Text ->
     ByteString ->
     IO [FilePath]
-  manifestWrite r name manifest = do
-    path <- path "manifest/" r name
+  manifestWrite name manifest = do
+    path <- path "manifest/" name
     putStrLn $ "# writing to: " <> path
     if path `elem` written
       then ByteString.appendFile path $ "---\n" <> manifest
@@ -81,6 +71,3 @@ main :: IO ()
 main = do
   _ <- foldlM processYaml [] yamls
   pure ()
-
--- traverse_ writeManifest manifests
--- traverse_ runHelm helmValuess

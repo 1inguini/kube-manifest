@@ -8,7 +8,7 @@ import Data.Aeson.Optics (AsJSON (_JSON), key, _Object)
 import Data.FileEmbed (embedStringFile)
 import Data.Record.Anon
 import Data.Record.Anon.Simple (Record, inject, merge, project)
-import Data.Record.Anon.Simple as Anon
+import qualified Data.Record.Anon.Simple as Anon
 import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -82,7 +82,7 @@ dns =
 certManager :: [Yaml]
 certManager =
   let ?name = "selfsigned-cluster-issuer"
-   in [Util.manifestNoNamespace $(embedYamlFile "src/cert-manager/cluster-issuer.yaml")]
+   in [Util.manifest $(embedYamlFile "src/cert-manager/cluster-issuer.yaml")]
 
 contour :: [Yaml]
 contour =
@@ -99,75 +99,13 @@ contour =
                       ]
                   , selector = ANON{app = ?name}
                   }
-      , Util.manifestNoNamespace
+      , Util.manifest
           $ Util.annotate
             (KeyMap.singleton "ingressclass.kubernetes.io/is-default-class" "true")
           $ Util.setSpecTo
-            (inject ANON{apiVersion = "networking.k8s.io/v1" :: Text} $ Util.object "IngressClass")
+            (Anon.set #apiVersion "networking.k8s.io/v1" $ Util.object "IngressClass")
             ANON{controller = "projectcontour.io/contour" :: Text}
       ]
-
-nginxIngressController :: [Yaml]
-nginxIngressController =
-  let ?namespace = "ingress-nginx"
-      ?name = "ingress-nginx-controller"
-   in let [service, configMap, ingressClass] =
-            $(embedYamlAllFile "src/ingress-nginx/ingress-nginx-controller.yaml")
-       in Util.manifest
-            <$> [ over
-                    (key "spec" % _Object)
-                    (KeyMap.insert "externalIPs" $ toJSON [externalIp])
-                    service
-                , over
-                    (key "data" % _Object)
-                    (KeyMap.insert "proxy-body-size" $ toJSON ("50g" :: Text))
-                    configMap
-                , over
-                    (key "metadata" % _Object)
-                    ( KeyMap.insert "annotations" $
-                        toJSON $
-                          KeyMap.singleton @Text "ingressclass.kubernetes.io/is-default-class" "true"
-                    )
-                    ingressClass
-                ]
-
-dockerRegistry :: [Yaml]
-dockerRegistry =
-  -- can be run by user
-  let ?namespace = "docker-registry"
-      ?name = "docker-registry"
-   in let config = Util.addSuffix "config"
-       in [ Util.manifest Util.namespace
-          , Util.manifest $
-              Util.deployment $
-                ANON
-                  { containers =
-                      [ Util.mirror Util.container "registry" $
-                          ANON
-                            { ports = [Util.containerPort 5000]
-                            , volumeMounts =
-                                [ Util.volumeMount "/var/lib/registry"
-                                , config $ Util.volumeMount "/etc/docker/registry"
-                                ]
-                            }
-                      ]
-                  , volumes =
-                      [ toJSON Util.persistentVolumeClaimVolume
-                      , toJSON $ config Util.configMapVolume
-                      ]
-                  }
-          , Util.manifest $ Util.openebsLvmClaim "5Gi"
-          , Util.manifest $
-              config $
-                Util.configMap $
-                  KeyMap.singleton "config.yml" ($(embedStringFile "src/registry/config.yml") :: Text)
-          , Util.manifest $
-              Util.service $
-                ANON
-                  { ports = [Util.servicePort 5000]
-                  }
-          , Util.manifest $ Util.ingressNginxTls [Util.ingressRule $ "registry." <> host]
-          ]
 
 harbor :: [Yaml]
 harbor =
@@ -183,7 +121,11 @@ harbor =
                         ANON
                           { ingress =
                               ANON
-                                { hosts =
+                                { annotations =
+                                    KeyMap.singleton
+                                      "cert-manager.io/cluster-issuer"
+                                      ("selfsigned-cluster-issuer" :: Text)
+                                , hosts =
                                     ANON
                                       { core = domain
                                       , notary = "notary." <> domain
@@ -199,7 +141,7 @@ harbor =
 openebs :: [Yaml]
 openebs =
   let ?name = "openebs"
-   in [Util.manifestNoNamespace $(embedYamlFile "src/openebs/storage-class.yaml")]
+   in [Util.manifest $(embedYamlFile "src/openebs/storage-class.yaml")]
 
 yamls :: [Yaml]
 yamls =
@@ -207,7 +149,6 @@ yamls =
     [ certManager
     , contour
     , dns
-    , nginxIngressController
     , openebs
     , harbor
     ]

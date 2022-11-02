@@ -249,33 +249,6 @@ data PathType
   | ImplementationSpecific
   deriving (Show)
 
-ingressNginxTls ::
-  (?name :: Text, ?namespace :: Text) =>
-  (AllFields back ToJSON) =>
-  [ Record
-      [ "host" := Text
-      , "http"
-          := Record
-              '[ "paths"
-                  := [ Record
-                        [ "backend" := Record back
-                        , "path" := Text
-                        , "pathType" := PathType
-                        ]
-                     ]
-               ]
-      ]
-  ] ->
-  Record _
-ingressNginxTls rules =
-  setSpecTo
-    (inject ANON{apiVersion = "networking.k8s.io/v1" :: Text} $ object "Ingress")
-    ANON
-      { ingressClassName = "nginx" :: Text
-      , rules = rules
-      , tls = [ANON{hosts = view #host <$> rules}]
-      }
-
 ingressContourTls ::
   (?name :: Text, ?namespace :: Text) =>
   (AllFields back ToJSON) =>
@@ -295,13 +268,14 @@ ingressContourTls ::
   ] ->
   Record _
 ingressContourTls rules =
-  setSpecTo
-    (inject ANON{apiVersion = "networking.k8s.io/v1" :: Text} $ object "Ingress")
-    ANON
-      { ingressClassName = "contour" :: Text
-      , rules = rules
-      , tls = [ANON{hosts = view #host <$> rules}]
-      }
+  annotate (KeyMap.singleton "cert-manager.io/cluster-issuer" "selfsigned-cluster-issuer") $
+    setSpecTo
+      (Anon.set #apiVersion "networking.k8s.io/v1" $ object "Ingress")
+      ANON
+        { ingressClassName = "contour" :: Text
+        , rules = rules
+        , tls = [ANON{hosts = view #host <$> rules}]
+        }
 
 ingressRule :: (?name :: Text) => Text -> Record _
 ingressRule host =
@@ -322,23 +296,10 @@ ingressRule host =
 backend :: (?name :: Text) => Record _
 backend = ANON{service = ANON{name = ?name, port = named}}
 
-gateway :: (?namespace :: Text, ?name :: Text) => Record _ -> Record _
-gateway spec =
-  setSpecTo
-    ( Util.annotate
-        (KeyMap.singleton "cert-manager.io/cluster-issuer" "selfsigned-cluster-issuer")
-        $ inject ANON{apiVersion = "gateway.networking.k8s.io/v1alpha2" :: Text}
-        $ object "Gateway"
-    )
-    $ ANON{gatewayClassName = "contour" :: Text} `merge` spec
-
--- httpRoute
-
 type Manifest = Record ["path" := FilePath, "objects" := [Aeson.Value]]
 
 data YamlType
-  = ManifestNoNamespace
-  | Manifest (Record '["namespace" := Text])
+  = Manifest
   | HelmValues (Record ["namespace" := Text, "chart" := String {- name of chart, like "harbor/harbor"-}])
 
 type Yaml =
@@ -351,7 +312,7 @@ type Yaml =
 mkYaml :: (?name :: Text) => Yaml
 mkYaml =
   ANON
-    { yamlType = ManifestNoNamespace
+    { yamlType = Manifest
     , name = ?name
     , value = Aeson.Null
     }
@@ -359,15 +320,11 @@ mkYaml =
 mkYamlAndModify :: (?name :: Text) => State Yaml () -> Yaml
 mkYamlAndModify = flip execState mkYaml
 
-manifest :: (?namespace :: Text, ?name :: Text) => ToJSON json => json -> Yaml
+manifest :: (?name :: Text) => ToJSON json => json -> Yaml
 manifest object =
   mkYamlAndModify $ do
-    modify $ Anon.set #yamlType $ Manifest ANON{namespace = ?namespace}
+    modify $ Anon.set #yamlType Manifest
     modify $ Anon.set #value $ toJSON object
-
-manifestNoNamespace :: (?name :: Text) => ToJSON json => json -> Yaml
-manifestNoNamespace object =
-  Anon.set #value (toJSON object) mkYaml
 
 helmValues :: (?name :: Text, ?namespace :: Text) => ToJSON json => String -> json -> Yaml
 helmValues chart values =
