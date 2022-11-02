@@ -8,6 +8,7 @@ import Data.Aeson.Optics (AsJSON (_JSON), key, _Object)
 import Data.FileEmbed (embedStringFile)
 import Data.Record.Anon
 import Data.Record.Anon.Simple (Record, inject, merge, project)
+import Data.Record.Anon.Simple as Anon
 import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -16,11 +17,11 @@ import Optics (ix, over, review, set, (%))
 import qualified Data.Aeson.KeyMap as KeyMap
 import Secret (externalIp, host)
 import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile)
-import Util (HelmValues, Manifest)
+import Util (HelmValues, Yaml)
 import qualified Util
 
 -- config for coredns
-dns :: Manifest
+dns :: [Yaml]
 dns =
   let ?namespace = "dns"
       ?name = "dns"
@@ -79,7 +80,7 @@ dns =
                     }
             ]
 
-nginxIngressController :: Manifest
+nginxIngressController :: [Yaml]
 nginxIngressController =
   let ?namespace = "ingress-nginx"
       ?name = "ingress-nginx-controller"
@@ -103,7 +104,7 @@ nginxIngressController =
                 ingressClass
             ]
 
-dockerRegistry :: Manifest
+dockerRegistry :: [Yaml]
 dockerRegistry =
   -- can be run by user
   let ?namespace = "docker-registry"
@@ -151,30 +152,32 @@ harbor =
             toJSON
               ANON
                 { expose =
-                    ANON
-                      { ingress =
-                          ANON
-                            { hosts =
-                                ANON
-                                  { core = url
-                                  , notary = "notary." <> url
-                                  }
-                            }
-                      }
+                    Anon.insert #type "ignore" $
+                      ANON
+                        { ingress =
+                            ANON
+                              { hosts =
+                                  ANON
+                                    { core = url
+                                    , notary = "notary." <> url
+                                    }
+                              }
+                        }
                 , externalURL = "https://" <> url
                 }
 
-openebs :: Manifest
+openebs :: [Yaml]
 openebs =
   let ?name = "openebs"
    in Util.manifest [$(embedYamlFile "src/openebs/storage-class.yaml")]
 
-manifests :: [Manifest]
+manifests :: [Yaml]
 manifests =
-  [ dns
-  , nginxIngressController
-  , openebs
-  ]
+  mconcat
+    [ dns
+    , nginxIngressController
+    , openebs
+    ]
 
 helmValuess :: [HelmValues]
 helmValuess =

@@ -282,22 +282,37 @@ backend = ANON{service = ANON{name = ?name, port = named}}
 
 type Manifest = Record ["path" := FilePath, "objects" := [Aeson.Value]]
 
-manifest :: (?name :: Text) => [Aeson.Value] -> Manifest
-manifest objects =
+data YamlType
+  = Manifest
+  | HelmValues String -- name of chart, like "harbor/harbor"
+
+type Yaml =
+  Record
+    [ "yamlType" := YamlType
+    , "namespace" := Text
+    , "name" := Text
+    , "value" := Aeson.Value
+    ]
+
+mkYaml :: (?name :: Text, ?namespace :: Text) => Yaml
+mkYaml =
   ANON
-    { path = "manifest/" <> Text.unpack ?name <> ".yaml"
-    , objects = objects
+    { yamlType = Manifest
+    , namespace = ?namespace
+    , name = ?name
+    , value = Aeson.Null
     }
+
+manifest :: (?namespace :: Text, ?name :: Text) => [Aeson.Value] -> [Yaml]
+manifest =
+  fmap (\object -> Anon.set #value object mkYaml)
 
 type HelmValues = Record ["chart" := String, "namespace" := Text, "name" := Text, "values" := Aeson.Value]
 
-helmValues :: (?name :: Text, ?namespace :: Text) => String -> Aeson.Value -> HelmValues
+helmValues :: (?name :: Text, ?namespace :: Text) => String -> Aeson.Value -> Yaml
 helmValues chart values =
-  ANON
-    { chart = chart
-    , namespace = ?namespace
-    , name = ?name
-    , values = values
-    }
+  flip execState mkYaml $ do
+    modify $ Anon.set #yamlType $ HelmValues chart
+    modify $ Anon.set #value values
 
 $(deriveJSON ''PathType)
