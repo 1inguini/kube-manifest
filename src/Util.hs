@@ -7,7 +7,9 @@ import Control.Monad.State.Strict (MonadState, State, execState, modify)
 import Data.Aeson (FromJSON, ToJSON (toJSON), fromJSON)
 import qualified Data.Aeson as Aeson
 import Data.Aeson.KeyMap (KeyMap)
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (AsValue, key)
+import Data.Maybe (fromMaybe)
 import Data.Record.Anon
 import qualified Data.Record.Anon.Advanced as A (Record)
 import Data.Record.Anon.Simple (Record, insert, merge, project)
@@ -26,7 +28,6 @@ import Optics (
   (%),
  )
 
-import qualified Data.Aeson.KeyMap as KeyMap
 import Secret (host)
 import TH (deriveJSON)
 
@@ -37,11 +38,11 @@ import TH (deriveJSON)
 mirror :: (a -> a -> b) -> a -> b
 mirror f a = f a a
 
-name :: (?name :: Text) => a -> (Text, a)
-name = (,) ?name
+name :: Text -> ((?name :: Text) => a) -> a
+name name x = let ?name = name in x
 
-addSuffix :: (?name :: Text) => Text -> ((?name :: Text) => a) -> a
-addSuffix suffix x = let ?name = ?name <> "-" <> suffix in x
+-- addSuffix :: (?name :: Text) => Text -> ((?name :: Text) => a) -> a
+-- addSuffix suffix x = let ?name = ?name <> "-" <> suffix in x
 
 systemClusterCritical :: Text
 systemClusterCritical = "system-cluster-critical"
@@ -74,20 +75,23 @@ domain = ?namespace <> "." <> host
 named :: (?name :: Text) => Record _
 named = ANON{name = ?name}
 
+labelSelector :: (?app :: Text) => Record _
+labelSelector = ANON{selector = ANON{app = ?app}}
+
 type ObjectMeta =
   [ "name" := Text
   , "namespace" := Text
   , "labels" := Record '["app" := Text]
   ]
 
-meta :: (?namespace :: Text, ?name :: Text) => Record ObjectMeta
+meta :: (?namespace :: Text, ?app :: Text, ?name :: Text) => Record ObjectMeta
 meta =
   ANON
     { name = ?name
     , namespace = ?namespace
     , labels =
         ANON
-          { app = ?name
+          { app = ?app
           }
     }
 
@@ -97,7 +101,7 @@ type Object =
   , "metadata" := Record ObjectMeta
   ]
 
-object :: (?namespace :: Text, ?name :: Text) => Text -> Record Object
+object :: (?namespace :: Text, ?app :: Text, ?name :: Text) => Text -> Record Object
 object kind =
   ANON
     { apiVersion = v1
@@ -116,7 +120,7 @@ annotate annotations object =
     ANON{metadata = Anon.get #metadata object `merge` ANON{annotations = annotations}}
 
 configMap ::
-  (?namespace :: Text, ?name :: Text) =>
+  (?namespace :: Text, ?app :: Text, ?name :: Text) =>
   ToJSON d =>
   d ->
   Record _
@@ -124,44 +128,46 @@ configMap d = insert #data d $ object "ConfigMap" `merge` ANON{immutable = True}
 
 container :: (?name :: Text) => Text -> Text -> Record _ -> Record _
 container suffix image rest =
-  addSuffix suffix $
-    ANON
-      { name = ?name
-      , image = image
-      , securityContext =
-          ANON
-            { allowPrivilegeEscalation = False
-            }
-      }
-      `merge` rest
+  ANON
+    { name = ?name
+    , image = image
+    , securityContext =
+        ANON
+          { allowPrivilegeEscalation = False
+          }
+    }
+    `merge` rest
 
 containerPort :: (?name :: Text) => Int -> Record _
 containerPort port =
   ANON{containerPort = port, name = ?name}
 
-httpGet :: Int -> Text -> Record ["port" := Int, "path" := Text]
-httpGet port path = ANON{port = port, path = path}
+probe :: Record _ -> Record _
+probe httpGet = ANON{httpGet = httpGet}
+
+httpGet :: (?name :: Text) => Text -> Record ["port" := Text, "path" := Text]
+httpGet path = ANON{port = ?name, path = path}
 
 namespace ::
-  (?namespace :: Text) =>
+  (?namespace :: Text, ?app :: Text) =>
   Record _
 namespace =
   let ?name = ?namespace
    in object "Namespace"
         `merge` ANON
-          { metadata = project meta :: Record ["name" := Text, "labels" := Record '["app" := Text]]
+          { metadata = project meta :: Record ["name" := _, "labels" := _]
           }
 
 noNamespace :: Text
 noNamespace = "_root"
 
-persistentVolumeClaim :: (?namespace :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
+persistentVolumeClaim :: (?namespace :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
 persistentVolumeClaim = setSpecTo (object "PersistentVolumeClaim")
 
 readWriteOnce :: Text
 readWriteOnce = "ReadWriteOnce"
 
-openebsLvmClaim :: (?namespace :: Text, ?name :: Text) => Text -> Record _
+openebsLvmClaim :: (?namespace :: Text, ?app :: Text, ?name :: Text) => Text -> Record _
 openebsLvmClaim size =
   persistentVolumeClaim
     ANON
@@ -176,11 +182,11 @@ openebsLvmClaim size =
   openebsLvmProvisioner :: Text
   openebsLvmProvisioner = "openebs-lvmpv"
 
-service :: (?namespace :: Text, ?name :: Text) => Record _ -> Record _
+service :: (?namespace :: Text, ?app :: Text, ?name :: Text) => Record _ -> Record _
 service spec =
   setSpecTo
     (object "Service")
-    $ merge ANON{selector = ANON{app = ?name}} spec
+    $ merge labelSelector spec
 
 servicePort :: (?name :: Text) => Int -> Record _
 servicePort port =
@@ -207,7 +213,7 @@ persistentVolumeClaimVolume =
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 
-deployment :: (?namespace :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
+deployment :: (?namespace :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
 deployment spec =
   object "Deployment"
     `merge` ANON
@@ -223,33 +229,6 @@ deployment spec =
                   }
             }
       }
-
-ingressNginx ::
-  (?namespace :: Text, ?name :: Text) =>
-  (AllFields backend ToJSON) =>
-  [ Record
-      [ "host" := Text
-      , "http"
-          := Record
-              '[ "paths"
-                  := [ Record
-                        [ "backend" := Record backend
-                        , "path" := Text
-                        , "pathType" := PathType
-                        ]
-                     ]
-               ]
-      ]
-  ] ->
-  Record _
-ingressNginx rules =
-  setSpecTo
-    (Anon.set #apiVersion "networking.k8s.io/v1" $ object "Ingress")
-    ANON
-      { ingressClassName = "nginx" :: Text
-      , rules = rules
-      }
-
 data PathType
   = Exact
   | Prefix
@@ -260,7 +239,7 @@ clusterIssuer :: Text
 clusterIssuer = "selfsigned-cluster-issuer"
 
 ingressContourTls ::
-  (?namespace :: Text, ?name :: Text) =>
+  (?namespace :: Text, ?app :: Text, ?name :: Text) =>
   (AllFields back ToJSON) =>
   [ Record
       [ "host" := Text
@@ -316,32 +295,40 @@ type Yaml =
   Record
     [ "yamlType" := YamlType
     , "namespace" := Text
-    , "name" := Text
+    , "app" := Text
     , "value" := Aeson.Value
     ]
 
-mkYaml :: (?namespace :: Text, ?name :: Text) => Yaml
+mkYaml :: (?namespace :: Text, ?app :: Text) => Yaml
 mkYaml =
   ANON
     { yamlType = Manifest
     , namespace = ?namespace
-    , name = ?name
+    , app = ?app
     , value = Aeson.Null
     }
 
-mkYamlAndModify :: (?namespace :: Text, ?name :: Text) => State Yaml () -> Yaml
+mkYamlAndModify :: (?namespace :: Text, ?app :: Text) => State Yaml () -> Yaml
 mkYamlAndModify = flip execState mkYaml
 
-manifest :: (?namespace :: Text, ?name :: Text) => ToJSON json => json -> Yaml
-manifest object =
-  mkYamlAndModify $ do
-    modify $ Anon.set #yamlType Manifest
-    modify $ Anon.set #value $ toJSON object
+maybeNamedManifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => Maybe Text -> ((?name :: Text) => json) -> Yaml
+maybeNamedManifest name object =
+  let ?name = maybe ?app ((?app <> "-") <>) name
+   in mkYamlAndModify $ do
+        modify $ Anon.set #yamlType Manifest
+        modify $ Anon.set #value $ toJSON object
 
-helmValues :: (?namespace :: Text, ?name :: Text) => ToJSON json => String -> json -> Yaml
+manifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => ((?name :: Text) => json) -> Yaml
+manifest = maybeNamedManifest Nothing
+
+namedManifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => Text -> ((?name :: Text) => json) -> Yaml
+namedManifest name = maybeNamedManifest (Just name)
+
+helmValues :: (?namespace :: Text, ?app :: Text) => ToJSON json => String -> json -> Yaml
 helmValues chart values =
-  mkYamlAndModify $ do
-    modify $ Anon.set #yamlType $ HelmValues ANON{chart = chart}
-    modify $ Anon.set #value $ toJSON values
+  let ?name = ?app
+   in mkYamlAndModify $ do
+        modify $ Anon.set #yamlType $ HelmValues ANON{chart = chart}
+        modify $ Anon.set #value $ toJSON values
 
 $(deriveJSON ''PathType)

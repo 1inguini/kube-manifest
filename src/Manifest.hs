@@ -23,21 +23,24 @@ import qualified Util
 openebs :: [Yaml]
 openebs =
   let ?namespace = Util.noNamespace
-      ?name = "openebs"
+      ?app = "openebs"
    in [Util.manifest $(embedYamlFile "src/openebs/storage-class.yaml")]
 
 certManager :: [Yaml]
 certManager =
   let ?namespace = Util.noNamespace
-      ?name = "cert-manager"
+      ?app = "cert-manager"
    in [Util.manifest $(embedYamlFile "src/cert-manager/cluster-issuer.yaml")]
 
 -- config for coredns
 dns :: [Yaml]
 dns =
   let ?namespace = "dns"
-      ?name = "dns"
+      ?app = "dns"
    in let mountPath = "/etc/coredns/"
+          health = Util.name "health"
+          ready = Util.name "ready"
+          metrics = Util.name "metrics"
        in [ Util.manifest Util.namespace
           , Util.manifest $
               Util.deployment
@@ -49,19 +52,14 @@ dns =
                           ANON
                             { args = ["-conf", mountPath <> "Corefile"] :: [Text]
                             , command = ["/coredns"] :: [Text]
-                            , livenessProbe =
-                                ANON
-                                  { httpGet = Util.httpGet 8080 "health"
-                                  , initialDelaySeconds = 60 :: Scientific
-                                  , timeoutSeconds = 5 :: Scientific
-                                  , successThreshold = 1 :: Int
-                                  , failureThreshold = 5 :: Int
-                                  }
                             , ports =
                                 [ toJSON $ Util.containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
-                                , toJSON $ Util.addSuffix "metrics" $ Util.containerPort 9153
+                                , toJSON $ metrics $ Util.containerPort 9153
+                                , toJSON $ health $ Util.containerPort 8080
+                                , toJSON $ ready $ Util.containerPort 8081
                                 ]
-                            , readinessProbe = ANON{httpGet = Util.httpGet 8081 "ready"}
+                            , livenessProbe = health $ Util.probe $ Util.httpGet "health"
+                            , readinessProbe = ready $ Util.probe $ Util.httpGet "ready"
                             , securityContext =
                                 ANON
                                   { capabilities =
@@ -89,23 +87,26 @@ dns =
                             `merge` ANON{protocol = "UDP" :: Text}
                       ]
                   }
+          , Util.manifest $
+              metrics $
+                Util.service $
+                  ANON{ports = [Util.servicePort 80]}
           ]
 
 projectcontour :: [Yaml]
 projectcontour =
   let ?namespace = "projectcontour"
-      ?name = "contour"
+      ?app = "contour"
    in [ Util.manifest $
-          let ?name = "envoy"
-           in Util.service
-                ANON
-                  { externalIPs = [externalIp]
-                  , ports =
-                      [ let ?name = "http" in Util.servicePort 80
-                      , let ?name = "https" in Util.servicePort 443
-                      ]
-                  , selector = ANON{app = ?name}
-                  }
+          Util.service
+            ANON
+              { externalIPs = [externalIp]
+              , ports =
+                  [ let ?name = "http" in Util.servicePort 80
+                  , let ?name = "https" in Util.servicePort 443
+                  ]
+              , selector = ANON{app = ?name}
+              }
       , Util.manifest
           $ Util.annotate
             (KeyMap.singleton "ingressclass.kubernetes.io/is-default-class" "true")
@@ -117,12 +118,11 @@ projectcontour =
 registry :: [Yaml]
 registry =
   let ?namespace = "registry"
-      ?name = "harbor"
+      ?app = "harbor"
    in [ Util.helmValues
           "harbor/harbor"
           ANON
             { expose =
-                -- Anon.insert #type ("ignore" :: Text) $ -- "ignore" is invalid value, so no ingress will be made
                 ANON
                   { ingress =
                       ANON
@@ -145,8 +145,47 @@ registry =
 gitbucket :: [Yaml]
 gitbucket =
   let ?namespace = "git" :: Text
-      ?name = "gitbucket" :: Text
-   in [Util.manifest Util.namespace]
+      ?app = "gitbucket" :: Text
+   in [ Util.manifest
+          Util.namespace
+          -- , Util.manifest $
+          --     let health = Util.addSuffix "health"
+          --      in Util.deployment
+          --           ANON
+          --             { containers =
+          --                 [ Util.container
+          --                     "gitbucket"
+          --                     ("registry." <> host <> "/" <> "gitbucket:4.38.3")
+          --                     ANON
+          --                       { livenessProbe =
+          --                           ANON
+          --                             { httpGet = health $ Util.httpGet "health"
+          --                             , initialDelaySeconds = 60 :: Scientific
+          --                             , timeoutSeconds = 5 :: Scientific
+          --                             , successThreshold = 1 :: Int
+          --                             , failureThreshold = 5 :: Int
+          --                             }
+          --                       , ports =
+          --                           [ toJSON $ Util.containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
+          --                           , toJSON $ Util.addSuffix "metrics" $ Util.containerPort 9153
+          --                           ]
+          --                       , readinessProbe = ANON{httpGet = Util.httpGet 8081 "ready"}
+          --                       , securityContext =
+          --                           ANON
+          --                             { capabilities =
+          --                                 ANON
+          --                                   { add = ["NET_BIND_SERVICE"] :: [Text]
+          --                                   , drop = ["all"] :: [Text]
+          --                                   }
+          --                             , readOnlyRootFilesystem = True
+          --                             }
+          --                       , volumeMounts = [Util.volumeMount mountPath]
+          --                       }
+          --                 ]
+          --             , priorityClassName = Util.systemClusterCritical
+          --             , volumes = [Util.configMapVolume]
+          --             }
+      ]
 
 yamls :: [Yaml]
 yamls =
