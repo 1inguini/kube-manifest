@@ -36,7 +36,7 @@ certManager =
 dns :: [Yaml]
 dns =
   let ?namespace = "dns"
-      ?app = "dns"
+      ?app = "coredns"
    in let mountPath = "/etc/coredns/"
           health = Util.name "health"
           ready = Util.name "ready"
@@ -47,7 +47,6 @@ dns =
                 ANON
                   { containers =
                       [ Util.container
-                          "coredns"
                           "registry.k8s.io/coredns/coredns:v1.9.3"
                           ANON
                             { args = ["-conf", mountPath <> "Corefile"] :: [Text]
@@ -98,15 +97,16 @@ projectcontour =
   let ?namespace = "projectcontour"
       ?app = "contour"
    in [ Util.manifest $
-          Util.service
-            ANON
-              { externalIPs = [externalIp]
-              , ports =
-                  [ let ?name = "http" in Util.servicePort 80
-                  , let ?name = "https" in Util.servicePort 443
-                  ]
-              , selector = ANON{app = ?name}
-              }
+          let ?app = "envoy"
+              ?name = "envoy"
+           in Util.service
+                ANON
+                  { externalIPs = [externalIp]
+                  , ports =
+                      [ ANON{name = "http" :: Text, port = 80 :: Int, targetPort = 8080 :: Int}
+                      , ANON{name = "https" :: Text, port = 443 :: Int, targetPort = 8443 :: Int}
+                      ]
+                  }
       , Util.manifest
           $ Util.annotate
             (KeyMap.singleton "ingressclass.kubernetes.io/is-default-class" "true")
@@ -126,17 +126,22 @@ registry =
                 ANON
                   { ingress =
                       ANON
-                        { annotations =
-                            KeyMap.singleton
-                              "cert-manager.io/cluster-issuer"
-                              Util.clusterIssuer
+                        { annotations = Util.ingressContourTlsAnnotations
                         , hosts =
                             ANON
                               { core = Util.domain
                               , notary = "notary." <> Util.domain
                               }
                         }
-                  , tls = ANON{auto = ANON{commonName = Util.domain}}
+                  , tls =
+                      ANON
+                        { certSource = "secret" :: Text
+                        , secret =
+                            ANON
+                              { secretName = ?app
+                              , notarySecretName = "notary-" <> ?app
+                              } -- ANON{auto = ANON{commonName = Util.domain}}
+                        }
                   }
             , externalURL = "https://" <> Util.domain
             }
@@ -146,46 +151,46 @@ gitbucket :: [Yaml]
 gitbucket =
   let ?namespace = "git" :: Text
       ?app = "gitbucket" :: Text
-   in [ Util.manifest
-          Util.namespace
-          -- , Util.manifest $
-          --     let health = Util.addSuffix "health"
-          --      in Util.deployment
-          --           ANON
-          --             { containers =
-          --                 [ Util.container
-          --                     "gitbucket"
-          --                     ("registry." <> host <> "/" <> "gitbucket:4.38.3")
-          --                     ANON
-          --                       { livenessProbe =
-          --                           ANON
-          --                             { httpGet = health $ Util.httpGet "health"
-          --                             , initialDelaySeconds = 60 :: Scientific
-          --                             , timeoutSeconds = 5 :: Scientific
-          --                             , successThreshold = 1 :: Int
-          --                             , failureThreshold = 5 :: Int
-          --                             }
-          --                       , ports =
-          --                           [ toJSON $ Util.containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
-          --                           , toJSON $ Util.addSuffix "metrics" $ Util.containerPort 9153
-          --                           ]
-          --                       , readinessProbe = ANON{httpGet = Util.httpGet 8081 "ready"}
-          --                       , securityContext =
-          --                           ANON
-          --                             { capabilities =
-          --                                 ANON
-          --                                   { add = ["NET_BIND_SERVICE"] :: [Text]
-          --                                   , drop = ["all"] :: [Text]
-          --                                   }
-          --                             , readOnlyRootFilesystem = True
-          --                             }
-          --                       , volumeMounts = [Util.volumeMount mountPath]
-          --                       }
-          --                 ]
-          --             , priorityClassName = Util.systemClusterCritical
-          --             , volumes = [Util.configMapVolume]
-          --             }
-      ]
+   in let plugins = Util.name "plugins"
+          registry = "registry." <> host <> "/library/"
+          pluginsDir = "/home/nonroot/.gitbucket/plugins"
+       in [ Util.manifest Util.namespace
+          , Util.manifest $
+              Util.deployment
+                ANON
+                  { initContainers =
+                      [ plugins $
+                          Util.container
+                            (registry <> "gitbucket/plugins")
+                            ANON
+                              { command = ["cp", "-r", "/plugins", pluginsDir]
+                              , volumeMounts =
+                                  [ plugins $ Util.volumeMount pluginsDir
+                                  ]
+                              }
+                      ]
+                  , containers =
+                      [ Util.container
+                          (registry <> "gitbucket:4.38.3")
+                          ANON
+                            { ports = [Util.containerPort 8080]
+                            , livenessProbe = Util.probe $ Util.httpGet "api/v3"
+                            , readinessProbe = Util.probe $ Util.httpGet "api/v3"
+                            , volumeMounts =
+                                [ Util.volumeMount "/home/nonroot/.gitbucket"
+                                , plugins $ Util.volumeMount pluginsDir
+                                ]
+                            }
+                      ]
+                  , volumes =
+                      [ toJSON Util.persistentVolumeClaimVolume
+                      , toJSON $ plugins Util.emptyDirVolume
+                      ]
+                  }
+          , Util.manifest $ Util.openebsLvmClaim "5Gi"
+          , Util.manifest $ Util.service ANON{ports = [Util.httpServicePort]}
+          , Util.manifest $ Util.ingressContourTls [Util.ingressRule "/"]
+          ]
 
 yamls :: [Yaml]
 yamls =

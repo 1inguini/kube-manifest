@@ -126,8 +126,8 @@ configMap ::
   Record _
 configMap d = insert #data d $ object "ConfigMap" `merge` ANON{immutable = True}
 
-container :: (?name :: Text) => Text -> Text -> Record _ -> Record _
-container suffix image rest =
+container :: (?name :: Text) => Text -> Record _ -> Record _
+container image rest =
   ANON
     { name = ?name
     , image = image
@@ -192,11 +192,18 @@ servicePort :: (?name :: Text) => Int -> Record _
 servicePort port =
   ANON{name = ?name, port = port, targetPort = ?name}
 
+httpServicePort :: (?name :: Text) => Record _
+httpServicePort =
+  ANON{name = ?name, port = 80 :: Int, targetPort = ?name}
+
 configMapVolume :: (?name :: Text) => Record _
 configMapVolume = merge named ANON{configMap = named}
 
 hostPathVolume :: (?name :: Text) => Text -> Record _
 hostPathVolume path = merge named ANON{hostPath = ANON{path = path}}
+
+emptyDirVolume :: (?name :: Text) => Record _
+emptyDirVolume = merge named ANON{emptyDir = KeyMap.empty :: KeyMap ()}
 
 persistentVolumeClaimVolume :: (?name :: Text) => Record _
 persistentVolumeClaimVolume =
@@ -221,6 +228,7 @@ deployment spec =
       , spec =
           ANON
             { replicas = 1 :: Int
+            , strategy = Anon.insert #type ("Recreate" :: Text) Anon.empty
             , selector = ANON{matchLabels = ANON{app = ?name}}
             , template =
                 ANON
@@ -237,6 +245,13 @@ data PathType
 
 clusterIssuer :: Text
 clusterIssuer = "selfsigned-cluster-issuer"
+
+ingressContourTlsAnnotations :: KeyMap Text
+ingressContourTlsAnnotations =
+  KeyMap.fromList
+    [ ("cert-manager.io/cluster-issuer", clusterIssuer)
+    , ("ingress.kubernetes.io/ssl-redirect", "true")
+    ]
 
 ingressContourTls ::
   (?namespace :: Text, ?app :: Text, ?name :: Text) =>
@@ -257,7 +272,7 @@ ingressContourTls ::
   ] ->
   Record _
 ingressContourTls rules =
-  annotate (KeyMap.singleton "cert-manager.io/cluster-issuer" clusterIssuer) $
+  annotate ingressContourTlsAnnotations $
     setSpecTo
       (Anon.set #apiVersion "networking.k8s.io/v1" $ object "Ingress")
       ANON
@@ -266,16 +281,16 @@ ingressContourTls rules =
         , tls = [ANON{hosts = view #host <$> rules}]
         }
 
-ingressRule :: (?name :: Text) => Text -> Record _
-ingressRule host =
+ingressRule :: (?namespace :: Text, ?name :: Text) => Text -> Record _
+ingressRule path =
   ANON
-    { host = host
+    { host = domain
     , http =
         ANON
           { paths =
               [ ANON
                   { backend = backend
-                  , path = "/" :: Text
+                  , path = path
                   , pathType = Prefix
                   }
               ]
