@@ -79,9 +79,14 @@ dns =
                   }
           ]
 
+openebs :: [Yaml]
+openebs =
+  let ?name = "openebs"
+   in [Util.manifest $(embedYamlFile "src/openebs/storage-class.yaml")]
+
 certManager :: [Yaml]
 certManager =
-  let ?name = "selfsigned-cluster-issuer"
+  let ?name = Util.clusterIssuer
    in [Util.manifest $(embedYamlFile "src/cert-manager/cluster-issuer.yaml")]
 
 contour :: [Yaml]
@@ -109,7 +114,7 @@ contour =
 
 harbor :: [Yaml]
 harbor =
-  let ?namespace = "repositry" :: Text
+  let ?namespace = "registry" :: Text
       ?name = "harbor" :: Text
    in let domain = ?namespace <> "." <> host
        in [ Util.helmValues
@@ -124,7 +129,7 @@ harbor =
                                 { annotations =
                                     KeyMap.singleton
                                       "cert-manager.io/cluster-issuer"
-                                      ("selfsigned-cluster-issuer" :: Text)
+                                      Util.clusterIssuer
                                 , hosts =
                                     ANON
                                       { core = domain
@@ -137,11 +142,6 @@ harbor =
                     }
               )
           ]
-
-openebs :: [Yaml]
-openebs =
-  let ?name = "openebs"
-   in [Util.manifest $(embedYamlFile "src/openebs/storage-class.yaml")]
 
 yamls :: [Yaml]
 yamls =

@@ -249,6 +249,9 @@ data PathType
   | ImplementationSpecific
   deriving (Show)
 
+clusterIssuer :: Text
+clusterIssuer = "selfsigned-cluster-issuer"
+
 ingressContourTls ::
   (?name :: Text, ?namespace :: Text) =>
   (AllFields back ToJSON) =>
@@ -268,7 +271,7 @@ ingressContourTls ::
   ] ->
   Record _
 ingressContourTls rules =
-  annotate (KeyMap.singleton "cert-manager.io/cluster-issuer" "selfsigned-cluster-issuer") $
+  annotate (KeyMap.singleton "cert-manager.io/cluster-issuer" clusterIssuer) $
     setSpecTo
       (Anon.set #apiVersion "networking.k8s.io/v1" $ object "Ingress")
       ANON

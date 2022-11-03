@@ -23,8 +23,7 @@ processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 processYaml written yaml =
   let ?name = view #name yaml
    in case view #yamlType yaml of
-        Manifest -> do
-          manifestWrite (view #name yaml) (Yaml.encode $ view #value yaml)
+        Manifest -> manifestWrite (view #name yaml) (Yaml.encode $ view #value yaml)
         HelmValues r ->
           let ?namespace = view #namespace r
               ?name = view #name yaml
@@ -55,10 +54,7 @@ processYaml written yaml =
   path dir name = do
     createDirectoryIfMissing True dir
     pure $ dir <> Text.unpack name <> ".yaml"
-  manifestWrite ::
-    Text ->
-    ByteString ->
-    IO [FilePath]
+  manifestWrite :: Text -> ByteString -> IO [FilePath]
   manifestWrite name manifest = do
     path <- path "manifest/" name
     putStrLn $ "# writing to: " <> path
