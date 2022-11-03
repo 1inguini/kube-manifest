@@ -153,7 +153,7 @@ namespace =
           }
 
 noNamespace :: Text
-noNamespace = "_not-namespaced"
+noNamespace = "_root"
 
 persistentVolumeClaim :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
 persistentVolumeClaim = setSpecTo (object "PersistentVolumeClaim")

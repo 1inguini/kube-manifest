@@ -2,6 +2,7 @@ module Main (
   main,
 ) where
 
+import Control.Monad (void)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (key, _Object)
@@ -63,7 +64,8 @@ processYaml written yaml =
       else ByteString.writeFile path manifest
     pure $ path : written
 
+generate :: IO ()
+generate = void $ foldlM processYaml [] yamls
+
 main :: IO ()
-main = do
-  _ <- foldlM processYaml [] yamls
-  pure ()
+main = generate
