@@ -10,7 +10,7 @@ import Data.Aeson.KeyMap (KeyMap)
 import Data.Aeson.Optics (AsValue, key)
 import Data.Record.Anon
 import qualified Data.Record.Anon.Advanced as A (Record)
-import Data.Record.Anon.Simple (Record, inject, insert, merge, project)
+import Data.Record.Anon.Simple (Record, insert, merge, project)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -80,7 +80,7 @@ type ObjectMeta =
   , "labels" := Record '["app" := Text]
   ]
 
-meta :: (?name :: Text, ?namespace :: Text) => Record ObjectMeta
+meta :: (?namespace :: Text, ?name :: Text) => Record ObjectMeta
 meta =
   ANON
     { name = ?name
@@ -97,7 +97,7 @@ type Object =
   , "metadata" := Record ObjectMeta
   ]
 
-object :: (?name :: Text, ?namespace :: Text) => Text -> Record Object
+object :: (?namespace :: Text, ?name :: Text) => Text -> Record Object
 object kind =
   ANON
     { apiVersion = v1
@@ -116,7 +116,7 @@ annotate annotations object =
     ANON{metadata = Anon.get #metadata object `merge` ANON{annotations = annotations}}
 
 configMap ::
-  (?name :: Text, ?namespace :: Text) =>
+  (?namespace :: Text, ?name :: Text) =>
   ToJSON d =>
   d ->
   Record _
@@ -155,13 +155,13 @@ namespace =
 noNamespace :: Text
 noNamespace = "_root"
 
-persistentVolumeClaim :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
+persistentVolumeClaim :: (?namespace :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
 persistentVolumeClaim = setSpecTo (object "PersistentVolumeClaim")
 
 readWriteOnce :: Text
 readWriteOnce = "ReadWriteOnce"
 
-openebsLvmClaim :: (?name :: Text, ?namespace :: Text) => Text -> Record _
+openebsLvmClaim :: (?namespace :: Text, ?name :: Text) => Text -> Record _
 openebsLvmClaim size =
   persistentVolumeClaim
     ANON
@@ -176,7 +176,7 @@ openebsLvmClaim size =
   openebsLvmProvisioner :: Text
   openebsLvmProvisioner = "openebs-lvmpv"
 
-service :: (?name :: Text, ?namespace :: Text) => Record _ -> Record _
+service :: (?namespace :: Text, ?name :: Text) => Record _ -> Record _
 service spec =
   setSpecTo
     (object "Service")
@@ -207,7 +207,7 @@ persistentVolumeClaimVolume =
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 
-deployment :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
+deployment :: (?namespace :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
 deployment spec =
   object "Deployment"
     `merge` ANON
@@ -225,7 +225,7 @@ deployment spec =
       }
 
 ingressNginx ::
-  (?name :: Text, ?namespace :: Text) =>
+  (?namespace :: Text, ?name :: Text) =>
   (AllFields backend ToJSON) =>
   [ Record
       [ "host" := Text
@@ -244,7 +244,7 @@ ingressNginx ::
   Record _
 ingressNginx rules =
   setSpecTo
-    (inject ANON{apiVersion = "networking.k8s.io/v1" :: Text} $ object "Ingress")
+    (Anon.set #apiVersion "networking.k8s.io/v1" $ object "Ingress")
     ANON
       { ingressClassName = "nginx" :: Text
       , rules = rules
@@ -260,7 +260,7 @@ clusterIssuer :: Text
 clusterIssuer = "selfsigned-cluster-issuer"
 
 ingressContourTls ::
-  (?name :: Text, ?namespace :: Text) =>
+  (?namespace :: Text, ?name :: Text) =>
   (AllFields back ToJSON) =>
   [ Record
       [ "host" := Text
@@ -329,16 +329,16 @@ mkYaml =
     , value = Aeson.Null
     }
 
-mkYamlAndModify :: (?name :: Text, ?namespace :: Text) => State Yaml () -> Yaml
+mkYamlAndModify :: (?namespace :: Text, ?name :: Text) => State Yaml () -> Yaml
 mkYamlAndModify = flip execState mkYaml
 
-manifest :: (?name :: Text, ?namespace :: Text) => ToJSON json => json -> Yaml
+manifest :: (?namespace :: Text, ?name :: Text) => ToJSON json => json -> Yaml
 manifest object =
   mkYamlAndModify $ do
     modify $ Anon.set #yamlType Manifest
     modify $ Anon.set #value $ toJSON object
 
-helmValues :: (?name :: Text, ?namespace :: Text) => ToJSON json => String -> json -> Yaml
+helmValues :: (?namespace :: Text, ?name :: Text) => ToJSON json => String -> json -> Yaml
 helmValues chart values =
   mkYamlAndModify $ do
     modify $ Anon.set #yamlType $ HelmValues ANON{chart = chart}
