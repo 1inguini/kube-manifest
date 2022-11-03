@@ -27,6 +27,7 @@ import Optics (
  )
 
 import qualified Data.Aeson.KeyMap as KeyMap
+import Secret (host)
 import TH (deriveJSON)
 
 -- import Data.
@@ -66,6 +67,9 @@ assignJSON ::
   a ->
   m ()
 assignJSON l = modify . setJSON l
+
+domain :: (?namespace :: Text) => Text
+domain = ?namespace <> "." <> host
 
 named :: (?name :: Text) => Record _
 named = ANON{name = ?name}
@@ -147,6 +151,9 @@ namespace =
         `merge` ANON
           { metadata = project meta :: Record ["name" := Text, "labels" := Record '["app" := Text]]
           }
+
+noNamespace :: Text
+noNamespace = "_not-namespaced"
 
 persistentVolumeClaim :: (?name :: Text, ?namespace :: Text) => ToJSON spec => spec -> Record _
 persistentVolumeClaim = setSpecTo (object "PersistentVolumeClaim")
@@ -303,27 +310,29 @@ type Manifest = Record ["path" := FilePath, "objects" := [Aeson.Value]]
 
 data YamlType
   = Manifest
-  | HelmValues (Record ["namespace" := Text, "chart" := String {- name of chart, like "harbor/harbor"-}])
+  | HelmValues (Record '["chart" := String {- name of chart, like "harbor/harbor"-}])
 
 type Yaml =
   Record
     [ "yamlType" := YamlType
+    , "namespace" := Text
     , "name" := Text
     , "value" := Aeson.Value
     ]
 
-mkYaml :: (?name :: Text) => Yaml
+mkYaml :: (?namespace :: Text, ?name :: Text) => Yaml
 mkYaml =
   ANON
     { yamlType = Manifest
+    , namespace = ?namespace
     , name = ?name
     , value = Aeson.Null
     }
 
-mkYamlAndModify :: (?name :: Text) => State Yaml () -> Yaml
+mkYamlAndModify :: (?name :: Text, ?namespace :: Text) => State Yaml () -> Yaml
 mkYamlAndModify = flip execState mkYaml
 
-manifest :: (?name :: Text) => ToJSON json => json -> Yaml
+manifest :: (?name :: Text, ?namespace :: Text) => ToJSON json => json -> Yaml
 manifest object =
   mkYamlAndModify $ do
     modify $ Anon.set #yamlType Manifest
@@ -332,7 +341,7 @@ manifest object =
 helmValues :: (?name :: Text, ?namespace :: Text) => ToJSON json => String -> json -> Yaml
 helmValues chart values =
   mkYamlAndModify $ do
-    modify $ Anon.set #yamlType $ HelmValues ANON{namespace = ?namespace, chart = chart}
+    modify $ Anon.set #yamlType $ HelmValues ANON{chart = chart}
     modify $ Anon.set #value $ toJSON values
 
 $(deriveJSON ''PathType)

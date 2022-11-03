@@ -17,8 +17,20 @@ import Optics (ix, modifying, over, review, set, (%))
 import qualified Data.Aeson.KeyMap as KeyMap
 import Secret (externalIp, host)
 import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile)
-import Util (Yaml, YamlType (..))
+import Util (Yaml)
 import qualified Util
+
+openebs :: [Yaml]
+openebs =
+  let ?namespace = Util.noNamespace
+      ?name = "openebs"
+   in [Util.manifest $(embedYamlFile "src/openebs/storage-class.yaml")]
+
+certManager :: [Yaml]
+certManager =
+  let ?namespace = Util.noNamespace
+      ?name = "cert-manager"
+   in [Util.manifest $(embedYamlFile "src/cert-manager/cluster-issuer.yaml")]
 
 -- config for coredns
 dns :: [Yaml]
@@ -79,18 +91,8 @@ dns =
                   }
           ]
 
-openebs :: [Yaml]
-openebs =
-  let ?name = "openebs"
-   in [Util.manifest $(embedYamlFile "src/openebs/storage-class.yaml")]
-
-certManager :: [Yaml]
-certManager =
-  let ?name = Util.clusterIssuer
-   in [Util.manifest $(embedYamlFile "src/cert-manager/cluster-issuer.yaml")]
-
-contour :: [Yaml]
-contour =
+projectcontour :: [Yaml]
+projectcontour =
   let ?namespace = "projectcontour"
       ?name = "contour"
    in [ Util.manifest $
@@ -112,43 +114,47 @@ contour =
             ANON{controller = "projectcontour.io/contour" :: Text}
       ]
 
-harbor :: [Yaml]
-harbor =
-  let ?namespace = "registry" :: Text
-      ?name = "harbor" :: Text
-   in let domain = ?namespace <> "." <> host
-       in [ Util.helmValues
-              "harbor/harbor"
-              ( toJSON
-                  ANON
-                    { expose =
-                        -- Anon.insert #type ("ignore" :: Text) $ -- "ignore" is invalid value, so no ingress will be made
-                        ANON
-                          { ingress =
-                              ANON
-                                { annotations =
-                                    KeyMap.singleton
-                                      "cert-manager.io/cluster-issuer"
-                                      Util.clusterIssuer
-                                , hosts =
-                                    ANON
-                                      { core = domain
-                                      , notary = "notary." <> domain
-                                      }
-                                }
-                          , tls = ANON{auto = ANON{commonName = domain}}
-                          }
-                    , externalURL = "https://" <> domain
-                    }
-              )
-          ]
+registry :: [Yaml]
+registry =
+  let ?namespace = "registry"
+      ?name = "harbor"
+   in [ Util.helmValues
+          "harbor/harbor"
+          ANON
+            { expose =
+                -- Anon.insert #type ("ignore" :: Text) $ -- "ignore" is invalid value, so no ingress will be made
+                ANON
+                  { ingress =
+                      ANON
+                        { annotations =
+                            KeyMap.singleton
+                              "cert-manager.io/cluster-issuer"
+                              Util.clusterIssuer
+                        , hosts =
+                            ANON
+                              { core = Util.domain
+                              , notary = "notary." <> Util.domain
+                              }
+                        }
+                  , tls = ANON{auto = ANON{commonName = Util.domain}}
+                  }
+            , externalURL = "https://" <> Util.domain
+            }
+      ]
+
+gitbucket :: [Yaml]
+gitbucket =
+  let ?namespace = "git" :: Text
+      ?name = "gitbucket" :: Text
+   in [Util.manifest Util.namespace]
 
 yamls :: [Yaml]
 yamls =
   mconcat
     [ certManager
-    , contour
     , dns
+    , gitbucket
     , openebs
-    , harbor
+    , projectcontour
+    , registry
     ]

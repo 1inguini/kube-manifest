@@ -21,42 +21,42 @@ import qualified Util
 
 processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 processYaml written yaml =
-  let ?name = view #name yaml
+  let ?namespace = view #namespace yaml
+      ?name = view #name yaml
    in case view #yamlType yaml of
-        Manifest -> manifestWrite (view #name yaml) (Yaml.encode $ view #value yaml)
+        Manifest -> manifestWrite (Yaml.encode $ view #value yaml)
         HelmValues r ->
-          let ?namespace = view #namespace r
-              ?name = view #name yaml
-           in do
-                valuesPath <- path "values/" ?name
-                putStrLn $ "# writing to: " <> valuesPath
-                ByteString.writeFile valuesPath $ Yaml.encode $ view #value yaml
-                aesons <-
-                  readProcess
-                    "helm"
-                    [ "template"
-                    , "--values"
-                    , valuesPath
-                    , view #chart r
-                    ]
-                    ""
-                    >>= Yaml.decodeAllThrow @IO @Aeson.Value . fromString
-                let objects =
-                      over
-                        (key "metadata" % _Object)
-                        (KeyMap.insert "namespace" $ Aeson.String ?namespace)
-                        <$> aesons
-                let ns = Yaml.encode Util.namespace
-                let manifest =
-                      foldl (\acc -> ((acc <> "---\n") <>)) ns $ Yaml.encode <$> objects
-                manifestWrite ?name manifest
+          do
+            valuesPath <- path "values/"
+            putStrLn $ "# writing to: " <> valuesPath
+            ByteString.writeFile valuesPath $ Yaml.encode $ view #value yaml
+            aesons <-
+              readProcess
+                "helm"
+                [ "template"
+                , "--values"
+                , valuesPath
+                , view #chart r
+                ]
+                ""
+                >>= Yaml.decodeAllThrow @IO @Aeson.Value . fromString
+            let objects =
+                  over
+                    (key "metadata" % _Object)
+                    (KeyMap.insert "namespace" $ Aeson.String ?namespace)
+                    <$> aesons
+            let ns = Yaml.encode Util.namespace
+            let manifest =
+                  foldl (\acc -> ((acc <> "---\n") <>)) ns $ Yaml.encode <$> objects
+            manifestWrite manifest
  where
-  path dir name = do
+  path prefix = do
+    let dir = prefix <> Text.unpack ?namespace
     createDirectoryIfMissing True dir
-    pure $ dir <> Text.unpack name <> ".yaml"
-  manifestWrite :: Text -> ByteString -> IO [FilePath]
-  manifestWrite name manifest = do
-    path <- path "manifest/" name
+    pure $ dir <> "/" <> Text.unpack ?name <> ".yaml"
+  manifestWrite :: (?namespace :: Text, ?name :: Text) => _
+  manifestWrite manifest = do
+    path <- path "manifest/"
     putStrLn $ "# writing to: " <> path
     if path `elem` written
       then ByteString.appendFile path $ "---\n" <> manifest
