@@ -147,6 +147,7 @@ registry =
                         }
                   }
             , externalURL = "https://" <> Util.domain
+            , updateStrategy = Anon.insert #type ("Recreate" :: Text) ANON{}
             }
       ]
 
