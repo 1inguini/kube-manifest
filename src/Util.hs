@@ -278,7 +278,7 @@ ingressContourTls rules =
       ANON
         { ingressClassName = "contour" :: Text
         , rules = rules
-        , tls = [ANON{hosts = view #host <$> rules}]
+        , tls = [ANON{secretName = ?name, hosts = view #host <$> rules}]
         }
 
 ingressRule :: (?namespace :: Text, ?name :: Text) => Text -> Record _
@@ -314,36 +314,19 @@ type Yaml =
     , "value" := Aeson.Value
     ]
 
-mkYaml :: (?namespace :: Text, ?app :: Text) => Yaml
-mkYaml =
+mkYaml :: (?namespace :: Text, ?app :: Text) => YamlType -> ToJSON json => ((?name :: Text) => json) -> Yaml
+mkYaml ty value =
   ANON
-    { yamlType = Manifest
+    { yamlType = ty
     , namespace = ?namespace
     , app = ?app
-    , value = Aeson.Null
+    , value = let ?name = ?app in toJSON value
     }
 
-mkYamlAndModify :: (?namespace :: Text, ?app :: Text) => State Yaml () -> Yaml
-mkYamlAndModify = flip execState mkYaml
-
-maybeNamedManifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => Maybe Text -> ((?name :: Text) => json) -> Yaml
-maybeNamedManifest name object =
-  let ?name = maybe ?app ((?app <> "-") <>) name
-   in mkYamlAndModify $ do
-        modify $ Anon.set #yamlType Manifest
-        modify $ Anon.set #value $ toJSON object
-
 manifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => ((?name :: Text) => json) -> Yaml
-manifest = maybeNamedManifest Nothing
-
-namedManifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => Text -> ((?name :: Text) => json) -> Yaml
-namedManifest name = maybeNamedManifest (Just name)
+manifest = mkYaml Manifest
 
 helmValues :: (?namespace :: Text, ?app :: Text) => ToJSON json => String -> json -> Yaml
-helmValues chart values =
-  let ?name = ?app
-   in mkYamlAndModify $ do
-        modify $ Anon.set #yamlType $ HelmValues ANON{chart = chart}
-        modify $ Anon.set #value $ toJSON values
+helmValues chart = mkYaml (HelmValues ANON{chart = chart})
 
 $(deriveJSON ''PathType)

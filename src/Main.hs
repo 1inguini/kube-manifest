@@ -14,7 +14,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Yaml as Yaml (decodeAllThrow, encode)
 import Manifest (yamls)
-import Optics (over, view, (%))
+import Optics (over, preview, view, (%))
 import System.Directory (createDirectoryIfMissing)
 import System.Process (readProcess)
 import Util (Yaml, YamlType (..))
@@ -25,7 +25,7 @@ processYaml written yaml =
   let ?namespace = view #namespace yaml
       ?app = view #app yaml
    in case view #yamlType yaml of
-        Manifest -> manifestWrite (Yaml.encode $ view #value yaml)
+        Manifest -> objectWrite written $ view #value yaml
         HelmValues r ->
           do
             valuesPath <- path "values/"
@@ -46,22 +46,29 @@ processYaml written yaml =
                     (key "metadata" % _Object)
                     (KeyMap.insert "namespace" $ Aeson.String ?namespace)
                     <$> aesons
-            let ns = Yaml.encode Util.namespace
-            let manifest =
-                  foldl (\acc -> ((acc <> "---\n") <>)) ns $ Yaml.encode <$> objects
-            manifestWrite manifest
+            written <- processYaml written $ Util.manifest Util.namespace
+            foldlM objectWrite written objects
  where
-  path prefix = do
-    let dir = prefix <> Text.unpack ?namespace
+  path dir = do
     createDirectoryIfMissing True dir
-    pure $ dir <> "/" <> Text.unpack ?app <> ".yaml"
-  manifestWrite :: (?namespace :: Text, ?app :: Text) => _
-  manifestWrite manifest = do
-    path <- path "manifest/"
+    pure $ dir <> Text.unpack ?app <> ".yaml"
+  objectWrite :: (?namespace :: Text, ?app :: Text) => [FilePath] -> Aeson.Value -> IO [FilePath]
+  objectWrite written object = do
+    path <-
+      path $
+        "manifest/"
+          <> Text.unpack ?namespace
+          <> "/"
+          <> ( case preview (key "kind") object of
+                Just "PersistentVolumeClaim" -> "never-delete/"
+                _ -> mempty
+             )
     putStrLn $ "# writing to: " <> path
-    if path `elem` written
-      then ByteString.appendFile path $ "---\n" <> manifest
-      else ByteString.writeFile path manifest
+    ( if path `elem` written
+        then ByteString.appendFile path . ("---\n" <>)
+        else ByteString.writeFile path
+      )
+      $ Yaml.encode object
     pure $ path : written
 
 generate :: IO ()
