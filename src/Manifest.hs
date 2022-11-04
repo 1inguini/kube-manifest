@@ -146,6 +146,7 @@ registry =
                               } -- ANON{auto = ANON{commonName = Util.domain}}
                         }
                   }
+            , caSecretName = ?app
             , externalURL = "https://" <> Util.domain
             , updateStrategy = Anon.insert #type ("Recreate" :: Text) ANON{}
             }
