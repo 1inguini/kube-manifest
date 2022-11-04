@@ -250,7 +250,7 @@ ingressContourTlsAnnotations :: KeyMap Text
 ingressContourTlsAnnotations =
   KeyMap.fromList
     [ ("cert-manager.io/cluster-issuer", clusterIssuer)
-    , ("ingress.kubernetes.io/ssl-redirect", "true")
+    , ("ingress.kubernetes.io/force-ssl-redirect", "true")
     ]
 
 ingressContourTls ::
