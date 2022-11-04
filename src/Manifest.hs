@@ -176,12 +176,12 @@ gitbucket =
                       ]
                   , containers =
                       [ Util.container
-                          (registry <> "gitbucket:4.38.3")
+                          (registry <> "gitbucket:latest")
                           ANON
                             { ports = [Util.containerPort 8080]
-                            , livenessProbe = Util.probe $ Util.httpGet "api/v3"
-                            , readinessProbe = Util.probe $ Util.httpGet "api/v3"
-                            , volumeMounts =
+                            , -- , livenessProbe = Util.probe $ Util.httpGet "/api/v3"
+                              -- , readinessProbe = Util.probe $ Util.httpGet "/api/v3"
+                              volumeMounts =
                                 [ Util.volumeMount "/home/nonroot/.gitbucket"
                                 , plugins $ Util.volumeMount pluginsDir
                                 ]
@@ -191,6 +191,7 @@ gitbucket =
                       [ toJSON Util.persistentVolumeClaimVolume
                       , toJSON $ plugins Util.emptyDirVolume
                       ]
+                  , securityContext = ANON{fsGroup = 65532 :: Int}
                   }
           , Util.manifest $ Util.openebsLvmClaim "5Gi"
           , Util.manifest $ Util.service ANON{ports = [Util.httpServicePort]}

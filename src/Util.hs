@@ -220,6 +220,10 @@ persistentVolumeClaimVolume =
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 
+-- uid of nonroot of distroless
+nonroot :: Int
+nonroot = 65532
+
 deployment :: (?namespace :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
 deployment spec =
   object "Deployment"
