@@ -244,7 +244,7 @@ data PathType
   deriving (Show)
 
 clusterIssuer :: Text
-clusterIssuer = "selfsigned-cluster-issuer"
+clusterIssuer = "1inguini-ca-cluster-issuer"
 
 ingressContourTlsAnnotations :: KeyMap Text
 ingressContourTlsAnnotations =

@@ -28,9 +28,12 @@ openebs =
 
 certManager :: [Yaml]
 certManager =
-  let ?namespace = Util.noNamespace
+  let ?namespace = "cert-manager"
       ?app = "cert-manager"
-   in [Util.manifest $(embedYamlFile "src/cert-manager/cluster-issuer.yaml")]
+   in [ Util.manifest $(embedYamlFile "src/cert-manager/selfsigned-issuer.yaml")
+      , Util.manifest $(embedYamlFile "src/cert-manager/1inguini-ca.yaml")
+      , Util.manifest $(embedYamlFile "src/cert-manager/1inguini-ca-cluster-issuer.yaml")
+      ]
 
 -- config for coredns
 dns :: [Yaml]
