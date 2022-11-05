@@ -1,0 +1,8 @@
+{
+	"removemake": "yes",
+	"maxconcurrentdownloads": 5,
+	"upgrademenu": false,
+	"cleanmenu": false,
+	"diffmenu": false,
+	"editmenu": false
+}
