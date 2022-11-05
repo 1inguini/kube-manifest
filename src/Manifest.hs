@@ -118,6 +118,14 @@ projectcontour =
             ANON{controller = "projectcontour.io/contour" :: Text}
       ]
 
+kubernetesDashboard :: [Yaml]
+kubernetesDashboard =
+  let ?namespace = "kubernetes-dashboard"
+      ?app = "kubernetes-dashboard"
+   in [ Util.manifest $(embedYamlFile "src/kubernetes-dashboard/service-account.yaml")
+      , Util.manifest $(embedYamlFile "src/kubernetes-dashboard/cluster-role-binding.yaml")
+      ]
+
 registry :: [Yaml]
 registry =
   let ?namespace = "registry"
