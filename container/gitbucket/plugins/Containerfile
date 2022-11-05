@@ -1,35 +1,26 @@
 FROM registry.1inguini.com/library/builder:latest as builder
 
 # plugins
-RUN mkdir -p /tmp/plugins
-RUN curl -L -o /tmp/plugins/gitbucket-commitgraphs-plugin_2.13-4.35.0.jar \
-  'https://github.com/yoshiyoshifujii/gitbucket-commitgraphs-plugin/releases/download/4.35.0/gitbucket-commitgraphs-plugin_2.13-4.35.0.jar'
-
-RUN curl -L -o /tmp/plugins/gitbucket-fess-plugin_2.13-1.7.0.jar \
-  'https://github.com/codelibs/gitbucket-fess-plugin/releases/download/gitbucket-fess-plugin-1.7.0/gitbucket-fess-plugin_2.13-1.7.0.jar'
-
-RUN curl -L -o /tmp/plugins/gitbucket-monitorting-plugin-5.1.0.jar \
-  'https://github.com/yoshinorin/gitbucket-monitoring-plugin/releases/download/v5.1.0/gitbucket-monitorting-plugin-5.1.0.jar'
-
-RUN curl -L -o /tmp/plugins/gitbucket-mirror-plugin-1.4.0.jar \
-  'https://github.com/alexandremenif/gitbucket-mirror-plugin/releases/download/v1.4.0/gitbucket-mirror-plugin-1.4.0.jar'
-
-RUN curl -L -o /tmp/plugins/gitbucket-explorer-plugin-9.0.0.jar \
-  'https://github.com/gitbucket-plugins/gitbucket-explorer-plugin/releases/download/9.0.0/gitbucket-explorer-plugin-9.0.0.jar'
-
-RUN curl -L -o /tmp/plugins/gitbucket-code-highlighter-plugin-1.6.0.jar \
-  'https://github.com/kaz-on/gitbucket-code-highlighter-plugin/releases/download/v1.6.0/gitbucket-code-highlighter-plugin-1.6.0.jar'
-
-RUN curl -L -o /tmp/plugins/gitbucket-popovers-plugin-1.0.0.jar \
-  'https://github.com/kaz-on/gitbucket-popovers-plugin/releases/download/v1.0.0/gitbucket-popovers-plugin-1.0.0.jar'
-
-RUN curl -L -o /tmp/plugins/gitbucket-html5media-plugin-1.2.2.jar \
-  'https://github.com/kounoike/gitbucket-html5media-plugin/releases/download/1.2.2/gitbucket-html5media-plugin-1.2.2.jar'
-
-RUN curl -L -o /tmp/plugins/gitbucket-swagger-plugin-1.0.7.jar \
+RUN curl -L -o /tmp/gitbucket-commitgraphs-plugin_2.13-4.35.0.jar \
+  'https://github.com/yoshiyoshifujii/gitbucket-commitgraphs-plugin/releases/download/4.35.0/gitbucket-commitgraphs-plugin_2.13-4.35.0.jar' & \
+  curl -L -o /tmp/gitbucket-fess-plugin_2.13-1.7.0.jar \
+  'https://github.com/codelibs/gitbucket-fess-plugin/releases/download/gitbucket-fess-plugin-1.7.0/gitbucket-fess-plugin_2.13-1.7.0.jar' & \
+  curl -L -o /tmp/gitbucket-monitorting-plugin-5.1.0.jar \
+  'https://github.com/yoshinorin/gitbucket-monitoring-plugin/releases/download/v5.1.0/gitbucket-monitorting-plugin-5.1.0.jar' & \
+  curl -L -o /tmp/gitbucket-mirror-plugin-1.4.0.jar \
+  'https://github.com/alexandremenif/gitbucket-mirror-plugin/releases/download/v1.4.0/gitbucket-mirror-plugin-1.4.0.jar' & \
+  curl -L -o /tmp/gitbucket-explorer-plugin-9.0.0.jar \
+  'https://github.com/gitbucket-plugins/gitbucket-explorer-plugin/releases/download/9.0.0/gitbucket-explorer-plugin-9.0.0.jar' & \
+  curl -L -o /tmp/gitbucket-code-highlighter-plugin-1.6.0.jar \
+  'https://github.com/kaz-on/gitbucket-code-highlighter-plugin/releases/download/v1.6.0/gitbucket-code-highlighter-plugin-1.6.0.jar' & \
+  curl -L -o /tmp/gitbucket-popovers-plugin-1.0.0.jar \
+  'https://github.com/kaz-on/gitbucket-popovers-plugin/releases/download/v1.0.0/gitbucket-popovers-plugin-1.0.0.jar' & \
+  curl -L -o /tmp/gitbucket-html5media-plugin-1.2.2.jar \
+  'https://github.com/kounoike/gitbucket-html5media-plugin/releases/download/1.2.2/gitbucket-html5media-plugin-1.2.2.jar' & \
+  curl -L -o /tmp/gitbucket-swagger-plugin-1.0.7.jar \
   'https://github.com/onukura/gitbucket-swagger-plugin/releases/download/1.0.7/gitbucket-swagger-plugin-1.0.7.jar'
 
 FROM busybox
 
-COPY --from=builder /tmp/plugins /plugins
+COPY --from=builder /tmp /plugins
 
