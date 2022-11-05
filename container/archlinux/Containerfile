@@ -11,7 +11,7 @@ RUN pacman -Syu --noconfirm glibc git moreutils busybox
 COPY --chmod=644 locale.gen /etc/locale.gen
 RUN locale-gen
 
-RUN useradd -d / -s /usr/bin/nologin user && \
+RUN useradd -m -s /usr/bin/nologin user && \
   printf '%s\n' 'user ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
 USER user
 
