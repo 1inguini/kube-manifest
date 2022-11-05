@@ -1,6 +1,6 @@
 FROM registry.1inguini.com/library/archlinux:latest
 
-RUN paru -S --noconfirm busybox
+# RUN paru -S --noconfirm busybox
 # RUN paru -S --noconfirm rsync
 
 COPY --chmod=755 files.sh /usr/bin/files.sh
