@@ -16,11 +16,11 @@ trap "
 rm -rf $files
 " EXIT
 
-# paru -Qql filesystem | sed -e '\:/usr/.:d' >> "$files"
+# yay -Qql filesystem | sed -e '\:/usr/.:d' >> "$files"
 
-paru -S --noconfirm "$@"
+yay -S --noconfirm "$@"
 
-paru -Qql "$(pactree -l "$@" | sed -e '\:filesystem:d')" |
+yay -Qql "$(pactree -l "$@" | sed -e '\:filesystem:d')" |
   sed -e '\:^/usr/share:d' |
   tee -a "$files" |
   xargs ldd 2>/dev/null |
