@@ -166,7 +166,7 @@ gitbucket =
       ?app = "gitbucket" :: Text
    in let plugins = Util.name "plugins"
           registry = "registry." <> host <> "/library/"
-          pluginsDir = "/home/nonroot/.gitbucket/plugins"
+          pluginsDir = "/home/nonroot/.gitbucket/plugins/"
        in [ Util.manifest Util.namespace
           , Util.manifest $
               Util.deployment
@@ -176,7 +176,7 @@ gitbucket =
                           Util.container
                             (registry <> "gitbucket/plugins")
                             ANON
-                              { command = ["cp", "-r", "/plugins", pluginsDir]
+                              { command = ["cp", "-r", "/plugins/", pluginsDir <> "../"]
                               , volumeMounts =
                                   [ plugins $ Util.volumeMount pluginsDir
                                   ]
@@ -184,12 +184,12 @@ gitbucket =
                       ]
                   , containers =
                       [ Util.container
-                          (registry <> "gitbucket:latest")
+                          (registry <> "gitbucket:4.38.3")
                           ANON
                             { ports = [Util.containerPort 8080]
-                            , -- , livenessProbe = Util.probe $ Util.httpGet "/api/v3"
-                              -- , readinessProbe = Util.probe $ Util.httpGet "/api/v3"
-                              volumeMounts =
+                            , livenessProbe = Util.probe $ Util.httpGet "/api/v3"
+                            , readinessProbe = Util.probe $ Util.httpGet "/api/v3"
+                            , volumeMounts =
                                 [ Util.volumeMount "/home/nonroot/.gitbucket"
                                 , plugins $ Util.volumeMount pluginsDir
                                 ]
@@ -199,7 +199,7 @@ gitbucket =
                       [ toJSON Util.persistentVolumeClaimVolume
                       , toJSON $ plugins Util.emptyDirVolume
                       ]
-                  , securityContext = ANON{fsGroup = 65532 :: Int}
+                  , securityContext = ANON{fsGroup = Util.nonroot}
                   }
           , Util.manifest $ Util.openebsLvmClaim "5Gi"
           , Util.manifest $ Util.service ANON{ports = [Util.httpServicePort]}
@@ -212,6 +212,7 @@ yamls =
     [ certManager
     , dns
     , gitbucket
+    , kubernetesDashboard
     , openebs
     , projectcontour
     , registry
