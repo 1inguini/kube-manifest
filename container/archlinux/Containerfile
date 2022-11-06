@@ -11,9 +11,10 @@ RUN pacman -Syu --noconfirm glibc git moreutils busybox
 COPY --chmod=644 locale.gen /etc/locale.gen
 RUN locale-gen
 
-RUN useradd -m -s /usr/bin/nologin user && \
-  printf '%s\n' 'user ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
-USER user
+RUN useradd --uid 65532 --gid 65532 -m -s /usr/bin/nologin nonroot && \
+  printf '%s\n' 'nonroot ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
+USER nonroot
+WORKDIR /home/nonroot
 
 RUN git clone https://aur.archlinux.org/paru-bin /tmp/paru
 RUN cd /tmp/paru && makepkg -sir --noconfirm
