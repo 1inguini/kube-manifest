@@ -1,6 +1,8 @@
 VERSION 0.6
 FROM registry.1inguini.com/library/builder:latest
+
 ARG gitbucket_ver=4.38.3
+ARG embed_plugins=no
 
 gitbucket.war:
   RUN curl -LO "https://github.com/gitbucket/gitbucket/releases/download/$gitbucket_ver/gitbucket.war"
@@ -24,22 +26,28 @@ plugins:
     -O 'https://github.com/onukura/gitbucket-swagger-plugin/releases/download/1.0.7/gitbucket-swagger-plugin-1.0.7.jar'
   SAVE ARTIFACT plugins
 
+plugins-container:
+  FROM busybox:latest
+  COPY +plugins/plugins plugins
+  SAVE IMAGE --push registry.1inguini.com/library/gitbucket/plugins
+
 git: # only git binary, requires ld, libc, libpthread, libz
   FROM docker.io/bitnami/git
   SAVE ARTIFACT /opt/bitnami/git/bin/git
 
 container:
-  FROM gcr.io/distroless/java11-debian11:nonroot
+  IF [ "$embed_plugins" == "yes" ] # condition requires /bin/sh, whitch isn't included in distroless
+    FROM gcr.io/distroless/java11-debian11:nonroot
+    COPY +plugins/plugins .gitbucket/plugins
+  ELSE
+    BUILD +plugins-container
+    FROM gcr.io/distroless/java11-debian11:nonroot
+  END
 
   COPY +gitbucket.war/gitbucket.war gitbucket.war
-  COPY +plugins/plugins .gitbucket/plugins
 
   ENV LANG="ja_JP.UTF-8"
-
   CMD [ "gitbucket.war", "--port=8080" ]
-  SAVE IMAGE gitbucket
 
-push:
-  FROM +container
   SAVE IMAGE --push registry.1inguini.com/library/gitbucket:$gitbucket_ver
   SAVE IMAGE --push registry.1inguini.com/library/gitbucket:latest
