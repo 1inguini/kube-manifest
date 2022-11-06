@@ -11,6 +11,7 @@ WORKDIR /home/nonroot/.gitbucket/plugins
 # plugins
 RUN curl --parallel -LO \
   'https://github.com/yoshiyoshifujii/gitbucket-commitgraphs-plugin/releases/download/4.35.0/gitbucket-commitgraphs-plugin_2.13-4.35.0.jar' \
+  'https://github.com/mrkm4ntr/gitbucket-network-plugin/releases/download/1.9.2/gitbucket-network-plugin_2.13-1.9.2.jar' \
   'https://github.com/codelibs/gitbucket-fess-plugin/releases/download/gitbucket-fess-plugin-1.7.0/gitbucket-fess-plugin_2.13-1.7.0.jar' \
   'https://github.com/yoshinorin/gitbucket-monitoring-plugin/releases/download/v5.1.0/gitbucket-monitorting-plugin-5.1.0.jar' \
   'https://github.com/alexandremenif/gitbucket-mirror-plugin/releases/download/v1.4.0/gitbucket-mirror-plugin-1.4.0.jar' \
