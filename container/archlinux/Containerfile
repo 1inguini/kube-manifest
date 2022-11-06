@@ -11,7 +11,8 @@ RUN pacman -Syu --noconfirm glibc git moreutils busybox
 COPY --chmod=644 locale.gen /etc/locale.gen
 RUN locale-gen
 
-RUN useradd --uid 65532 --gid 65532 -m -s /usr/bin/nologin nonroot && \
+RUN groupadd --gid 65532 nonroot && \
+  useradd --uid 65532 --gid 65532 -m -s /usr/bin/nologin nonroot && \
   printf '%s\n' 'nonroot ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
 USER nonroot
 WORKDIR /home/nonroot
