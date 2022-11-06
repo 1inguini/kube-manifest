@@ -21,6 +21,12 @@ podman build containers/php-fpm --rm --tag registry.1inguini.com/library/php-fpm
 
 ## マニフェスト
 
+``` bash
+cabal run kube-manifest
+```
+
+でmanifest/namespace/app.yamlが生成される
+
 ### Harbor
 
 ``` bash
