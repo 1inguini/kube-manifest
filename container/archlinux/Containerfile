@@ -16,7 +16,6 @@ RUN useradd --uid 65532 --gid 65532 -m -s /usr/bin/nologin nonroot && \
 USER nonroot
 WORKDIR /home/nonroot
 
-RUN git clone https://aur.archlinux.org/paru-bin /tmp/paru
-RUN cd /tmp/paru && makepkg -sir --noconfirm
-
-RUN rm -rf /tmp/*
+RUN git clone https://aur.archlinux.org/yay-bin /tmp/aur-helper
+RUN cd /tmp/aur-helper && makepkg -sir --noconfirm
+ENV PACMAN yay
