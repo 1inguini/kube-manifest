@@ -1,6 +1,3 @@
 FROM registry.1inguini.com/library/archlinux:latest
 
 COPY --chmod=755 files.sh /usr/bin/files.sh
-
-RUN mkdir /home/user/workdir
-WORKDIR /home/user/workdir
