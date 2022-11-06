@@ -8,12 +8,12 @@ RUN curl -LO 'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gi
 
 RUN sha256sum gitbucket.war
 
-RUN files.sh jre-openjdk-headless git
+FROM docker.io/bitnami/git as git
 
-FROM gcr.io/distroless/static:latest
+FROM gcr.io/distroless/java11-debian11:latest
 
-COPY --from=builder /tmp/files/ /
-COPY --from=builder --chown=nonroot:nonroot /home/user/workdir/gitbucket.war /home/nonroot/gitbucket.war
+COPY --from=git /opt/bitnami/git/bin/git /usr/bin/git
+COPY --from=builder --chown=nonroot:nonroot /home/user/workdir /home/nonroot
 
 ENV LANG="ja_JP.UTF-8"
 
