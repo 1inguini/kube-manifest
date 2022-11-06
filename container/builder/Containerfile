@@ -6,7 +6,8 @@ RUN sed -i /etc/pacman.conf -e 's/NoProgress/#NoProgress/' -e '/NoExtract.*local
 
 COPY --chmod=644 mirrorlist /etc/pacman.d/mirrorlist
 
-RUN pacman -Syu --noconfirm glibc git moreutils busybox
+RUN pacman -Syu --noconfirm archlinux-keyring && \
+  pacman -S busybox git glibc moreutils pacman-contrib sudo
 
 COPY --chmod=644 locale.gen /etc/locale.gen
 RUN locale-gen
@@ -20,3 +21,6 @@ RUN cd /home/user/yay && makepkg -sir --noconfirm
 COPY --chown=user:user yay.json /home/user/.config/yay/config.json
 
 COPY --chmod=755 files.sh /usr/bin/files.sh
+
+RUN mkdir /home/user/workdir
+WORKDIR /home/user/workdir

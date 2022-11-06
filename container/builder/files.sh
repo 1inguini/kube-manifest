@@ -20,7 +20,7 @@ rm -rf $files
 
 yay -S --noconfirm "$@"
 
-yay -Qql "$(pactree -l "$@" | sed -e '\:filesystem:d')" |
+yay -Qql "$@" |
   sed -e '\:^/usr/share:d' |
   tee -a "$files" |
   xargs ldd 2>/dev/null |
@@ -38,4 +38,4 @@ sed -i "$files" -e 's:^/:./:'
 
 mkdir /tmp/files
 sudo tar --dereference --ignore-failed-read --no-recursion -C / --verbatim-files-from -T "$files" -cpf - |
-  tar -C /tmp/files/ -xpf -
+  sudo tar -C /tmp/files/ -xpf -

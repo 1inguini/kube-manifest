@@ -1,23 +1,23 @@
 FROM registry.1inguini.com/library/builder:latest as builder
 
+WORKDIR /home/user/workdir
 # tag 4.38.3
-RUN curl -L -o /tmp/gitbucket.war \ 
-  'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gitbucket.war'
-RUN curl -L -o /tmp/gitbucket.war.sha256 \
-  'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gitbucket.war.sha256'
+RUN curl -LO 'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gitbucket.war'
+# curl -L -o gitbucket.war.sha256 \
+# 'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gitbucket.war.sha256'
 
-RUN sha256sum /tmp/gitbucket.war
+RUN sha256sum gitbucket.war
 
 RUN files.sh jre-openjdk-headless git
 
 FROM gcr.io/distroless/static:latest
 
 COPY --from=builder /tmp/files/ /
-COPY --from=builder --chown=nonroot:nonroot /tmp/gitbucket.war /home/nonroot/gitbucket.war
+COPY --from=builder --chown=nonroot:nonroot /home/user/workdir/gitbucket.war /home/nonroot/gitbucket.war
 
 ENV LANG="ja_JP.UTF-8"
 
-ENTRYPOINT [ "/bin/java", "--jar" ]
+ENTRYPOINT [ "/usr/bin/java", "--jar" ]
 CMD [ "/home/nonroot/gitbucket.war", "--port=8080" ]
 
 USER nonroot
