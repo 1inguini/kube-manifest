@@ -45,5 +45,4 @@ helm template --values values/harbor.yaml harbor/harbor > manifest/harbor.yaml
 
 ## TODO
 
-* `Yaml`にnamespace、app、nameを格納するのではなく、`Aeson.Value`から読み取る
 * `embedYamlFromDirectory`、Kubernetesオブジェクトの`Aeson.Value`のリストを`Ix`に

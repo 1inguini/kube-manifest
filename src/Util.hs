@@ -8,7 +8,7 @@ import Data.Aeson (FromJSON, ToJSON (toJSON), fromJSON)
 import qualified Data.Aeson as Aeson
 import Data.Aeson.KeyMap (KeyMap)
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Optics (AsValue, key)
+import Data.Aeson.Optics (AsValue (_Object), key)
 import Data.Maybe (fromMaybe)
 import Data.Record.Anon
 import qualified Data.Record.Anon.Advanced as A (Record)
@@ -23,6 +23,7 @@ import Optics (
   NoIx,
   Optic',
   over,
+  preview,
   set,
   view,
   (%),
@@ -308,13 +309,17 @@ type Manifest = Record ["path" := FilePath, "objects" := [Aeson.Value]]
 
 data YamlType
   = Manifest
-  | HelmValues (Record '["chart" := String {- name of chart, like "harbor/harbor"-}])
+  | HelmValues
+      ( Record
+          '[ "chart" := String -- name of chart, like "harbor/harbor"
+           , "namespace" := Text
+           , "appLabel" := Text
+           ]
+      )
 
 type Yaml =
   Record
     [ "yamlType" := YamlType
-    , "namespace" := Text
-    , "app" := Text
     , "value" := Aeson.Value
     ]
 
@@ -322,15 +327,28 @@ mkYaml :: (?namespace :: Text, ?app :: Text) => YamlType -> ToJSON json => ((?na
 mkYaml ty value =
   ANON
     { yamlType = ty
-    , namespace = ?namespace
-    , app = ?app
-    , value = let ?name = ?app in toJSON value
+    , value =
+        over (key "metadata" % _Object) (KeyMap.insert "namespace" $ Aeson.String ?namespace) $
+          let ?name = ?app in toJSON value
     }
 
 manifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => ((?name :: Text) => json) -> Yaml
 manifest = mkYaml Manifest
 
-helmValues :: (?namespace :: Text, ?app :: Text) => ToJSON json => String -> json -> Yaml
-helmValues chart = mkYaml (HelmValues ANON{chart = chart})
+helmValues ::
+  (?namespace :: Text, ?app :: Text) =>
+  ToJSON json =>
+  Record '["chart" := String, "appLabel" := Text] ->
+  json ->
+  Yaml
+helmValues meta =
+  mkYaml
+    ( HelmValues
+        ANON
+          { chart = view #chart meta
+          , namespace = ?namespace
+          , appLabel = view #appLabel meta
+          }
+    )
 
 $(deriveJSON ''PathType)

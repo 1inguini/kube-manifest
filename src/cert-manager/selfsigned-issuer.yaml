@@ -3,5 +3,7 @@ kind: Issuer
 metadata:
   namespace: cert-manager
   name: selfsigned-issuer
+  labels:
+    app: cert-manager
 spec:
   selfSigned: {}

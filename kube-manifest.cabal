@@ -75,7 +75,9 @@ executable kube-manifest
     , optics
     , optics-th
     , process
+    , safe
     , scientific
+    , string-conversions
     , template-haskell
     , text
     , time

@@ -99,10 +99,9 @@ projectcontour :: [Yaml]
 projectcontour =
   let ?namespace = "projectcontour"
       ?app = "contour"
-   in [ Util.manifest $
-          let ?app = "envoy"
-              ?name = "envoy"
-           in Util.service
+   in [ let ?app = "envoy"
+         in Util.manifest $
+              Util.service
                 ANON
                   { externalIPs = [externalIp]
                   , ports =
@@ -131,7 +130,7 @@ registry =
   let ?namespace = "registry"
       ?app = "harbor"
    in [ Util.helmValues
-          "harbor/harbor"
+          ANON{chart = "harbor/harbor", appLabel = "app"}
           ANON
             { expose =
                 ANON
@@ -162,11 +161,11 @@ registry =
 
 gitbucket :: [Yaml]
 gitbucket =
-  let ?namespace = "git" :: Text
-      ?app = "gitbucket" :: Text
+  let ?namespace = "git"
+      ?app = "gitbucket"
    in let plugins = Util.name "plugins"
           registry = "registry." <> host <> "/library/"
-          pluginsDir = "/home/nonroot/.gitbucket/plugins/"
+          gitbucketHome = "/home/nonroot/.gitbucket/"
        in [ Util.manifest Util.namespace
           , Util.manifest $
               Util.deployment
@@ -176,9 +175,9 @@ gitbucket =
                           Util.container
                             (registry <> "gitbucket/plugins")
                             ANON
-                              { command = ["cp", "-r", "/plugins/", pluginsDir <> "../"]
+                              { command = ["cp", "-r", "plugins", gitbucketHome <> "plugins"]
                               , volumeMounts =
-                                  [ plugins $ Util.volumeMount pluginsDir
+                                  [ plugins $ Util.volumeMount $ gitbucketHome <> "plugins/"
                                   ]
                               }
                       ]
@@ -190,8 +189,8 @@ gitbucket =
                             , livenessProbe = Util.probe $ Util.httpGet "/api/v3"
                             , readinessProbe = Util.probe $ Util.httpGet "/api/v3"
                             , volumeMounts =
-                                [ Util.volumeMount "/home/nonroot/.gitbucket"
-                                , plugins $ Util.volumeMount pluginsDir
+                                [ Util.volumeMount gitbucketHome
+                                , plugins $ Util.volumeMount $ gitbucketHome <> "plugins/"
                                 ]
                             }
                       ]
