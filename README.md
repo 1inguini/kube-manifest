@@ -45,4 +45,5 @@ helm template --values values/harbor.yaml harbor/harbor > manifest/harbor.yaml
 
 ## TODO
 
+* gitbucketにmariadb
 * `embedYamlFromDirectory`、Kubernetesオブジェクトの`Aeson.Value`のリストを`Ix`に
