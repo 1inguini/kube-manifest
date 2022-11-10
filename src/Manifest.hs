@@ -164,11 +164,12 @@ gitbucket =
   let ?namespace = "git"
       ?app = "gitbucket"
    in let plugins = Util.name "plugins"
+          database = Util.name "database"
           registry = "registry." <> host <> "/library/"
           gitbucketHome = "/home/nonroot/.gitbucket/"
        in [ Util.manifest Util.namespace
           , Util.manifest $
-              Util.deployment
+              Util.statefulSet
                 ANON
                   { initContainers =
                       [ plugins $
@@ -200,8 +201,11 @@ gitbucket =
                       ]
                   , securityContext = ANON{fsGroup = Util.nonroot}
                   }
-          , Util.manifest $ Util.openebsLvmClaim "5Gi"
+                [ Util.openebsLvmClaim "5Gi"
+                , database $ Util.openebsLvmClaim "1Gi"
+                ]
           , Util.manifest $ Util.service ANON{ports = [Util.httpServicePort]}
+          , Util.manifest $ database $ Util.service ANON{ports = [Util.servicePort 7000]}
           , Util.manifest $ Util.ingressContourTls [Util.ingressRule "/"]
           ]
 

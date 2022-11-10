@@ -1,0 +1,46 @@
+VERSION 0.6
+FROM registry.1inguini.com/library/builder:latest
+
+mariadb:
+  RUN $PACMAN -S --noconfirm mariadb
+
+  RUN $PACMAN -Qql mariadb | \
+    grep -E '(/etc|/usr/(bin|share/mysql|lib/(mysql|security|sysusers.d))).*[^/]$' | \
+    tee -a files.txt | \
+    xargs ldd 2>/dev/null | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a files.txt
+  RUN echo '/usr/lib/locale/locale-archive' >> files.txt
+  RUN echo '/etc/ld.so.cache' >> files.txt
+  RUN echo '/lib64/ld-linux-x86-64.so.2' >> files.txt
+  RUN sort <files.txt | uniq | sed -e 's:^/:./:' | sponge files.txt
+
+  RUN for file in $(cat files.txt); do \
+      if [ $(file -L --mime-type $file | grep -o '[^ ]*$') == 'text/x-shellscript' ]; then \
+        sed -e "/$file/d" -i files.txt; \
+      fi; \
+    done
+
+  # RUN xargs readlink -f <files.txt | sponge -a files.txt
+  
+  RUN mkdir -p /tmp/files/run/mysqld/
+  RUN sudo tar --ignore-failed-read --dereference -C / -T files.txt -cpf - | \
+    sudo tar -C /tmp/files/ -xpf -
+
+  RUN sudo mariadb-install-db --user=nonroot \
+    --basedir=/tmp/files/usr --datadir=/tmp/files/var/lib/mysql
+
+  COPY install.sql install.sql
+  RUN mariadbd --socket /tmp/files/run/mysqld/mysql.sock \
+    --basedir=/tmp/files/usr --datadir=/tmp/files/var/lib/mysql & sleep 2 && \
+    mariadb -u nonroot --socket /tmp/files/run/mysqld/mysql.sock -e "$(cat install.sql)" && \
+    killall mariadbd
+  
+  SAVE ARTIFACT --keep-own /tmp/files
+
+container:
+  FROM gcr.io/distroless/static:nonroot
+
+  COPY --keep-own +mariadb/files /
+
+  ENTRYPOINT [ "/usr/bin/mariadbd" ]
+
+  SAVE IMAGE --push registry.1inguini.com/library/mariadb:latest

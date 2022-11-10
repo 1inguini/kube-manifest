@@ -225,23 +225,50 @@ volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 nonroot :: Int
 nonroot = 65532
 
-deployment :: (?namespace :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
-deployment spec =
-  object "Deployment"
+workload ::
+  (?namespace :: Text, ?app :: Text, ?name :: Text) =>
+  ToJSON podTemplateSpec =>
+  Text ->
+  podTemplateSpec ->
+  Record _
+workload kind podTemplateSpec =
+  object kind
     `merge` ANON
       { apiVersion = "apps/v1" :: Text
       , spec =
           ANON
             { replicas = 1 :: Int
-            , strategy = Anon.insert #type ("Recreate" :: Text) Anon.empty
             , selector = ANON{matchLabels = ANON{app = ?name}}
             , template =
                 ANON
                   { metadata = meta
-                  , spec = spec
+                  , spec = podTemplateSpec
                   }
             }
       }
+
+deployment :: (?namespace :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
+deployment =
+  over #spec (merge ANON{strategy = Anon.insert #type ("Recreate" :: Text) ANON{}})
+    . workload "Deployment"
+
+statefulSet ::
+  (?namespace :: Text, ?app :: Text, ?name :: Text) =>
+  (ToJSON podTemplateSpec, ToJSON persistentVolumeClaim) =>
+  podTemplateSpec ->
+  [persistentVolumeClaim] ->
+  Record _
+statefulSet podTemplateSpec persistentVolumeClaims =
+  over
+    #spec
+    ( merge
+        ANON
+          { serviceName = ?name
+          , podManagementPolicy = "Parallel" :: Text
+          , volumeClaimTemplates = persistentVolumeClaims
+          }
+    )
+    . workload "StatefulSet"
 data PathType
   = Exact
   | Prefix
