@@ -3,6 +3,8 @@ FROM registry.1inguini.com/library/builder:latest
 
 rootfs:
   RUN $PACMAN -S --noconfirm mariadb
+  RUN $PACMAN -Qi mariadb | grep 'Version' | grep -o '[^ ]*$' > version.txt
+  SAVE ARTIFACT version.txt
 
   RUN $PACMAN -Qql mariadb | \
     grep -E '(/etc|/usr/(bin|share/mysql|lib/(mysql|security|sysusers.d))).*[^/]$' | \
@@ -24,15 +26,19 @@ rootfs:
   RUN sudo tar --ignore-failed-read -C / -T files.txt -cpf - | \
     sudo tar -C /tmp/rootfs/ -xpf -
 
-  SAVE ARTIFACT --keep-own /tmp/rootfs/*
+  SAVE ARTIFACT --keep-own /tmp/rootfs
 
 container:
+  COPY +rootfs/version.txt version.txt
+  ARG version=$(cat version.txt)
+
   FROM gcr.io/distroless/static:nonroot
 
-  COPY --keep-own +rootfs/ /
+  COPY --keep-own +rootfs/rootfs /
 
   ENTRYPOINT [ "/usr/bin/mariadbd" ]
   SAVE IMAGE --push registry.1inguini.com/library/mariadb:latest
+  SAVE IMAGE --push registry.1inguini.com/library/mariadb:$version
 
 var:
   FROM +rootfs --package=mariadb
@@ -48,6 +54,9 @@ var:
   SAVE ARTIFACT --keep-own /tmp/rootfs/var
 
 var-container:
+  COPY +rootfs/version.txt version.txt
+  ARG version=$(cat version.txt)
+
   FROM busybox:latest
   COPY --keep-own +var/ /
 
@@ -55,6 +64,7 @@ var-container:
   CMD [ "/mnt" ]
   VOLUME /var/lib/mysql
   SAVE IMAGE --push registry.1inguini.com/library/mariadb/var:latest
+  SAVE IMAGE --push registry.1inguini.com/library/mariadb/var:$version
 
 all:
   BUILD +container
