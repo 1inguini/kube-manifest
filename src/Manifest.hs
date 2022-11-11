@@ -175,11 +175,11 @@ gitbucket =
                       [ plugins $
                           Util.container
                             (registry <> "gitbucket/plugins")
-                            ANON
-                              { volumeMounts =
-                                  [ plugins $ Util.volumeMount "/mnt"
-                                  ]
-                              }
+                            ANON{volumeMounts = [Util.volumeMount "/mnt"]}
+                      , database $
+                          Util.container
+                            (registry <> "mariadb/var")
+                            ANON{volumeMounts = [Util.volumeMount "/mnt"]}
                       ]
                   , containers =
                       [ Util.container
@@ -193,9 +193,17 @@ gitbucket =
                                 , plugins $ Util.volumeMount $ gitbucketHome <> "plugins/"
                                 ]
                             }
+                      , database $
+                          Util.container
+                            (registry <> "mariadb:10.9.3-3")
+                            ANON
+                              { ports = [Util.containerPort 3306]
+                              , volumeMounts = [Util.volumeMount "/var/lib/mysql/"]
+                              }
                       ]
                   , volumes =
                       [ toJSON Util.persistentVolumeClaimVolume
+                      , toJSON $ database Util.persistentVolumeClaimVolume
                       , toJSON $ plugins Util.emptyDirVolume
                       ]
                   , securityContext = ANON{fsGroup = Util.nonroot}
@@ -204,7 +212,7 @@ gitbucket =
                 , database $ Util.openebsLvmClaim "1Gi"
                 ]
           , Util.manifest $ Util.service ANON{ports = [Util.httpServicePort]}
-          , Util.manifest $ database $ Util.service ANON{ports = [Util.servicePort 7000]}
+          , Util.manifest $ database $ Util.service ANON{ports = [Util.servicePort 3306]}
           , Util.manifest $ Util.ingressContourTls [Util.ingressRule "/"]
           ]
 
