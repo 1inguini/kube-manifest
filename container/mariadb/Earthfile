@@ -51,7 +51,7 @@ var-container:
   FROM busybox:latest
   COPY --keep-own +var/ /
 
-  ENTRYPOINT ["/bin/cp", "-r", "/var/lib/mysql"]
+  ENTRYPOINT ["/bin/cp", "-rn", "/var/lib/mysql"]
   CMD [ "/mnt" ]
   VOLUME /var/lib/mysql
   SAVE IMAGE --push registry.1inguini.com/library/mariadb/var:latest
