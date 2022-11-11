@@ -29,6 +29,8 @@ plugins:
 plugins-container:
   FROM busybox:latest
   COPY +plugins/plugins plugins
+  ENTRYPOINT ["/bin/cp", "-r", "plugins"]
+  CMD [ "/mnt" ]
   SAVE IMAGE --push registry.1inguini.com/library/gitbucket/plugins
 
 git: # only git binary, requires ld, libc, libpthread, libz

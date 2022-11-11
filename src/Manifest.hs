@@ -176,9 +176,8 @@ gitbucket =
                           Util.container
                             (registry <> "gitbucket/plugins")
                             ANON
-                              { command = ["cp", "-r", "plugins", gitbucketHome <> "plugins"]
-                              , volumeMounts =
-                                  [ plugins $ Util.volumeMount $ gitbucketHome <> "plugins/"
+                              { volumeMounts =
+                                  [ plugins $ Util.volumeMount "/mnt"
                                   ]
                               }
                       ]
