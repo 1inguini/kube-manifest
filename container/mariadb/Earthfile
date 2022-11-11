@@ -1,13 +1,10 @@
 VERSION 0.6
 FROM registry.1inguini.com/library/builder:latest
 
-
 rootfs:
-  RUN $PACMAN -S --noconfirm mariadb mariadb-clients
+  RUN $PACMAN -S --noconfirm mariadb
 
-  ARG package=mariadb
-
-  RUN $PACMAN -Qql $package | \
+  RUN $PACMAN -Qql mariadb | \
     grep -E '(/etc|/usr/(bin|share/mysql|lib/(mysql|security|sysusers.d))).*[^/]$' | \
     tee -a files.txt | \
     xargs ldd 2>/dev/null | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a files.txt
@@ -29,7 +26,15 @@ rootfs:
 
   SAVE ARTIFACT --keep-own /tmp/rootfs/*
 
-database:
+container:
+  FROM gcr.io/distroless/static:nonroot
+
+  COPY --keep-own +rootfs/ /
+
+  ENTRYPOINT [ "/usr/bin/mariadbd" ]
+  SAVE IMAGE --push registry.1inguini.com/library/mariadb:latest
+
+var:
   FROM +rootfs --package=mariadb
   RUN sudo mariadb-install-db --user=nonroot \
     --basedir=/tmp/rootfs/usr --datadir=/tmp/rootfs/var/lib/mysql
@@ -40,24 +45,17 @@ database:
     mariadb -u nonroot --socket /tmp/rootfs/run/mysqld/mysql.sock -e "$(cat install.sql)" && \
     killall mariadbd
   
-  SAVE ARTIFACT --keep-own /tmp/rootfs/*
+  SAVE ARTIFACT --keep-own /tmp/rootfs/var
 
-container:
-  FROM gcr.io/distroless/static:nonroot
+var-container:
+  FROM busybox:latest
+  COPY --keep-own +var/ /
 
-  COPY --keep-own +database/ /
-
-  ENTRYPOINT [ "/usr/bin/mariadbd" ]
-  SAVE IMAGE --push registry.1inguini.com/library/mariadb:latest
-
-client-container:
-  FROM gcr.io/distroless/static:nonroot
-
-  COPY --keep-own (+rootfs/ --package=mariadb-clients) /
-
-  ENTRYPOINT [ "/usr/bin/mariadb" ]
-  SAVE IMAGE --push registry.1inguini.com/library/mariadb/client:latest
+  ENTRYPOINT ["/bin/cp", "-r", "/var/lib/mysql"]
+  CMD [ "/mnt" ]
+  VOLUME /var/lib/mysql
+  SAVE IMAGE --push registry.1inguini.com/library/mariadb/var:latest
 
 all:
   BUILD +container
-  BUILD +client-container
+  BUILD +var-container

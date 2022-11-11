@@ -23,6 +23,8 @@ podman build containers/php-fpm --rm --tag registry.1inguini.com/library/php-fpm
 
 rootの初期パスワードは`secret`
 
+/var/lib/mysqlは空なのでregistry.1inguini.com/library/mariadb/varを無限ループでもさせて`podman run --volumes-from ~~`
+
 ## マニフェスト
 
 ``` bash
