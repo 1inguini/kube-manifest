@@ -32,26 +32,27 @@ VERSION:
   COMMAND
   ARG --required target
   ARG --required outfile
-  RUN $pacman -Qi "$target" | grep 'Version' | grep -o '[^ ]*$' > "$outfile"
+  RUN $pacman -Qi $target | grep 'Version' | grep -o '[^ ]*$' > $outfile
+  SAVE ARTIFACT $outfile
 
 FILELIST:
   COMMAND
   ARG --required file
 
-  RUN cat "$file" | xargs ldd | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a "$file"
-  RUN echo '/usr/lib/locale/locale-archive' >> "$file" && \
-    echo '/etc/ld.so.cache' >> "$file" && \
-    echo '/lib64/ld-linux-x86-64.so.2' >> "$file"
+  RUN cat $file | xargs ldd | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a $file
+  RUN echo '/usr/lib/locale/locale-archive' >> $file && \
+    echo '/etc/ld.so.cache' >> $file && \
+    echo '/lib64/ld-linux-x86-64.so.2' >> $file
 
-  RUN xargs readlink -f <"$file" | sponge -a "$file"
-  RUN sort <"$file" | uniq | sponge "$file"
+  RUN xargs readlink -f <$file | sponge -a $file
+  RUN sort <$file | uniq | sponge $file
 
 ROOTFS:
   COMMAND
   ARG --required infile
 
   RUN mkdir -p /tmp/rootfs/
-  RUN sudo tar --ignore-failed-read --no-recursion -C / -T "$infile" -cpf - | \
+  RUN sudo tar --ignore-failed-read --no-recursion -C / -T $infile -cpf - | \
     sudo tar -C /tmp/rootfs/ -xpf -
   RUN sudo ldconfig -r /tmp/rootfs
 
@@ -62,6 +63,6 @@ REMOVE_SH:
   ARG --required dir
   RUN for file in $(find $dir -type f); do \
       if [ $(file -L --mime-type $file | grep -o '[^ ]*$') = 'text/x-shellscript' ]; then \
-        sudo rm "$file"; \
+        sudo rm $file; \
       fi; \
     done
