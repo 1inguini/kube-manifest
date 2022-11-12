@@ -212,7 +212,6 @@ gitbucket =
                 , database $ Util.openebsLvmClaim "1Gi"
                 ]
           , Util.manifest $ Util.service ANON{ports = [Util.httpServicePort]}
-          , Util.manifest $ database $ Util.service ANON{ports = [Util.servicePort 3306]}
           , Util.manifest $ Util.ingressContourTls [Util.ingressRule "/"]
           ]
 
