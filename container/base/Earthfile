@@ -23,16 +23,46 @@ SAVE_FULLPATH:
   ARG --required path
   SAVE ARTIFACT --keep-own "$path" "$path"
 
-s6-rootfs:
-  RUN mkdir -p /tmp/rootfs/services
-  RUN $pacman -S s6
-  RUN echo '/usr/bin/s6-supervise' '/usr/bin/s6-svscan' >> files.txt
+s6-rc-rootfs:
+  RUN $pacman -S s6-rc
+  # RUN echo '/usr/bin/s6-supervise' '/usr/bin/s6-svscan' >> files.txt
+  RUN $pacman -Qql execline s6 s6-rc | \
+    grep -Pve '(posix|/usr/include|(\.a|/)$)' >> files.txt
+  # RUN echo \
+  #   '/usr/bin/s6-svscan' \
+  #   '/usr/bin/s6-supervise' \
+  #   '/usr/bin/s6-rc-init' \
+  #   '/usr/bin/s6-rc' >> files.txt
   DO builder+FILELIST --file=files.txt
-  DO builder+ROOTFS --infile=files.txt
+  DO builder+ROOTFS --infile=files.txt --save=no
 
-s6:
+  WORKDIR /tmp/rootfs
+  RUN mkdir -p service/.s6-svscan
+  RUN sudo ln -s /usr/bin command
+  SAVE ARTIFACT --keep-own /tmp/rootfs
+
+  DO builder+VERSION --target=s6-rc --outfile=version.txt
+
+s6-rc:
+  COPY --keep-own +s6-rc-rootfs/version.txt .
+  ARG version=$(cat version.txt)
+
   FROM +scratch
-  COPY --keep-own +s6-rootfs/ /
+  COPY --keep-own +s6-rc-rootfs/rootfs /
+  COPY --chmod=700 --chown=nonroot:nonroot init /init
+  ENTRYPOINT [ "execlineb", "/init" ]
+  SAVE IMAGE --push registry.1inguini.com/library/s6-rc:latest
+  SAVE IMAGE --push registry.1inguini.com/library/s6-rc:$version
 
-  ENTRYPOINT [ "s6-svscan" ]
-  SAVE IMAGE --push registry.1inguini.com/library/s6
+s6-test-compiled:
+  RUN mkdir -p s6-rc/echo/
+  RUN echo oneshot > s6-rc/echo/type
+  RUN echo "\#!/command/execlineb -P\necho Hello World!" > s6-rc/echo/up
+  RUN s6-rc-compile -v2 compiled s6-rc
+  SAVE ARTIFACT --keep-own compiled/*
+
+s6-test:
+  FROM +s6-rc
+  COPY --keep-own +s6-test-compiled/ compiled
+  CMD [ "echo" ]
+  SAVE IMAGE s6-test
