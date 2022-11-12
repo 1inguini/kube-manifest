@@ -21,7 +21,7 @@ GIT CLONE --branch master https://aur.archlinux.org/${pacman}-bin.git /tmp/aur-h
 RUN cd /tmp/aur-helper && makepkg -sir --noconfirm
 ARG pacman=$pacman --noconfirm
 
-$pacman -S s6-rc
+RUN $pacman -S s6-rc
 
 container:
   ARG date=$(date --utc +%Y%m%d%H%M)
