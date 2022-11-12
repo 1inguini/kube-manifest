@@ -9,20 +9,20 @@ ARG version=$(cat version.txt)
 
 rootfs:
   RUN mkdir -p /tmp/rootfs/run/mysqld/
-  RUN $pacman -Qql mariadb | \
-    grep -E '(/etc|/usr/(bin|share/mysql|lib/(mysql|security|sysusers.d))).*[^/]$' > files.txt
+  RUN $pacman -Qql mariadb | grep -E '^/(etc|usr/(bin|(share|lib)/mysql)).*[^/]$' > files.txt
   DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt
 
-no-sh:
+strip:
   FROM +rootfs
   DO builder+REMOVE_SH --dir=/tmp/rootfs/usr/bin
+  RUN find /tmp/rootfs/usr/bin -type f | grep --invert-match '/usr/bin/mariadbd?$' | sudo xargs rm
   SAVE ARTIFACT --keep-own /tmp/rootfs
 
 container:
-  FROM gcr.io/distroless/static:nonroot
+  FROM ../base+scratch
 
-  COPY --keep-own +no-sh/rootfs /
+  COPY --keep-own +strip/rootfs /
 
   ENTRYPOINT [ "/usr/bin/mariadbd" ]
 

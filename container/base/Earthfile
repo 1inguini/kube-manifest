@@ -1,0 +1,26 @@
+VERSION --use-chmod 0.6
+IMPORT ../builder
+FROM builder+base
+
+nonroot:
+  DO +SAVE_FULLPATH --path=/tmp
+  DO +SAVE_FULLPATH --path=/home/nonroot
+
+  FROM gcr.io/distroless/static:nonroot
+  DO +SAVE_FULLPATH --path=/etc/passwd
+  DO +SAVE_FULLPATH --path=/etc/group
+  DO +SAVE_FULLPATH --path=/etc/nsswitch.conf
+  DO +SAVE_FULLPATH --path=/etc/ssl
+
+scratch:
+  FROM scratch
+  COPY --keep-own +nonroot/ /
+  WORKDIR /home/nonroot
+  USER nonroot
+  SAVE IMAGE --push registry.1inguini.com/library/scratch
+
+SAVE_FULLPATH:
+  COMMAND
+  ARG --required path
+  SAVE ARTIFACT --keep-own "$path" "$path"
+  
