@@ -2,7 +2,7 @@ VERSION 0.6
 IMPORT ../builder
 FROM builder+base
 
-DO builder+INSTALL --packages=mariadb
+RUN $pacman -S mariadb
 
 DO builder+VERSION --target=mariadb --outfile=version.txt
 ARG version=$(cat version.txt)

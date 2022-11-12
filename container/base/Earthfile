@@ -2,11 +2,10 @@ VERSION --use-chmod 0.6
 IMPORT ../builder
 FROM builder+base
 
-nonroot:
+scratch-rootfs:
+  FROM gcr.io/distroless/static:nonroot
   DO +SAVE_FULLPATH --path=/tmp
   DO +SAVE_FULLPATH --path=/home/nonroot
-
-  FROM gcr.io/distroless/static:nonroot
   DO +SAVE_FULLPATH --path=/etc/passwd
   DO +SAVE_FULLPATH --path=/etc/group
   DO +SAVE_FULLPATH --path=/etc/nsswitch.conf
@@ -14,7 +13,7 @@ nonroot:
 
 scratch:
   FROM scratch
-  COPY --keep-own +nonroot/ /
+  COPY --keep-own +scratch-rootfs/ /
   WORKDIR /home/nonroot
   USER nonroot
   SAVE IMAGE --push registry.1inguini.com/library/scratch
@@ -23,4 +22,17 @@ SAVE_FULLPATH:
   COMMAND
   ARG --required path
   SAVE ARTIFACT --keep-own "$path" "$path"
-  
+
+s6-rootfs:
+  RUN mkdir -p /tmp/rootfs/services
+  RUN $pacman -S s6
+  RUN echo '/usr/bin/s6-supervise' '/usr/bin/s6-svscan' >> files.txt
+  DO builder+FILELIST --file=files.txt
+  DO builder+ROOTFS --infile=files.txt
+
+s6:
+  FROM +scratch
+  COPY --keep-own +s6-rootfs/ /
+
+  ENTRYPOINT [ "s6-svscan" ]
+  SAVE IMAGE --push registry.1inguini.com/library/s6

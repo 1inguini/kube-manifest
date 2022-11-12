@@ -5,7 +5,7 @@ RUN sed -i /etc/pacman.conf -e 's/NoProgress/#NoProgress/' -e '/NoExtract.*local
 # && \
 # printf '%s\n%s\n' 'NoExtract = !usr/share/locale/ja/*' 'NoExtract = !usr/share/i18n/locales/ja_JP/*' >> /etc/pacman.conf
 COPY --chmod=644 mirrorlist /etc/pacman.d/mirrorlist
-RUN pacman -Sy --noconfirm glibc git moreutils
+RUN pacman -Sy glibc git moreutils
 
 COPY --chmod=644 locale.gen /etc/locale.gen
 RUN locale-gen
@@ -16,19 +16,17 @@ RUN groupadd --gid 65532 nonroot && \
 USER nonroot
 WORKDIR /home/nonroot
 
-ENV pacman=yay
+ARG pacman=yay
 GIT CLONE --branch master https://aur.archlinux.org/${pacman}-bin.git /tmp/aur-helper
 RUN cd /tmp/aur-helper && makepkg -sir --noconfirm
+ARG pacman=$pacman --noconfirm
+
+$pacman -S s6-rc
 
 container:
   ARG date=$(date --utc +%Y%m%d%H%M)
   SAVE IMAGE --push registry.1inguini.com/library/builder:latest
   SAVE IMAGE --push registry.1inguini.com/library/builder:$date
-
-INSTALL:
-  COMMAND
-  ARG --required packages
-  RUN $pacman -S --noconfirm "$packages"
 
 VERSION:
   COMMAND
@@ -55,6 +53,7 @@ ROOTFS:
   RUN mkdir -p /tmp/rootfs/
   RUN sudo tar --ignore-failed-read --no-recursion -C / -T "$infile" -cpf - | \
     sudo tar -C /tmp/rootfs/ -xpf -
+  RUN sudo ldconfig -r /tmp/rootfs
 
   SAVE ARTIFACT --keep-own /tmp/rootfs
 
