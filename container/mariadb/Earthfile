@@ -8,18 +8,21 @@ DO builder+VERSION --target=mariadb --outfile=version.txt
 ARG version=$(cat version.txt)
 
 rootfs:
-  COPY (builder+filelist/files.txt --target=mariadb) files.txt
-  RUN for file in $(cat files.txt); do \
-      if [ $(file -L --mime-type $file | grep -o '[^ ]*$') = 'text/x-shellscript' ]; then \
-        sed -e "\:$file:d" -i files.txt; \
-      fi; \
-    done
+  RUN mkdir -p /tmp/rootfs/run/mysqld/
+  RUN $pacman -Qql mariadb | \
+    grep -E '(/etc|/usr/(bin|share/mysql|lib/(mysql|security|sysusers.d))).*[^/]$' > files.txt
+  DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt
+
+no-sh:
+  FROM +rootfs
+  DO builder+REMOVE_SH --dir=/tmp/rootfs/usr/bin
+  SAVE ARTIFACT --keep-own /tmp/rootfs
 
 container:
   FROM gcr.io/distroless/static:nonroot
 
-  COPY --keep-own +rootfs/rootfs/ /
+  COPY --keep-own +no-sh/rootfs /
 
   ENTRYPOINT [ "/usr/bin/mariadbd" ]
 
@@ -27,7 +30,7 @@ container:
   SAVE IMAGE --push registry.1inguini.com/library/mariadb:$version
 
 var:
-  COPY --keep-own --dir +rootfs/rootfs /tmp/
+  COPY --keep-own +rootfs/rootfs /tmp/rootfs
 
   RUN sudo mariadb-install-db --user=nonroot \
     --basedir=/tmp/rootfs/usr --datadir=/tmp/rootfs/var/lib/mysql

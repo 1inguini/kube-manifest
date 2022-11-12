@@ -16,7 +16,7 @@ RUN groupadd --gid 65532 nonroot && \
 USER nonroot
 WORKDIR /home/nonroot
 
-ARG pacman=yay
+ENV pacman=yay
 GIT CLONE --branch master https://aur.archlinux.org/${pacman}-bin.git /tmp/aur-helper
 RUN cd /tmp/aur-helper && makepkg -sir --noconfirm
 
@@ -36,29 +36,33 @@ VERSION:
   ARG --required outfile
   RUN $pacman -Qi "$target" | grep 'Version' | grep -o '[^ ]*$' > "$outfile"
 
-filelist:
-  ARG --required target
-  DO +INSTALL --packages="$target"
-  ARG regex
-  RUN $pacman -Qql "$target" | \
-    grep -E "$regex" | \
-    tee -a files.txt | \
-    xargs ldd 2>/dev/null | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a files.txt
-  RUN echo '/usr/lib/locale/locale-archive' >> files.txt
-  RUN echo '/etc/ld.so.cache' >> files.txt
-  RUN echo '/lib64/ld-linux-x86-64.so.2' >> files.txt
+FILELIST:
+  COMMAND
+  ARG --required file
 
-  RUN xargs readlink -f <files.txt | sponge -a files.txt
-  RUN sort <files.txt | uniq | sponge files.txt
-  RUN sed -i files.txt -e '\:^/(bin|sbin):d'
-  SAVE ARTIFACT files.txt
+  RUN cat "$file" | xargs ldd | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a "$file"
+  RUN echo '/usr/lib/locale/locale-archive' >> "$file" && \
+    echo '/etc/ld.so.cache' >> "$file" && \
+    echo '/lib64/ld-linux-x86-64.so.2' >> "$file"
+
+  RUN xargs readlink -f <"$file" | sponge -a "$file"
+  RUN sort <"$file" | uniq | sponge "$file"
 
 ROOTFS:
   COMMAND
   ARG --required infile
 
   RUN mkdir -p /tmp/rootfs/
-  RUN sudo tar --ignore-failed-read -C / -T "$infile" -cpf - | \
+  RUN sudo tar --ignore-failed-read --no-recursion -C / -T "$infile" -cpf - | \
     sudo tar -C /tmp/rootfs/ -xpf -
 
   SAVE ARTIFACT --keep-own /tmp/rootfs
+
+REMOVE_SH:
+  COMMAND
+  ARG --required dir
+  RUN for file in $(find $dir -type f); do \
+      if [ $(file -L --mime-type $file | grep -o '[^ ]*$') = 'text/x-shellscript' ]; then \
+        sudo rm "$file"; \
+      fi; \
+    done
