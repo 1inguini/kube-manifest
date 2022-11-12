@@ -1,3 +1,0 @@
-FROM registry.1inguini.com/library/archlinux:latest
-
-COPY --chmod=755 files.sh /usr/bin/files.sh

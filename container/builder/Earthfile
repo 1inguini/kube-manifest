@@ -1,0 +1,64 @@
+VERSION --use-chmod 0.6
+FROM docker.io/library/archlinux:base-devel
+
+RUN sed -i /etc/pacman.conf -e 's/NoProgress/#NoProgress/' -e '/NoExtract.*locale/d'
+# && \
+# printf '%s\n%s\n' 'NoExtract = !usr/share/locale/ja/*' 'NoExtract = !usr/share/i18n/locales/ja_JP/*' >> /etc/pacman.conf
+COPY --chmod=644 mirrorlist /etc/pacman.d/mirrorlist
+RUN pacman -Sy --noconfirm glibc git moreutils
+
+COPY --chmod=644 locale.gen /etc/locale.gen
+RUN locale-gen
+
+RUN groupadd --gid 65532 nonroot && \
+  useradd --uid 65532 --gid 65532 -m -s /usr/bin/nologin nonroot && \
+  printf '%s\n' 'nonroot ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
+USER nonroot
+WORKDIR /home/nonroot
+
+ARG pacman=yay
+GIT CLONE --branch master https://aur.archlinux.org/${pacman}-bin.git /tmp/aur-helper
+RUN cd /tmp/aur-helper && makepkg -sir --noconfirm
+
+container:
+  ARG date=$(date --utc +%Y%m%d%H%M)
+  SAVE IMAGE --push registry.1inguini.com/library/builder:latest
+  SAVE IMAGE --push registry.1inguini.com/library/builder:$date
+
+INSTALL:
+  COMMAND
+  ARG --required packages
+  RUN $pacman -S --noconfirm "$packages"
+
+VERSION:
+  COMMAND
+  ARG --required target
+  ARG --required outfile
+  RUN $pacman -Qi "$target" | grep 'Version' | grep -o '[^ ]*$' > "$outfile"
+
+filelist:
+  ARG --required target
+  DO +INSTALL --packages="$target"
+  ARG regex
+  RUN $pacman -Qql "$target" | \
+    grep -E "$regex" | \
+    tee -a files.txt | \
+    xargs ldd 2>/dev/null | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a files.txt
+  RUN echo '/usr/lib/locale/locale-archive' >> files.txt
+  RUN echo '/etc/ld.so.cache' >> files.txt
+  RUN echo '/lib64/ld-linux-x86-64.so.2' >> files.txt
+
+  RUN xargs readlink -f <files.txt | sponge -a files.txt
+  RUN sort <files.txt | uniq | sponge files.txt
+  RUN sed -i files.txt -e '\:^/(bin|sbin):d'
+  SAVE ARTIFACT files.txt
+
+ROOTFS:
+  COMMAND
+  ARG --required infile
+
+  RUN mkdir -p /tmp/rootfs/
+  RUN sudo tar --ignore-failed-read -C / -T "$infile" -cpf - | \
+    sudo tar -C /tmp/rootfs/ -xpf -
+
+  SAVE ARTIFACT --keep-own /tmp/rootfs

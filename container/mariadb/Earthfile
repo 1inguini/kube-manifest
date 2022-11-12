@@ -1,47 +1,34 @@
 VERSION 0.6
-FROM registry.1inguini.com/library/builder:latest
+IMPORT ../builder
+FROM builder+base
+
+DO builder+INSTALL --packages=mariadb
+
+DO builder+VERSION --target=mariadb --outfile=version.txt
+ARG version=$(cat version.txt)
 
 rootfs:
-  RUN $PACMAN -S --noconfirm mariadb
-  RUN $PACMAN -Qi mariadb | grep 'Version' | grep -o '[^ ]*$' > version.txt
-  SAVE ARTIFACT version.txt
-
-  RUN $PACMAN -Qql mariadb | \
-    grep -E '(/etc|/usr/(bin|share/mysql|lib/(mysql|security|sysusers.d))).*[^/]$' | \
-    tee -a files.txt | \
-    xargs ldd 2>/dev/null | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a files.txt
-  RUN echo '/usr/lib/locale/locale-archive' >> files.txt
-  RUN echo '/etc/ld.so.cache' >> files.txt
-  RUN echo '/lib64/ld-linux-x86-64.so.2' >> files.txt
+  COPY (builder+filelist/files.txt --target=mariadb) files.txt
   RUN for file in $(cat files.txt); do \
       if [ $(file -L --mime-type $file | grep -o '[^ ]*$') = 'text/x-shellscript' ]; then \
         sed -e "\:$file:d" -i files.txt; \
       fi; \
     done
-  RUN xargs readlink -f <files.txt | sponge -a files.txt
-
-  RUN sort <files.txt | uniq | sed -e 's:^/:./:' | sponge files.txt
-
-  RUN mkdir -p /tmp/rootfs/run/mysqld/
-  RUN sudo tar --ignore-failed-read -C / -T files.txt -cpf - | \
-    sudo tar -C /tmp/rootfs/ -xpf -
-
-  SAVE ARTIFACT --keep-own /tmp/rootfs
+  DO builder+ROOTFS --infile=files.txt
 
 container:
-  COPY +rootfs/version.txt version.txt
-  ARG version=$(cat version.txt)
-
   FROM gcr.io/distroless/static:nonroot
 
-  COPY --keep-own +rootfs/rootfs /
+  COPY --keep-own +rootfs/rootfs/ /
 
   ENTRYPOINT [ "/usr/bin/mariadbd" ]
+
   SAVE IMAGE --push registry.1inguini.com/library/mariadb:latest
   SAVE IMAGE --push registry.1inguini.com/library/mariadb:$version
 
 var:
-  FROM +rootfs --package=mariadb
+  COPY --keep-own --dir +rootfs/rootfs /tmp/
+
   RUN sudo mariadb-install-db --user=nonroot \
     --basedir=/tmp/rootfs/usr --datadir=/tmp/rootfs/var/lib/mysql
 
@@ -54,9 +41,6 @@ var:
   SAVE ARTIFACT --keep-own /tmp/rootfs/var
 
 var-container:
-  COPY +rootfs/version.txt version.txt
-  ARG version=$(cat version.txt)
-
   FROM busybox:latest
   COPY --keep-own +var/ /
 

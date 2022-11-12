@@ -1,0 +1,2 @@
+VERSION 0.6
+FROM registry.1inguini.com/library/builder:latest
