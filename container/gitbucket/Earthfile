@@ -33,7 +33,7 @@ plugins-container:
   COPY +plugins/plugins plugins
   VOLUME plugins
   CMD [ "plugins", "/mnt" ]
-  SAVE IMAGE --push registry.1inguini.com/library/gitbucket/plugins
+  SAVE IMAGE --push registry.1inguini.com/library/gitbucket/plugins:latest
 
 git: # only git binary, requires ld, libc, libpthread, libz
   FROM docker.io/bitnami/git

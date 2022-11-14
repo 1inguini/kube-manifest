@@ -11,8 +11,10 @@ rootfs:
   RUN mkdir rootfs && sudo mkdir rootfs/usr
   RUN sudo $cpr /usr/lib/jvm/java-19-openjdk/. rootfs/usr/.
   RUN sudo $cpr /usr/lib/jvm/java-19-openjdk/. /usr/.
-  RUN $pacman -Qql jre-openjdk-headless | grep -Po '(?<=openjdk)/lib.*' | \
+  RUN $pacman -Qql jre-openjdk-headless | grep -Po '(?<=openjdk)/(lib/.*|conf)$' | \
     sed -e 's:^:/usr:' >> files.txt
+  RUN pacman -Qql jre-openjdk-headless | grep '/etc' >> files.txt
+  RUN sudo mkdir rootfs/etc && echo '/usr/lib/server' | sudo tee rootfs/etc/ld.so.conf
   DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt
 

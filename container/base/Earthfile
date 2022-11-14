@@ -31,7 +31,7 @@ cp-rootfs:
 cp:
   FROM scratch
   COPY +cp-rootfs/rootfs /
-  ENTRYPOINT [ '/usr/bin/cp', '-vrn' ]
+  ENTRYPOINT [ "/usr/bin/cp", "-vrn" ]
 
 # s6-rootfs:
 #   RUN $pacman -S s6
