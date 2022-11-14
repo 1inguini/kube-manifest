@@ -2,6 +2,10 @@ VERSION --use-chmod 0.6
 IMPORT ../builder
 FROM builder+base
 
+all:
+  BUILD +scratch
+  BUILD +cp
+
 scratch-rootfs:
   FROM gcr.io/distroless/static:nonroot
   DO +SAVE_FULLPATH --path=/tmp
@@ -25,7 +29,6 @@ SAVE_FULLPATH:
 
 cp-rootfs:
   RUN echo '/usr/bin/cp' >> files.txt
-  DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt
 
 cp:

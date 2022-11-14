@@ -7,17 +7,20 @@ RUN $pacman -S mariadb
 DO builder+VERSION --target=mariadb --outfile=version.txt
 ARG version=$(cat version.txt)
 
+
+all:
+  BUILD +container
+  BUILD +var-container
+
 bins:
   COPY --keep-own +strip/rootfs rootfs
   RUN $pacman -Qql mariadb | grep -P '^/usr/bin' > files.txt
-  DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt
 
 strip:
   RUN mkdir -p rootfs/run/mysqld/
   RUN $pacman -Qql mariadb mariadb-libs | grep -P '^/(etc|usr/(share|lib)/mysql).*[^/]$' > files.txt
   RUN echo '/usr/bin/mariadbd' >> files.txt
-  DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt
 
 container:
@@ -51,7 +54,3 @@ var-container:
   VOLUME /var/lib/mysql
   SAVE IMAGE --push registry.1inguini.com/library/mariadb/var:latest
   SAVE IMAGE --push registry.1inguini.com/library/mariadb/var:$version
-
-all:
-  BUILD +container
-  BUILD +var-container

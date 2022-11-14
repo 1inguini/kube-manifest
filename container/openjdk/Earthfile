@@ -7,6 +7,9 @@ RUN $pacman -S jre-openjdk-headless
 DO builder+VERSION --target=jre-openjdk-headless --outfile=version.txt
 ARG version=$(cat version.txt)
 
+all:
+  BUILD +container
+
 rootfs:
   RUN mkdir rootfs && sudo mkdir rootfs/usr
   RUN sudo $cpr /usr/lib/jvm/java-19-openjdk/. rootfs/usr/.
@@ -15,7 +18,6 @@ rootfs:
     sed -e 's:^:/usr:' >> files.txt
   RUN pacman -Qql jre-openjdk-headless | grep '/etc' >> files.txt
   RUN sudo mkdir rootfs/etc && echo '/usr/lib/server' | sudo tee rootfs/etc/ld.so.conf
-  DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt
 
 container:

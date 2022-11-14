@@ -6,6 +6,9 @@ FROM builder+base
 ARG gitbucket_ver=4.38.3
 ARG embed_plugins=no
 
+all:
+  BUILD +container
+
 gitbucket.war:
   RUN curl -LO "https://github.com/gitbucket/gitbucket/releases/download/$gitbucket_ver/gitbucket.war"
   # curl -L -o gitbucket.war.sha256 \
