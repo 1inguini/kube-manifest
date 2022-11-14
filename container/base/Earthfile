@@ -23,8 +23,8 @@ SAVE_FULLPATH:
   ARG --required path
   SAVE ARTIFACT --keep-own "$path" "$path"
 
-s6-rc-rootfs:
-  RUN $pacman -S s6-rc
+s6-rootfs:
+  RUN $pacman -S s6
   # RUN echo '/usr/bin/s6-supervise' '/usr/bin/s6-svscan' >> files.txt
   # RUN $pacman -Qql execline s6 s6-rc | \
   #   grep -Pve '(posix|/usr/include|(\.a|/)$)' >> files.txt
@@ -39,33 +39,33 @@ s6-rc-rootfs:
   DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt --save=no
 
-  WORKDIR /tmp/rootfs
   RUN mkdir -p service/.s6-svscan
-  RUN sudo ln -s /usr/bin command
-  SAVE ARTIFACT --keep-own /tmp/rootfs
+  SAVE ARTIFACT --keep-own rootfs
+  DO builder+VERSION --target=s6 --outfile=version.txt
 
-  DO builder+VERSION --target=s6-rc --outfile=version.txt
-
-s6-rc:
-  COPY --keep-own +s6-rc-rootfs/version.txt .
+s6:
+  COPY --keep-own +s6-rootfs/version.txt .
   ARG version=$(cat version.txt)
 
   FROM +scratch
-  COPY --keep-own +s6-rc-rootfs/rootfs /
-  COPY --chmod=700 --chown=nonroot:nonroot init /init
-  ENTRYPOINT [ "execlineb", "/init" ]
+  COPY --keep-own +s6-rootfs/rootfs /
+  ENTRYPOINT [ "/usr/bin/background", "-d", " s6-svscan", " /service", "" ]
   SAVE IMAGE --push registry.1inguini.com/library/s6-rc:latest
   SAVE IMAGE --push registry.1inguini.com/library/s6-rc:$version
 
-s6-test-compiled:
-  RUN mkdir -p s6-rc/echo/
-  RUN echo oneshot > s6-rc/echo/type
-  RUN echo "\#!/command/execlineb -P\necho Hello World!" > s6-rc/echo/up
-  RUN s6-rc-compile -v2 compiled s6-rc
-  SAVE ARTIFACT --keep-own compiled/*
+s6-test-rootfs:
+  COPY --keep-own ../mariadb+strip/rootfs rootfs
+
+  RUN sudo mkdir -p rootfs/service/mariadb/supervise rootfs/run/mysqld && \
+    sudo chown -Rv nonroot:nonroot rootfs/service rootfs/run/mysqld
+  RUN sudo mv rootfs/usr/bin/mariadbd rootfs/service/mariadb/run
+
+  COPY --keep-own ../mariadb+var/var rootfs/var
+
+  SAVE ARTIFACT --keep-own rootfs
 
 s6-test:
-  FROM +s6-rc
-  COPY --keep-own +s6-test-compiled/ compiled
-  CMD [ "echo" ]
+  FROM +s6
+  COPY --keep-own +s6-test-rootfs/rootfs /
+  CMD [ "loopwhilex", "-o", "1", "foreground", "sleep", "1", "", "mariadb", "--wait", "--connect-timeout=10", "-B", "-u", "root", "--password=secret", "-e", "SELECT Host,User FROM mysql.user"]
   SAVE IMAGE s6-test

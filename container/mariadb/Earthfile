@@ -7,17 +7,18 @@ RUN $pacman -S mariadb
 DO builder+VERSION --target=mariadb --outfile=version.txt
 ARG version=$(cat version.txt)
 
-rootfs:
-  RUN mkdir -p /tmp/rootfs/run/mysqld/
-  RUN $pacman -Qql mariadb | grep -E '^/(etc|usr/(bin|(share|lib)/mysql)).*[^/]$' > files.txt
+bins:
+  COPY --keep-own +strip/rootfs rootfs
+  RUN $pacman -Qql mariadb | grep -P '^/usr/bin' > files.txt
   DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt
 
 strip:
-  FROM +rootfs
-  DO builder+REMOVE_SH --dir=/tmp/rootfs/usr/bin
-  RUN find /tmp/rootfs/usr/bin -type f | grep --invert-match '/usr/bin/mariadbd?$' | sudo xargs rm
-  SAVE ARTIFACT --keep-own /tmp/rootfs
+  RUN mkdir -p rootfs/run/mysqld/
+  RUN $pacman -Qql mariadb mariadb-libs | grep -P '^/(etc|usr/(share|lib)/mysql).*[^/]$' > files.txt
+  RUN echo '/usr/bin/mariadbd' >> files.txt
+  DO builder+FILELIST --file=files.txt
+  DO builder+ROOTFS --infile=files.txt
 
 container:
   FROM ../base+scratch
@@ -30,18 +31,16 @@ container:
   SAVE IMAGE --push registry.1inguini.com/library/mariadb:$version
 
 var:
-  COPY --keep-own +rootfs/rootfs /tmp/rootfs
-
-  RUN sudo mariadb-install-db --user=nonroot \
-    --basedir=/tmp/rootfs/usr --datadir=/tmp/rootfs/var/lib/mysql
+  RUN mkdir -p rootfs/var/lib/mysql
+  RUN sudo chown -v nonroot:nonroot /run/mysqld
+  RUN sudo mariadb-install-db --user=nonroot --datadir=$HOME/rootfs/var/lib/mysql
 
   COPY install.sql install.sql
-  RUN mariadbd --socket /tmp/rootfs/run/mysqld/mysql.sock \
-    --basedir=/tmp/rootfs/usr --datadir=/tmp/rootfs/var/lib/mysql & sleep 2 && \
-    mariadb -u nonroot --socket /tmp/rootfs/run/mysqld/mysql.sock -e "$(cat install.sql)" && \
+  RUN mariadbd --datadir=$HOME/rootfs/var/lib/mysql & sleep 2 && \
+    mariadb -u nonroot -e "$(cat install.sql)" && \
     killall mariadbd
   
-  SAVE ARTIFACT --keep-own /tmp/rootfs/var
+  SAVE ARTIFACT --keep-own rootfs/var
 
 var-container:
   FROM busybox:latest

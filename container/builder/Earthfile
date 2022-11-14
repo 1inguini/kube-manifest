@@ -52,13 +52,13 @@ ROOTFS:
   ARG --required infile
   ARG save=yes
 
-  RUN mkdir -p /tmp/rootfs/
+  RUN mkdir -p rootfs/
   RUN sudo tar --ignore-failed-read --no-recursion -C / -T $infile -cpf - | \
-    sudo tar -C /tmp/rootfs/ -xpf -
-  RUN sudo ldconfig -r /tmp/rootfs
+    sudo tar -C rootfs/ -xpf -
+  RUN sudo ldconfig -r rootfs
 
   IF [ $save = 'yes' ]
-    SAVE ARTIFACT --keep-own /tmp/rootfs
+    SAVE ARTIFACT --keep-own rootfs
   END
 
 REMOVE_SH:
