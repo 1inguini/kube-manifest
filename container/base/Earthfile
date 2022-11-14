@@ -69,9 +69,20 @@ cp:
 # s6-test-rootfs:
 #   COPY --keep-own ../mariadb+strip/rootfs rootfs
 
-#   RUN sudo mkdir -p rootfs/service/mariadb/supervise rootfs/run/mysqld && \
-#     sudo chown -Rv nonroot:nonroot rootfs/service rootfs/run/mysqld
-#   RUN sudo mv rootfs/usr/bin/mariadbd rootfs/service/mariadb/run
+uutils:
+  RUN $pacman -S rustup
+  RUN rustup default stable
+  RUN rustup target install x86_64-unknown-linux-musl
+  GIT CLONE --branch 0.0.16 https://github.com/uutils/coreutils.git uutils
+  WORKDIR uutils
+  ARG packages=sleep echo
+  RUN for p in $packages; do \
+      cd src/uu/$p && \
+        cargo install --target=x86_64-unknown-linux-musl --path . --root $HOME/rootfs && \
+        cd ../../..; \
+    done
+  WORKDIR ..
+  SAVE ARTIFACT rootfs/bin command AS LOCAL uutils
 
 #   COPY --keep-own ../mariadb+var/var rootfs/var
 
