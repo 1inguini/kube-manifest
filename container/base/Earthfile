@@ -23,49 +23,59 @@ SAVE_FULLPATH:
   ARG --required path
   SAVE ARTIFACT --keep-own "$path" "$path"
 
-s6-rootfs:
-  RUN $pacman -S s6
-  # RUN echo '/usr/bin/s6-supervise' '/usr/bin/s6-svscan' >> files.txt
-  # RUN $pacman -Qql execline s6 s6-rc | \
-  #   grep -Pve '(posix|/usr/include|(\.a|/)$)' >> files.txt
-  RUN f=( \
-    '/usr/bin/s6-svscan' \
-    '/usr/bin/s6-supervise' \
-    '/usr/bin/background' \
-    '/usr/bin/foreground' \
-    '/usr/bin/loopwhilex' \
-    '/usr/bin/sleep' \
-    ) && printf '%s\n' $f >> files.txt
+cp-rootfs:
+  RUN echo '/usr/bin/cp' >> files.txt
   DO builder+FILELIST --file=files.txt
-  DO builder+ROOTFS --infile=files.txt --save=no
+  DO builder+ROOTFS --infile=files.txt
 
-  RUN mkdir -p service/.s6-svscan
-  SAVE ARTIFACT --keep-own rootfs
-  DO builder+VERSION --target=s6 --outfile=version.txt
+cp:
+  FROM scratch
+  COPY +cp-rootfs/rootfs /
+  ENTRYPOINT [ '/usr/bin/cp', '-vrn' ]
 
-s6:
-  COPY --keep-own +s6-rootfs/version.txt .
-  ARG version=$(cat version.txt)
+# s6-rootfs:
+#   RUN $pacman -S s6
+#   # RUN echo '/usr/bin/s6-supervise' '/usr/bin/s6-svscan' >> files.txt
+#   # RUN $pacman -Qql execline s6 s6-rc | \
+#   #   grep -Pve '(posix|/usr/include|(\.a|/)$)' >> files.txt
+#   RUN f=( \
+#     '/usr/bin/s6-svscan' \
+#     '/usr/bin/s6-supervise' \
+#     '/usr/bin/background' \
+#     '/usr/bin/foreground' \
+#     '/usr/bin/loopwhilex' \
+#     '/usr/bin/sleep' \
+#     ) && printf '%s\n' $f >> files.txt
+#   DO builder+FILELIST --file=files.txt
+#   DO builder+ROOTFS --infile=files.txt --save=no
 
-  FROM +scratch
-  COPY --keep-own +s6-rootfs/rootfs /
-  ENTRYPOINT [ "/usr/bin/background", "-d", " s6-svscan", " /service", "" ]
-  SAVE IMAGE --push registry.1inguini.com/library/s6-rc:latest
-  SAVE IMAGE --push registry.1inguini.com/library/s6-rc:$version
+#   RUN mkdir -p service/.s6-svscan
+#   SAVE ARTIFACT --keep-own rootfs
+#   DO builder+VERSION --target=s6 --outfile=version.txt
 
-s6-test-rootfs:
-  COPY --keep-own ../mariadb+strip/rootfs rootfs
+# s6:
+#   COPY --keep-own +s6-rootfs/version.txt .
+#   ARG version=$(cat version.txt)
 
-  RUN sudo mkdir -p rootfs/service/mariadb/supervise rootfs/run/mysqld && \
-    sudo chown -Rv nonroot:nonroot rootfs/service rootfs/run/mysqld
-  RUN sudo mv rootfs/usr/bin/mariadbd rootfs/service/mariadb/run
+#   FROM +scratch
+#   COPY --keep-own +s6-rootfs/rootfs /
+#   ENTRYPOINT [ "/usr/bin/background", "-d", " s6-svscan", " /service", "" ]
+#   SAVE IMAGE --push registry.1inguini.com/library/s6-rc:latest
+#   SAVE IMAGE --push registry.1inguini.com/library/s6-rc:$version
 
-  COPY --keep-own ../mariadb+var/var rootfs/var
+# s6-test-rootfs:
+#   COPY --keep-own ../mariadb+strip/rootfs rootfs
 
-  SAVE ARTIFACT --keep-own rootfs
+#   RUN sudo mkdir -p rootfs/service/mariadb/supervise rootfs/run/mysqld && \
+#     sudo chown -Rv nonroot:nonroot rootfs/service rootfs/run/mysqld
+#   RUN sudo mv rootfs/usr/bin/mariadbd rootfs/service/mariadb/run
 
-s6-test:
-  FROM +s6
-  COPY --keep-own +s6-test-rootfs/rootfs /
-  CMD [ "loopwhilex", "-o", "1", "foreground", "sleep", "1", "", "mariadb", "--wait", "--connect-timeout=10", "-B", "-u", "root", "--password=secret", "-e", "SELECT Host,User FROM mysql.user"]
-  SAVE IMAGE s6-test
+#   COPY --keep-own ../mariadb+var/var rootfs/var
+
+#   SAVE ARTIFACT --keep-own rootfs
+
+# s6-test:
+#   FROM +s6
+#   COPY --keep-own +s6-test-rootfs/rootfs /
+#   CMD [ "loopwhilex", "-o", "1", "foreground", "sleep", "1", "", "mariadb", "--wait", "--connect-timeout=10", "-B", "-u", "root", "--password=secret", "-e", "SELECT Host,User FROM mysql.user"]
+#   SAVE IMAGE s6-test
