@@ -1,0 +1,24 @@
+VERSION --use-chmod 0.6
+IMPORT ../base
+IMPORT ../builder
+FROM builder+base
+
+RUN $pacman -S jre-openjdk-headless
+DO builder+VERSION --target=jre-openjdk-headless --outfile=version.txt
+ARG version=$(cat version.txt)
+
+rootfs:
+  RUN mkdir rootfs && sudo mkdir rootfs/usr
+  RUN sudo $cpr /usr/lib/jvm/java-19-openjdk/. rootfs/usr/.
+  RUN sudo $cpr /usr/lib/jvm/java-19-openjdk/. /usr/.
+  RUN $pacman -Qql jre-openjdk-headless | grep -Po '(?<=openjdk)/lib.*' | \
+    sed -e 's:^:/usr:' >> files.txt
+  DO builder+FILELIST --file=files.txt
+  DO builder+ROOTFS --infile=files.txt
+
+container:
+  FROM base+scratch
+  COPY --keep-own +rootfs/rootfs /
+  ENTRYPOINT [ "/usr/bin/java", "-jar" ]
+  SAVE IMAGE --push registry.1inguini.com/library/openjdk:latest
+  SAVE IMAGE --push registry.1inguini.com/library/openjdk:$version

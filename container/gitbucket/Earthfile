@@ -1,5 +1,7 @@
 VERSION 0.6
-FROM registry.1inguini.com/library/builder:latest
+IMPORT ../base
+IMPORT ../builder 
+FROM builder+base
 
 ARG gitbucket_ver=4.38.3
 ARG embed_plugins=no
@@ -27,10 +29,10 @@ plugins:
   SAVE ARTIFACT plugins
 
 plugins-container:
-  FROM busybox:latest
+  FROM base+cp
   COPY +plugins/plugins plugins
-  ENTRYPOINT ["/bin/cp", "-rn", "plugins"]
-  CMD [ "/mnt" ]
+  VOLUME plugins
+  CMD [ "plugins", "/mnt" ]
   SAVE IMAGE --push registry.1inguini.com/library/gitbucket/plugins
 
 git: # only git binary, requires ld, libc, libpthread, libz
@@ -39,17 +41,17 @@ git: # only git binary, requires ld, libc, libpthread, libz
 
 container:
   IF [ "$embed_plugins" == "yes" ] # condition requires /bin/sh, whitch isn't included in distroless
-    FROM gcr.io/distroless/java11-debian11:nonroot
+    FROM ../openjdk+container
     COPY +plugins/plugins .gitbucket/plugins
   ELSE
     BUILD +plugins-container
-    FROM gcr.io/distroless/java11-debian11:nonroot
+    FROM ../openjdk+container
   END
 
   COPY +gitbucket.war/gitbucket.war gitbucket.war
 
   ENV LANG="ja_JP.UTF-8"
   CMD [ "gitbucket.war", "--port=8080" ]
-
+  EXPOSE 8080
   SAVE IMAGE --push registry.1inguini.com/library/gitbucket:$gitbucket_ver
   SAVE IMAGE --push registry.1inguini.com/library/gitbucket:latest

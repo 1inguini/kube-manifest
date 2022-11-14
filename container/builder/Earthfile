@@ -16,12 +16,12 @@ RUN groupadd --gid 65532 nonroot && \
 USER nonroot
 WORKDIR /home/nonroot
 
-ARG pacman=yay
-GIT CLONE --branch master https://aur.archlinux.org/${pacman}-bin.git /tmp/aur-helper
+GIT CLONE --branch master https://aur.archlinux.org/yay-bin.git /tmp/aur-helper
 RUN cd /tmp/aur-helper && makepkg -sir --noconfirm
-ENV pacman=$pacman --noconfirm
+ENV pacman=yay --noconfirm
 
-RUN $pacman -S s6-rc
+RUN $pacman -S rsync
+ENV cpr='rsync --archive --acls --xattrs -hh --partial --info=stats1,progress2 --modify-window=1 --no-inc-recursive'
 
 container:
   ARG date=$(date --utc +%Y%m%d%H%M)
