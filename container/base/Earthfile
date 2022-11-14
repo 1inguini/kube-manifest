@@ -28,12 +28,14 @@ s6-rc-rootfs:
   # RUN echo '/usr/bin/s6-supervise' '/usr/bin/s6-svscan' >> files.txt
   # RUN $pacman -Qql execline s6 s6-rc | \
   #   grep -Pve '(posix|/usr/include|(\.a|/)$)' >> files.txt
-  RUN echo '/usr/bin/s6-svscan' >> files.txt && \
-    echo '/usr/bin/s6-supervise' >> files.txt && \
-    echo '/usr/bin/background' >> files.txt && \
-    echo '/usr/bin/foreground' >> files.txt && \
-    echo '/usr/bin/loopwhilex' >> files.txt && \
-    echo '/usr/bin/sleep' >> files.txt
+  RUN f=( \
+    '/usr/bin/s6-svscan' \
+    '/usr/bin/s6-supervise' \
+    '/usr/bin/background' \
+    '/usr/bin/foreground' \
+    '/usr/bin/loopwhilex' \
+    '/usr/bin/sleep' \
+    ) && printf '%s\n' $f >> files.txt
   DO builder+FILELIST --file=files.txt
   DO builder+ROOTFS --infile=files.txt --save=no
 
