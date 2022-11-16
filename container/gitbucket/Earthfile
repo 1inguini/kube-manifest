@@ -27,35 +27,32 @@ plugins:
     -O 'https://github.com/onukura/gitbucket-swagger-plugin/releases/download/1.0.7/gitbucket-swagger-plugin-1.0.7.jar'
   SAVE ARTIFACT plugins
 
-plugins-container:
-  FROM base+cp
-  COPY +plugins/plugins plugins
-  VOLUME plugins
-  CMD [ "plugins", "/mnt" ]
-  DO builder+PUSH --name=gitbucket/plugins
-
 git: # only git binary, requires ld, libc, libpthread, libz
   FROM docker.io/bitnami/git
   SAVE ARTIFACT --keep-own /opt/bitnami/git/bin/git
 
 rootfs:
   COPY --keep-own +git/git rootfs/usr/bin/
-  COPY --chown=nonroot:nonroot +gitbucket.war/gitbucket.war rootfs$HOME/gitbucket.war
-  COPY --chown=nonroot:nonroot --chmod=644 database.conf rootfs$HOME/.gitbucket
-  COPY --chown=nonroot:nonroot --dir +plugins/plugins rootfs$HOME/.gitbucket/
+  COPY --keep-own base+execline/background rootfs/usr/bin/
+  COPY --chown=nonroot:nonroot +gitbucket.war/gitbucket.war rootfs/home/nonroot/
+  COPY --chown=nonroot:nonroot --chmod=644 database.conf rootfs/home/nonroot/.gitbucket/
+  COPY --chown=nonroot:nonroot +plugins/plugins rootfs/home/nonroot/.gitbucket/plugins
 
   COPY --keep-own ../mariadb+rootfs/rootfs rootfs
+  COPY --keep-own ../mariadb+var/var rootfs/var
   RUN $pacman -S mariadb
-  RUN mariadbd --datadir=$HOME/rootfs/var/lib/mysql & sleep 2 && \
-    mariadb -u root --password=secret -e "CREATE DATABASE gitbucket" && \
+  RUN sudo mkdir -p /run/mysqld && sudo chown nonroot:nonroot /run/mysqld && \
+    mariadbd --datadir=$HOME/rootfs/var/lib/mysql & \
+    sleep 2 && mariadb -u root --password=secret -e 'CREATE DATABASE gitbucket' && \
     killall mariadbd
-  SAVE ARTIFACT --keep-own rootfs
+  DO builder+ROOTFS
 
 
 container:
   # BUILD +plugins-container
   FROM ../openjdk+container
   COPY --keep-own +rootfs/rootfs /
+  ENTRYPOINT [ "background", "mariadbd", "", "java", "-jar" ]
   CMD [ "gitbucket.war", "--port=8080" ]
   EXPOSE 8080
   DO builder+PUSH --name=gitbucket --tag=$version

@@ -14,6 +14,8 @@ nonroot:
 pacman:
   FROM +nonroot
   RUN sudo sed -i /etc/pacman.conf -e 's/NoProgress/#NoProgress/' -e '/^NoExtract/d' \
+    -e '$aNoExtract  = etc/systemd/*' \
+    -e '$aNoExtract  = usr/share/systemd/*' \
     -e '$aNoExtract  = usr/share/man/*' \
     -e '$aNoExtract  = usr/share/help/*' \
     -e '$aNoExtract  = usr/share/doc/*' \
@@ -75,14 +77,13 @@ PACKAGE:
   END
   RUN mkdir rootfs && \
     $pacman -S --root rootfs --dbpath=/var/lib/pacman $targets
-  SAVE ARTIFACT --keep-own rootfs/*
+  SAVE ARTIFACT --keep-own rootfs/rootfs
 
 ROOTFS:
   COMMAND
-  ARG --required infile
+  ARG infile=files.txt
   ARG save=yes
-
-  RUN cat $infile | xargs ldd | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a $infile
+  RUN touch $infile && cat $infile | xargs ldd | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a $infile
   RUN f=( \
       '/usr/lib/locale/locale-archive' \
       '/lib64/ld-linux-x86-64.so.2' \
