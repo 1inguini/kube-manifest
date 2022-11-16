@@ -67,3 +67,22 @@ REMOVE_SH:
         sudo rm $file; \
       fi; \
     done
+
+PUSH:
+  COMMAND
+  ARG --required name
+  ARG tag=$date
+  LABEL org.opencontainers.image.created=$seconds
+  LABEL org.opencontainers.image.authors=1inguini 9647142@gmail.com
+  LABEL org.opencontainers.image.url=https://registry.1inguini.com/library/$name
+  LABEL org.opencontainers.image.url=https://hub.docker.com/repository/docker/1inguini/$name
+  LABEL org.opencontainers.image.documentation=https://git.1inguini.com/1inguini/kube-manifest/$name
+  LABEL org.opencontainers.image.documentation=https://github.com/1inguini/kube-manifest/$name
+  LABEL org.opencontainers.image.source=https://git.1inguini.com/1inguini/kube-manifest/$name
+  LABEL org.opencontainers.image.source=https://github.com/1inguini/kube-manifest/$name
+  SAVE IMAGE --push registry.1inguini.com/library/$name:latest
+  SAVE IMAGE --push registry.1inguini.com/library/$name:$tag
+  # SAVE IMAGE --push ghcr.io/1inguini/kube-manifest/$name:latest
+  # SAVE IMAGE --push ghcr.io/1inguini/kube-manifest/$name:$tag
+  SAVE IMAGE --push docker.io/1inguini/$name:latest
+  SAVE IMAGE --push docker.io/1inguini/$name:$tag
