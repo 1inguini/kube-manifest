@@ -1,7 +1,7 @@
 VERSION 0.6
 IMPORT ../base
 IMPORT ../builder 
-FROM builder+base
+FROM builder+buildenv
 
 ARG gitbucket_ver=4.38.3
 ARG embed_plugins=no

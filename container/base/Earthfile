@@ -1,6 +1,8 @@
 VERSION --use-chmod 0.6
 IMPORT ../builder
-FROM builder+base
+FROM builder+buildenv
+
+ARG date=$(date --utc +%Y%m%d)
 
 all:
   BUILD +scratch

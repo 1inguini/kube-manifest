@@ -1,32 +1,60 @@
 VERSION --use-chmod 0.6
 FROM docker.io/library/archlinux:base-devel
 
-RUN sed -i /etc/pacman.conf -e 's/NoProgress/#NoProgress/' -e '/NoExtract.*locale/d'
-# && \
-# printf '%s\n%s\n' 'NoExtract = !usr/share/locale/ja/*' 'NoExtract = !usr/share/i18n/locales/ja_JP/*' >> /etc/pacman.conf
-COPY --chmod=644 mirrorlist /etc/pacman.d/mirrorlist
-RUN pacman --noconfirm -Sy glibc git moreutils
+ARG date=$(date --rfc-3339=date)
+ARG seconds=$(date --rfc-3339=seconds)
 
-COPY --chmod=644 locale.gen /etc/locale.gen
-RUN locale-gen
+nonroot:
+  RUN groupadd --gid 65532 nonroot && \
+    useradd --uid 65532 --gid 65532 -m -s /usr/bin/nologin nonroot && \
+    echo 'nonroot ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
+  USER nonroot
+  WORKDIR /home/nonroot
 
-RUN groupadd --gid 65532 nonroot && \
-  useradd --uid 65532 --gid 65532 -m -s /usr/bin/nologin nonroot && \
-  printf '%s\n' 'nonroot ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
-USER nonroot
-WORKDIR /home/nonroot
+pacman:
+  FROM +nonroot
+  RUN sudo sed -i /etc/pacman.conf -e 's/NoProgress/#NoProgress/' -e '/^NoExtract/d' \
+    -e '$aNoExtract  = usr/share/man/*' \
+    -e '$aNoExtract  = usr/share/help/*' \
+    -e '$aNoExtract  = usr/share/doc/*' \
+    -e '$aNoExtract  = usr/share/gtk-doc/*' \
+    -e '$aNoExtract  = usr/share/info/*' \
+    -e '$aNoExtract  = usr/share/i18n/*' \
+    -e '$aNoExtract  = !usr/share/i18n/charmaps/UTF-8.gz' \
+    -e '$aNoExtract  = !usr/share/i18n/locales/en_US !usr/share/i18n/locales/ja_JP' \
+    -e '$aNoExtract  = usr/share/locale/*' \
+    -e '$aNoExtract  = !usr/share/locale/en !usr/share/locale/ja' \
+    -e '$aNoExtract  = usr/share/X11/*' \
+    -e '$aNoExtract  = usr/share/systemd/*' \
+    -e '$aNoExtract  = usr/share/bash-completion/*' \
+    -e '$aNoExtract  = usr/share/fish/*' \
+    -e '$aNoExtract  = usr/share/zsh/*'
 
-GIT CLONE --branch master https://aur.archlinux.org/yay-bin.git /tmp/aur-helper
-RUN cd /tmp/aur-helper && makepkg -sir --noconfirm
-ENV pacman=yay --noconfirm
+  COPY --chmod=644 --chown=root:root mirrorlist /etc/pacman.d/mirrorlist
+  RUN sudo pacman --noconfirm -Sy
+  ENV pacman=sudo pacman --noconfirm
 
-RUN $pacman -S rsync
-ENV cpr='rsync --archive --acls --xattrs -hh --partial --info=stats1,progress2 --modify-window=1 --no-inc-recursive'
+aur-helper:
+  FROM +pacman
+  GIT CLONE --branch master https://aur.archlinux.org/yay-bin.git aur-helper
+  WORKDIR aur-helper
+  RUN makepkg --noconfirm -sir
+  ENV pacman=yay --noconfirm
 
-container:
-  ARG date=$(date --utc +%Y%m%d%H%M)
-  SAVE IMAGE --push registry.1inguini.com/library/builder:latest
-  SAVE IMAGE --push registry.1inguini.com/library/builder:$date
+locale-archive:
+  FROM +pacman
+  RUN $pacman -S glibc
+  RUN sudo sed -i /etc/locale.gen \
+    -e '$aen_US.UTF-8 UTF-8' \
+    -e '$aja_JP.UTF-8 UTF-8'
+  RUN sudo locale-gen
+  SAVE ARTIFACT --keep-own /usr/lib/locale/locale-archive
+
+buildenv:
+  FROM +aur-helper
+  COPY --keep-own +locale-archive/locale-archive /usr/lib/locale/
+  RUN $pacman -S git moreutils rsync
+  ENV cpr='rsync --archive --acls --xattrs -hh --partial --info=stats1,progress2 --modify-window=1 --no-inc-recursive'
 
 VERSION:
   COMMAND
@@ -35,22 +63,34 @@ VERSION:
   RUN $pacman -Qi $target | grep 'Version' | grep -o '[^ ]*$' > $outfile
   SAVE ARTIFACT $outfile
 
+PACKAGE:
+  COMMAND
+  ARG --required targets
+  ARG aur=no
+  IF [ $aur = 'yes' ]
+    FROM +aur-helper
+  ELSE
+    FROM +pacman
+  END
+  RUN mkdir rootfs && \
+    $pacman -S --root rootfs --dbpath=/var/lib/pacman $targets
+  SAVE ARTIFACT --keep-own rootfs/*
+
 ROOTFS:
   COMMAND
   ARG --required infile
   ARG save=yes
-  
+
   RUN cat $infile | xargs ldd | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a $infile
   RUN f=( \
       '/usr/lib/locale/locale-archive' \
-      '/etc/ld.so.cache' \
       '/lib64/ld-linux-x86-64.so.2' \
-    ) && printf '%s\n' $f >> $infile
+    ) && printf '%s\n' ${f[@]} >> $infile
 
   RUN xargs readlink -f <$infile | sponge -a $infile
-  RUN sort <$infile | uniq | sponge $infile
+  RUN sort <$infile | uniq | sed -e 's:^/::' | sponge $infile
 
-  RUN mkdir -p rootfs/
+  RUN sudo mkdir -p rootfs/etc
   RUN sudo tar --ignore-failed-read --no-recursion -C / -T $infile -cpf - | \
     sudo tar -C rootfs/ -xpf -
   RUN sudo ldconfig -r rootfs
@@ -73,7 +113,7 @@ PUSH:
   ARG --required name
   ARG tag=$date
   LABEL org.opencontainers.image.created=$seconds
-  LABEL org.opencontainers.image.authors=1inguini 9647142@gmail.com
+  LABEL org.opencontainers.image.authors="1inguini <9647142@gmail.com>"
   LABEL org.opencontainers.image.url=https://registry.1inguini.com/library/$name
   LABEL org.opencontainers.image.url=https://hub.docker.com/repository/docker/1inguini/$name
   LABEL org.opencontainers.image.documentation=https://git.1inguini.com/1inguini/kube-manifest/$name
