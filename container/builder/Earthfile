@@ -39,6 +39,7 @@ aur-helper:
   GIT CLONE --branch master https://aur.archlinux.org/yay-bin.git aur-helper
   WORKDIR aur-helper
   RUN makepkg --noconfirm -sir
+  WORKDIR ../
   ENV pacman=yay --noconfirm
 
 locale-archive:
