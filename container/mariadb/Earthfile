@@ -1,4 +1,5 @@
 VERSION 0.6
+IMPORT ../base
 IMPORT ../builder
 FROM builder+buildenv
 
@@ -24,14 +25,10 @@ strip:
   DO builder+ROOTFS --infile=files.txt
 
 container:
-  FROM ../base+scratch
-
+  FROM base+scratch
   COPY --keep-own +strip/rootfs /
-
-  ENTRYPOINT [ "/usr/bin/mariadbd" ]
-
-  SAVE IMAGE --push registry.1inguini.com/library/mariadb:latest
-  SAVE IMAGE --push registry.1inguini.com/library/mariadb:$version
+  ENTRYPOINT [ "mariadbd" ]
+  DO builder+PUSH --name=mariadb --tag=$version
 
 var:
   RUN mkdir -p rootfs/var/lib/mysql
@@ -46,11 +43,9 @@ var:
   SAVE ARTIFACT --keep-own rootfs/var
 
 var-container:
-  FROM busybox:latest
+  FROM base+cp
   COPY --keep-own +var/ /
 
-  ENTRYPOINT ["/bin/cp", "-rn", "/var/lib/mysql"]
-  CMD [ "/mnt" ]
+  CMD [ "/var/lib/mysql", "/mnt" ]
   VOLUME /var/lib/mysql
-  SAVE IMAGE --push registry.1inguini.com/library/mariadb/var:latest
-  SAVE IMAGE --push registry.1inguini.com/library/mariadb/var:$version
+  DO builder+PUSH --name=mariadb/var --tag=$version

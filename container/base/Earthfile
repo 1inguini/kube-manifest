@@ -22,7 +22,7 @@ scratch:
   COPY --keep-own +scratch-rootfs/ /
   WORKDIR /home/nonroot
   USER nonroot
-  SAVE IMAGE --push registry.1inguini.com/library/scratch
+  DO builder+PUSH --name=scratch --tag=$date
 
 SAVE_FULLPATH:
   COMMAND
@@ -30,68 +30,41 @@ SAVE_FULLPATH:
   SAVE ARTIFACT --keep-own "$path" "$path"
 
 cp-rootfs:
-  RUN echo '/usr/bin/cp' >> files.txt
-  DO builder+ROOTFS --infile=files.txt
+  RUN sudo mkdir -p rootfs/
+  RUN sudo curl -L -o rootfs/cp https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox_CP
+  SAVE ARTIFACT --keep-own rootfs
 
 cp:
   FROM scratch
-  COPY +cp-rootfs/rootfs /
-  ENTRYPOINT [ "/usr/bin/cp", "-vrn" ]
+  COPY --keep-own +cp-rootfs/rootfs /
+  ENTRYPOINT [ "/cp", "-vrn" ]
+  VOLUME /src
+  DO builder+PUSH --name=cp --tag=1.35.0
 
-# s6-rootfs:
-#   RUN $pacman -S s6
-#   # RUN echo '/usr/bin/s6-supervise' '/usr/bin/s6-svscan' >> files.txt
-#   # RUN $pacman -Qql execline s6 s6-rc | \
-#   #   grep -Pve '(posix|/usr/include|(\.a|/)$)' >> files.txt
-#   RUN f=( \
-#     '/usr/bin/s6-svscan' \
-#     '/usr/bin/s6-supervise' \
-#     '/usr/bin/background' \
-#     '/usr/bin/foreground' \
-#     '/usr/bin/loopwhilex' \
-#     '/usr/bin/sleep' \
-#     ) && printf '%s\n' $f >> files.txt
-#   DO builder+FILELIST --file=files.txt
-#   DO builder+ROOTFS --infile=files.txt --save=no
-
-#   RUN mkdir -p service/.s6-svscan
-#   SAVE ARTIFACT --keep-own rootfs
-#   DO builder+VERSION --target=s6 --outfile=version.txt
-
-# s6:
-#   COPY --keep-own +s6-rootfs/version.txt .
-#   ARG version=$(cat version.txt)
-
-#   FROM +scratch
-#   COPY --keep-own +s6-rootfs/rootfs /
-#   ENTRYPOINT [ "/usr/bin/background", "-d", " s6-svscan", " /service", "" ]
-#   SAVE IMAGE --push registry.1inguini.com/library/s6-rc:latest
-#   SAVE IMAGE --push registry.1inguini.com/library/s6-rc:$version
-
-# s6-test-rootfs:
-#   COPY --keep-own ../mariadb+strip/rootfs rootfs
-
-uutils:
-  RUN $pacman -S rustup
-  RUN rustup default stable
-  RUN rustup target install x86_64-unknown-linux-musl
-  GIT CLONE --branch 0.0.16 https://github.com/uutils/coreutils.git uutils
-  WORKDIR uutils
-  ARG packages=sleep echo
-  RUN for p in $packages; do \
-      cd src/uu/$p && \
-        cargo install --target=x86_64-unknown-linux-musl --path . --root $HOME/rootfs && \
-        cd ../../..; \
-    done
+skalibs:
+  RUN $pacman -S musl
+  ARG version=v2.12.0.1
+  GIT CLONE --branch $version https://github.com/skarnet/skalibs.git skalibs
+  WORKDIR skalibs
+  RUN ./configure --disable-dynamic --prefix=$HOME/rootfs
+  RUN make && sudo make install
   WORKDIR ..
-  SAVE ARTIFACT rootfs/bin command AS LOCAL uutils
+  SAVE ARTIFACT --keep-own rootfs
 
-#   COPY --keep-own ../mariadb+var/var rootfs/var
+execline:
+  RUN $pacman -S musl
+  COPY --keep-own +skalibs/rootfs /usr/lib/musl
+  ARG version=v2.9.0.1
+  GIT CLONE --branch $version https://github.com/skarnet/execline.git execline
+  WORKDIR execline
+  RUN ./configure --bindir=$HOME/command --enable-static-libc \
+    --with-sysdeps=/usr/lib/musl/lib/skalibs/sysdeps --with-include=/usr/lib/musl/include \
+    --with-lib=/usr/lib/musl/lib --with-lib=/usr/lib/musl/lib/skalibs
+  RUN make && sudo make install
+  WORKDIR ..
+  SAVE ARTIFACT --keep-own command/*
 
-#   SAVE ARTIFACT --keep-own rootfs
-
-# s6-test:
-#   FROM +s6
-#   COPY --keep-own +s6-test-rootfs/rootfs /
-#   CMD [ "loopwhilex", "-o", "1", "foreground", "sleep", "1", "", "mariadb", "--wait", "--connect-timeout=10", "-B", "-u", "root", "--password=secret", "-e", "SELECT Host,User FROM mysql.user"]
-#   SAVE IMAGE s6-test
+busybox:
+  RUN sudo curl -L -o command/sleep https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox_SLEEP
+  RUN sudo chmod -vR 755 command/
+  SAVE ARTIFACT --keep-own command/*

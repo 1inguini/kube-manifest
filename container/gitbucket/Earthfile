@@ -3,17 +3,14 @@ IMPORT ../base
 IMPORT ../builder 
 FROM builder+buildenv
 
-ARG gitbucket_ver=4.38.3
+ARG version=4.38.3
 ARG embed_plugins=no
 
 all:
   BUILD +container
 
 gitbucket.war:
-  RUN curl -LO "https://github.com/gitbucket/gitbucket/releases/download/$gitbucket_ver/gitbucket.war"
-  # curl -L -o gitbucket.war.sha256 \
-  # 'https://github.com/gitbucket/gitbucket/releases/download/4.38.3/gitbucket.war.sha256'
-  # sha256sum gitbucket.war
+  RUN curl -LO "https://github.com/gitbucket/gitbucket/releases/download/$version/gitbucket.war"
   SAVE ARTIFACT gitbucket.war
 
 plugins:
@@ -36,7 +33,7 @@ plugins-container:
   COPY +plugins/plugins plugins
   VOLUME plugins
   CMD [ "plugins", "/mnt" ]
-  SAVE IMAGE --push registry.1inguini.com/library/gitbucket/plugins:latest
+  DO builder+PUSH --name=gitbucket/plugins
 
 git: # only git binary, requires ld, libc, libpthread, libz
   FROM docker.io/bitnami/git
@@ -56,5 +53,4 @@ container:
   ENV LANG="ja_JP.UTF-8"
   CMD [ "gitbucket.war", "--port=8080" ]
   EXPOSE 8080
-  SAVE IMAGE --push registry.1inguini.com/library/gitbucket:$gitbucket_ver
-  SAVE IMAGE --push registry.1inguini.com/library/gitbucket:latest
+  DO builder+PUSH --name=gitbucket --tag=$version

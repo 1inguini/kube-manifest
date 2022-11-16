@@ -23,6 +23,5 @@ rootfs:
 container:
   FROM base+scratch
   COPY --keep-own +rootfs/rootfs /
-  ENTRYPOINT [ "/usr/bin/java", "-jar" ]
-  SAVE IMAGE --push registry.1inguini.com/library/openjdk:latest
-  SAVE IMAGE --push registry.1inguini.com/library/openjdk:$version
+  ENTRYPOINT [ "java", "-jar" ]
+  DO builder+PUSH --name=openjdk --tag=$version
