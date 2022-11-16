@@ -4,7 +4,6 @@ IMPORT ../builder
 FROM builder+buildenv
 
 ARG version=4.38.3
-ARG embed_plugins=no
 
 all:
   BUILD +container
@@ -40,13 +39,8 @@ git: # only git binary, requires ld, libc, libpthread, libz
   SAVE ARTIFACT /opt/bitnami/git/bin/git
 
 container:
-  IF [ "$embed_plugins" == "yes" ] # condition requires /bin/sh, whitch isn't included in distroless
-    FROM ../openjdk+container
-    COPY +plugins/plugins .gitbucket/plugins
-  ELSE
-    BUILD +plugins-container
-    FROM ../openjdk+container
-  END
+  BUILD +plugins-container
+  FROM ../openjdk+container
 
   COPY +gitbucket.war/gitbucket.war gitbucket.war
 
