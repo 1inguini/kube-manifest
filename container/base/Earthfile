@@ -2,7 +2,9 @@ VERSION --use-chmod 0.6
 IMPORT ../builder
 FROM builder+buildenv
 
-ARG date=$(date --utc +%Y%m%d)
+ARG busybox_ver=1.35.0
+ARG skalibs_ver=2.12.0.1
+ARG execline_ver=2.9.0.1
 
 all:
   BUILD +scratch
@@ -22,28 +24,22 @@ scratch:
   COPY --keep-own +scratch-rootfs/ /
   WORKDIR /home/nonroot
   USER nonroot
-  DO builder+PUSH --name=scratch --tag=$date
+  DO builder+PUSH --name=scratch
 
 SAVE_FULLPATH:
   COMMAND
   ARG --required path
   SAVE ARTIFACT --keep-own "$path" "$path"
 
-cp-rootfs:
-  RUN sudo mkdir -p rootfs/
-  RUN sudo curl -L -o rootfs/cp https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox_CP
-  SAVE ARTIFACT --keep-own rootfs
-
 cp:
   FROM scratch
-  COPY --keep-own +cp-rootfs/rootfs /
+  COPY --keep-own +busybox/cp /
   ENTRYPOINT [ "/cp", "-vrn" ]
-  VOLUME /src
-  DO builder+PUSH --name=cp --tag=1.35.0
+  DO builder+PUSH --name=cp --tag=$busybox_ver
 
 skalibs:
   RUN $pacman -S musl
-  ARG version=v2.12.0.1
+  ARG version=v$skalibs_ver
   GIT CLONE --branch $version https://github.com/skarnet/skalibs.git skalibs
   WORKDIR skalibs
   RUN ./configure --disable-dynamic --prefix=$HOME/rootfs
@@ -54,7 +50,7 @@ skalibs:
 execline:
   RUN $pacman -S musl
   COPY --keep-own +skalibs/rootfs /usr/lib/musl
-  ARG version=v2.9.0.1
+  ARG version=v$execline_ver
   GIT CLONE --branch $version https://github.com/skarnet/execline.git execline
   WORKDIR execline
   RUN ./configure --bindir=$HOME/command --enable-static-libc \
@@ -65,6 +61,11 @@ execline:
   SAVE ARTIFACT --keep-own command/*
 
 busybox:
-  RUN sudo curl -L -o command/sleep https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox_SLEEP
+  ARG version=$busybox_ver
+  RUN mkdir command
+  RUN sudo curl -L -o command/sleep \
+    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_SLEEP"
+  RUN sudo curl -L -o command/cp \
+    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_CP"
   RUN sudo chmod -vR 755 command/
   SAVE ARTIFACT --keep-own command/*
