@@ -1,4 +1,4 @@
-VERSION 0.6
+VERSION --use-chmod 0.6
 IMPORT ../base
 IMPORT ../builder 
 FROM builder+buildenv
@@ -36,15 +36,26 @@ plugins-container:
 
 git: # only git binary, requires ld, libc, libpthread, libz
   FROM docker.io/bitnami/git
-  SAVE ARTIFACT /opt/bitnami/git/bin/git
+  SAVE ARTIFACT --keep-own /opt/bitnami/git/bin/git
+
+rootfs:
+  COPY --keep-own +git/git rootfs/usr/bin/
+  COPY --chown=nonroot:nonroot +gitbucket.war/gitbucket.war rootfs$HOME/gitbucket.war
+  COPY --chown=nonroot:nonroot --chmod=644 database.conf rootfs$HOME/.gitbucket
+  COPY --chown=nonroot:nonroot --dir +plugins/plugins rootfs$HOME/.gitbucket/
+
+  COPY --keep-own ../mariadb+rootfs/rootfs rootfs
+  RUN $pacman -S mariadb
+  RUN mariadbd --datadir=$HOME/rootfs/var/lib/mysql & sleep 2 && \
+    mariadb -u root --password=secret -e "CREATE DATABASE gitbucket" && \
+    killall mariadbd
+  SAVE ARTIFACT --keep-own rootfs
+
 
 container:
-  BUILD +plugins-container
+  # BUILD +plugins-container
   FROM ../openjdk+container
-
-  COPY +gitbucket.war/gitbucket.war gitbucket.war
-
-  ENV LANG="ja_JP.UTF-8"
+  COPY --keep-own +rootfs/rootfs /
   CMD [ "gitbucket.war", "--port=8080" ]
   EXPOSE 8080
   DO builder+PUSH --name=gitbucket --tag=$version
