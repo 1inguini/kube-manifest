@@ -1,9 +1,8 @@
 VERSION --use-chmod 0.6
 
 all:
-  BUILD base+all
-  BUILD builder+all
-  BUILD gitbucket+all
-  BUILD mariadb+all
-  BUILD openjdk+all
-  
+  BUILD ./base+all
+  BUILD ./builder+all
+  BUILD ./gitbucket+all
+  BUILD ./mariadb+all
+  BUILD ./openjdk+all
