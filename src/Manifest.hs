@@ -165,46 +165,31 @@ gitbucket =
       ?app = "gitbucket"
    in let plugins = Util.name "plugins"
           database = Util.name "database"
-          registry = "registry." <> host <> "/library/"
           gitbucketHome = "/home/nonroot/.gitbucket/"
+          databaseData = "/var/lib/mysqld/"
        in [ Util.manifest Util.namespace
           , Util.manifest $
               Util.statefulSet
                 ANON
-                  { initContainers =
-                      [ plugins $
-                          Util.container
-                            (registry <> "gitbucket/plugins")
-                            ANON{volumeMounts = [Util.volumeMount "/mnt"]}
-                      , database $
-                          Util.container
-                            (registry <> "mariadb/var")
-                            ANON{volumeMounts = [Util.volumeMount "/mnt"]}
-                      ]
-                  , containers =
+                  { containers =
                       [ Util.container
-                          (registry <> "gitbucket:4.38.3")
+                          (Util.registry <> "gitbucket:4.38.3")
                           ANON
-                            { ports = [Util.containerPort 8080]
+                            { ports =
+                                [ Util.containerPort 8080
+                                , database $ Util.containerPort 3306
+                                ]
                             , livenessProbe = Util.probe $ Util.httpGet "/api/v3"
                             , readinessProbe = Util.probe $ Util.httpGet "/api/v3"
                             , volumeMounts =
                                 [ Util.volumeMount gitbucketHome
-                                , plugins $ Util.volumeMount $ gitbucketHome <> "plugins/"
+                                , database $ Util.volumeMount databaseData
                                 ]
                             }
-                      , database $
-                          Util.container
-                            (registry <> "mariadb:10.9.3-3")
-                            ANON
-                              { ports = [Util.containerPort 3306]
-                              , volumeMounts = [Util.volumeMount "/var/lib/mysql/"]
-                              }
                       ]
                   , volumes =
                       [ toJSON Util.persistentVolumeClaimVolume
                       , toJSON $ database Util.persistentVolumeClaimVolume
-                      , toJSON $ plugins Util.emptyDirVolume
                       ]
                   , securityContext = ANON{fsGroup = Util.nonroot}
                   }

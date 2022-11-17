@@ -36,6 +36,9 @@ import TH (deriveJSON)
 -- import Manifest.Io.K8s.Api.Core.V1 (Namespace)
 -- import Manifest.Io.K8s.Apimachinery.Pkg.Apis.Meta.V1 (ObjectMeta (..))
 
+registry :: Text
+registry = "registry." <> host <> "/library/"
+
 mirror :: (a -> a -> b) -> a -> b
 mirror f a = f a a
 
@@ -227,11 +230,12 @@ nonroot = 65532
 
 workload ::
   (?namespace :: Text, ?app :: Text, ?name :: Text) =>
-  ToJSON podTemplateSpec =>
+  (ToJSON (Record spec), ToJSON podTemplateSpec) =>
   Text ->
+  Record spec ->
   podTemplateSpec ->
   Record _
-workload kind podTemplateSpec =
+workload kind spec podTemplateSpec =
   object kind
     `merge` ANON
       { apiVersion = "apps/v1" :: Text
@@ -245,12 +249,12 @@ workload kind podTemplateSpec =
                   , spec = podTemplateSpec
                   }
             }
+            `merge` spec
       }
 
 deployment :: (?namespace :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Record _
 deployment =
-  over #spec (merge ANON{strategy = Anon.insert #type ("Recreate" :: Text) ANON{}})
-    . workload "Deployment"
+  workload "Deployment" ANON{strategy = Anon.insert #type ("Recreate" :: Text) ANON{}}
 
 statefulSet ::
   (?namespace :: Text, ?app :: Text, ?name :: Text) =>
@@ -259,16 +263,15 @@ statefulSet ::
   [persistentVolumeClaim] ->
   Record _
 statefulSet podTemplateSpec persistentVolumeClaims =
-  over
-    #spec
-    ( merge
-        ANON
-          { serviceName = ?name
-          , podManagementPolicy = "Parallel" :: Text
-          , volumeClaimTemplates = persistentVolumeClaims
-          }
-    )
-    . workload "StatefulSet"
+  workload
+    "StatefulSet"
+    ANON
+      { serviceName = ?name
+      , podManagementPolicy = "Parallel" :: Text
+      , volumeClaimTemplates = persistentVolumeClaims
+      }
+    podTemplateSpec
+
 data PathType
   = Exact
   | Prefix
