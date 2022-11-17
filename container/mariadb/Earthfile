@@ -37,13 +37,8 @@ rootfs:
 container:
   IF [ $kube = yes ]
     ARG suffix=/main
-    BUILD +datadir-init-container
-    FROM base+scratch
-    COPY bin+busybox/umount /usr/bin/
-    ARG suffix=/main
-  ELSE
-    FROM base+scratch
   END
+  FROM base+scratch
   COPY --keep-own +rootfs/rootfs /
   ENTRYPOINT [ "mariadbd" ]
   DO builder+PUSH --name=mariadb$suffix --tag=$version

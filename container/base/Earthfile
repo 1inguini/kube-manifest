@@ -5,7 +5,6 @@ FROM builder+buildenv
 
 all:
   BUILD +scratch
-  BUILD +cp
 
 scratch-rootfs:
   FROM gcr.io/distroless/static:nonroot
@@ -16,9 +15,12 @@ scratch-rootfs:
   DO +SAVE_FULLPATH --path=/etc/nsswitch.conf
   DO +SAVE_FULLPATH --path=/etc/ssl
 
-scratch:
+root:
   FROM scratch
   COPY --keep-own +scratch-rootfs/ /
+
+scratch:
+  FROM +root
   WORKDIR /home/nonroot
   USER nonroot
   LABEL org.opencontainers.image.description="scratch with nonroot user, ssl certs, nssswitch.conf"
@@ -30,7 +32,7 @@ SAVE_FULLPATH:
   SAVE ARTIFACT --keep-own "$path" "$path"
 
 cp-init:
-  FROM +scratch
+  FROM +root
   COPY bin+busybox/cp /bin/
   COPY empty /contents
   COPY empty /mnt
@@ -38,8 +40,8 @@ cp-init:
   CMD [ "/contents", "/mnt" ]
 
 overlay-init: # use with kubernetes bind propagation bidirectional
-  FROM +scratch
-  COPY bin+busybox/mount bin+busybox/cp bin+execline/foreground /bin/
+  FROM +root
+  COPY bin+busybox/mount bin+busybox/umount bin+busybox/cp bin+execline/foreground /bin/
   COPY empty /initial-contents
   COPY empty /lowerdir
   COPY empty /upperdir

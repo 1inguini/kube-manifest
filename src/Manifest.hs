@@ -178,20 +178,28 @@ gitbucket =
                 ANON
                   { initContainers =
                       [ toJSON $
-                          Util.container
-                            (Util.registry <> "gitbucket/plugins-init:latest")
-                            ANON{volumeMounts = [plugins $ Util.volumeMount "/mnt"]}
+                          Util.name "gitbucket-init" $
+                            Util.container
+                              (Util.registry <> "gitbucket/plugins-init:latest")
+                              ANON{volumeMounts = [plugins $ Util.volumeMount "/mnt"]}
                       , toJSON $
-                          database $
+                          Util.name "database-init" $
                             Util.container
                               (Util.registry <> "gitbucket/mariadb-init:" <> mariadbVersion)
                               ANON
-                                { volumeMounts =
+                                { securityContext = ANON{privileged = True}
+                                , -- , lifecycle =
+                                  --     ANON
+                                  --       { preStop =
+                                  --           ANON{exec = ANON{command = ["umount", "/upperdir"] :: [Text]}}
+                                  --       }
+                                  volumeMounts =
                                     [ toJSON $ databaseWork $ Util.volumeMount "/workdir"
                                     , toJSON $ databaseLower $ Util.volumeMount "/lowerdir"
                                     , toJSON $
-                                        Util.volumeMount "/upperdir"
-                                          `merge` ANON{mountPropagation = "Bidirectional" :: Text}
+                                        database $
+                                          Util.volumeMount "/upperdir"
+                                            `merge` ANON{mountPropagation = "Bidirectional" :: Text}
                                     ]
                                 }
                       ]

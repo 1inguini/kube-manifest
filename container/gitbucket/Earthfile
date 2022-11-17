@@ -55,13 +55,11 @@ plugins-init-container:
 container:
   IF [ $kube = yes ]
     BUILD +plugins-init-container
+    BUILD mariadb+container
     BUILD mariadb+datadir-init-container --exec='CREATE DATABASE gitbucket' --name=gitbucket/mariadb-init
     ARG suffix=/main
-    FROM ../openjdk+container
-    COPY bin+busybox/umount /usr/bin/
-  ELSE
-    FROM ../openjdk+container
   END
+  FROM ../openjdk+container
   COPY --keep-own +rootfs/rootfs /
   CMD [ "gitbucket.war", "--port=8080" ]
   EXPOSE 8080

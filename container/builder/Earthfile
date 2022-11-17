@@ -4,6 +4,9 @@ FROM docker.io/library/archlinux:base-devel
 ARG date=$(date --rfc-3339=date)
 ARG seconds=$(date --rfc-3339=seconds)
 
+all:
+  BUILD +buildenv
+
 nonroot:
   RUN groupadd --gid 65532 nonroot && \
     useradd --uid 65532 --gid 65532 -m -s /usr/bin/nologin nonroot && \
@@ -58,6 +61,7 @@ buildenv:
   COPY --keep-own +locale-archive/locale-archive /usr/lib/locale/
   RUN $pacman -S git moreutils rsync
   ENV cpr='rsync --archive --acls --xattrs -hh --partial --info=stats1,progress2 --modify-window=1 --no-inc-recursive'
+  DO +PUSH --name=builder
 
 VERSION:
   COMMAND

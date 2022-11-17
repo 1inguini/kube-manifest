@@ -139,6 +139,7 @@ container image rest =
         ANON
           { allowPrivilegeEscalation = False
           }
+    , imagePullPolicy = "Always" :: Text
     }
     `merge` rest
 
