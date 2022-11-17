@@ -77,7 +77,7 @@ PACKAGE:
   END
   RUN mkdir rootfs && \
     $pacman -S --root rootfs --dbpath=/var/lib/pacman $targets
-  SAVE ARTIFACT --keep-own rootfs/rootfs
+  SAVE ARTIFACT --keep-own rootfs
 
 ROOTFS:
   COMMAND

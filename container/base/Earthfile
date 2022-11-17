@@ -2,10 +2,6 @@ VERSION --use-chmod 0.6
 IMPORT ../builder
 FROM builder+buildenv
 
-ARG busybox_ver=1.35.0
-ARG skalibs_ver=2.12.0.1
-ARG execline_ver=2.9.0.1
-
 all:
   BUILD +scratch
   BUILD +cp
@@ -30,42 +26,3 @@ SAVE_FULLPATH:
   COMMAND
   ARG --required path
   SAVE ARTIFACT --keep-own "$path" "$path"
-
-cp:
-  FROM scratch
-  COPY --keep-own +busybox/cp /
-  ENTRYPOINT [ "/cp", "-vrn" ]
-  DO builder+PUSH --name=cp --tag=$busybox_ver
-
-skalibs:
-  RUN $pacman -S musl
-  ARG version=v$skalibs_ver
-  GIT CLONE --branch $version https://github.com/skarnet/skalibs.git skalibs
-  WORKDIR skalibs
-  RUN ./configure --disable-dynamic --prefix=$HOME/rootfs
-  RUN make && sudo make install
-  WORKDIR ..
-  SAVE ARTIFACT --keep-own rootfs
-
-execline:
-  RUN $pacman -S musl
-  COPY --keep-own +skalibs/rootfs /usr/lib/musl
-  ARG version=v$execline_ver
-  GIT CLONE --branch $version https://github.com/skarnet/execline.git execline
-  WORKDIR execline
-  RUN ./configure --bindir=$HOME/command --enable-static-libc \
-    --with-sysdeps=/usr/lib/musl/lib/skalibs/sysdeps --with-include=/usr/lib/musl/include \
-    --with-lib=/usr/lib/musl/lib --with-lib=/usr/lib/musl/lib/skalibs
-  RUN make && sudo make install
-  WORKDIR ..
-  SAVE ARTIFACT --keep-own command/*
-
-busybox:
-  ARG version=$busybox_ver
-  RUN mkdir command
-  RUN sudo curl -L -o command/sleep \
-    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_SLEEP"
-  RUN sudo curl -L -o command/cp \
-    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_CP"
-  RUN sudo chmod -vR 755 command/
-  SAVE ARTIFACT --keep-own command/*

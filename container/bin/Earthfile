@@ -1,0 +1,44 @@
+VERSION --use-chmod 0.6
+IMPORT ../builder
+FROM builder+buildenv
+
+musl:
+  DO builder+PACKAGE --targets=musl
+
+skalibs:
+  ARG version=2.12.0.1
+  RUN echo $version > version.txt
+  SAVE ARTIFACT version.txt
+  COPY --keep-own +musl/rootfs/usr/lib/musl /usr
+  GIT CLONE --branch v$version https://github.com/skarnet/skalibs.git skalibs
+  WORKDIR skalibs
+  RUN ./configure --disable-dynamic --prefix=$HOME/rootfs/usr
+  RUN make && sudo make install
+  WORKDIR ..
+  SAVE ARTIFACT --keep-own rootfs
+
+execline:
+  ARG version=2.9.0.1
+  RUN echo $version > version.txt
+  SAVE ARTIFACT version.txt
+  COPY --keep-own +musl/rootfs/usr/lib/musl /usr
+  COPY --keep-own +skalibs/rootfs/usr /usr
+  GIT CLONE --branch v$version https://github.com/skarnet/execline.git execline
+  WORKDIR execline
+  RUN ./configure --bindir=$HOME/command --enable-static-libc \
+    --with-sysdeps=/usr/lib/skalibs/sysdeps --with-lib=/usr/lib/skalibs
+  RUN make && sudo make install
+  WORKDIR ..
+  SAVE ARTIFACT --keep-own command/*
+
+busybox:
+  ARG version=1.35.0
+  RUN echo $version > version.txt
+  SAVE ARTIFACT version.txt
+  RUN mkdir command
+  RUN sudo curl -L -o command/sleep \
+    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_SLEEP"
+  RUN sudo curl -L -o command/cp \
+    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_CP"
+  RUN sudo chmod -vR 755 command/
+  SAVE ARTIFACT --keep-own command/*
