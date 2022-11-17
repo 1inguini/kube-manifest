@@ -166,7 +166,7 @@ gitbucket =
    in let plugins = Util.name "plugins"
           database = Util.name "database"
           gitbucketHome = "/home/nonroot/.gitbucket/"
-          databaseData = "/var/lib/mysqld/"
+          databaseData = "/var/lib/mysql/"
        in [ Util.manifest Util.namespace
           , Util.manifest $
               Util.statefulSet
