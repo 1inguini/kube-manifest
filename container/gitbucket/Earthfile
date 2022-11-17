@@ -1,9 +1,12 @@
 VERSION --use-chmod 0.6
+IMPORT ../base
 IMPORT ../bin
-IMPORT ../builder 
+IMPORT ../builder
+IMPORT ../mariadb
 FROM builder+buildenv
 
 ARG version=4.38.4
+ARG kube=yes
 
 all:
   BUILD +container
@@ -33,27 +36,34 @@ git:
   DO builder+ROOTFS --infile=files.txt
 
 rootfs:
-  COPY --keep-own +git/rootfs rootfs
-  COPY --keep-own bin+execline/background rootfs/usr/bin/
   COPY --chown=nonroot:nonroot +gitbucket.war/gitbucket.war rootfs/home/nonroot/
   COPY --chown=nonroot:nonroot --chmod=644 database.conf rootfs/home/nonroot/.gitbucket/
-  COPY --chown=nonroot:nonroot +plugins/plugins rootfs/home/nonroot/.gitbucket/plugins
-
-  COPY --keep-own ../mariadb+rootfs/rootfs rootfs
-  COPY --keep-own ../mariadb+var/var rootfs/var
-  RUN $pacman -S mariadb
-  RUN sudo mkdir -p /run/mysqld && sudo chown nonroot:nonroot /run/mysqld && \
-    mariadbd --datadir=$HOME/rootfs/var/lib/mysql & \
-    sleep 2 && mariadb -u root --password=secret -e 'CREATE DATABASE gitbucket' && \
-    killall mariadbd
+  COPY --keep-own +git/rootfs rootfs
+  IF [ $kube = no ]
+    COPY --keep-own bin+execline/background rootfs/usr/bin/
+    COPY --chown=nonroot:nonroot +plugins/plugins rootfs/home/nonroot/.gitbucket/plugins
+    COPY --keep-own ../mariadb+rootfs/rootfs rootfs
+  END
+  
   DO builder+ROOTFS
 
+plugins-init-container:
+  FROM base+cp-init
+  COPY --chown=nonroot:nonroot +plugins/ /contents
+  DO builder+PUSH --name=gitbucket/plugins-init
+
 container:
-  # BUILD +plugins-container
-  FROM ../openjdk+container
+  IF [ $kube = yes ]
+    BUILD +plugins-init-container
+    BUILD mariadb+datadir-init-container --exec='CREATE DATABASE gitbucket' --name=gitbucket/mariadb-init
+    ARG suffix=/main
+    FROM ../openjdk+container
+    COPY bin+busybox/umount /usr/bin/
+  ELSE
+    FROM ../openjdk+container
+  END
   COPY --keep-own +rootfs/rootfs /
-  ENTRYPOINT [ "background", "mariadbd", "", "java", "-jar" ]
   CMD [ "gitbucket.war", "--port=8080" ]
   EXPOSE 8080
   LABEL org.opencontainers.image.description="gitbucket with mariadb"
-  DO builder+PUSH --name=gitbucket --tag=$version
+  DO builder+PUSH --name=gitbucket$suffix --tag=$version

@@ -1,4 +1,5 @@
 VERSION --use-chmod 0.6
+IMPORT ../bin
 IMPORT ../builder
 FROM builder+buildenv
 
@@ -27,3 +28,21 @@ SAVE_FULLPATH:
   COMMAND
   ARG --required path
   SAVE ARTIFACT --keep-own "$path" "$path"
+
+cp-init:
+  FROM +scratch
+  COPY bin+busybox/cp /bin/
+  COPY empty /contents
+  COPY empty /mnt
+  ENTRYPOINT [ "cp", "-rn" ]
+  CMD [ "/contents", "/mnt" ]
+
+overlay-init: # use with kubernetes bind propagation bidirectional
+  FROM +scratch
+  COPY bin+busybox/mount bin+busybox/cp bin+execline/foreground /bin/
+  COPY empty /initial-contents
+  COPY empty /lowerdir
+  COPY empty /upperdir
+  COPY empty /workdir
+  ENTRYPOINT [ "foreground", "cp", "-rn", "/initial-contents", "/lowerdir", "" ]
+  CMD [ "mount", "-t", "overlay", "overlay", "-o", "lowerdir=/lowerdir,upperdir=/upperdir,workdir=/workdir", "/upperdir" ]

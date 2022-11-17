@@ -1,5 +1,6 @@
 VERSION 0.6
 IMPORT ../base
+IMPORT ../bin
 IMPORT ../builder
 FROM builder+buildenv
 
@@ -8,10 +9,14 @@ RUN $pacman -S mariadb
 DO builder+VERSION --target=mariadb --outfile=version.txt
 ARG version=$(cat version.txt)
 
+ARG kube=yes # yes | no
 
 all:
   BUILD +container
-  BUILD +var-container
+
+buildenv:
+  COPY --chown=nonroot:nonroot empty /run/mysqld
+  COPY --chown=nonroot:nonroot empty /var/lib/mysql
 
 bins:
   COPY --keep-own +strip/rootfs rootfs
@@ -19,34 +24,44 @@ bins:
   DO builder+ROOTFS --infile=files.txt
 
 rootfs:
-  RUN mkdir -p rootfs/run/mysqld/
+  COPY --chown=nonroot:nonroot empty rootfs/run/mysqld
+  IF [ $kube = yes ]
+    COPY --chown=nonroot:nonroot empty rootfs/var/lib/mysql
+  ELSE
+    COPY --chown=nonroot:nonroot +datadir/mysql rootfs/var/lib/mysql
+  END
   RUN $pacman -Qql mariadb mariadb-libs | grep -P '^/(etc|usr/(share|lib)/mysql).*[^/]$' > files.txt
   RUN echo '/usr/bin/mariadbd' >> files.txt
   DO builder+ROOTFS --infile=files.txt
 
 container:
-  FROM base+scratch
+  IF [ $kube = yes ]
+    ARG suffix=/main
+    BUILD +datadir-init-container
+    FROM base+scratch
+    COPY bin+busybox/umount /usr/bin/
+    ARG suffix=/main
+  ELSE
+    FROM base+scratch
+  END
   COPY --keep-own +rootfs/rootfs /
-  COPY --keep-own --dir +var/var /
   ENTRYPOINT [ "mariadbd" ]
-  DO builder+PUSH --name=mariadb --tag=$version
+  DO builder+PUSH --name=mariadb$suffix --tag=$version
 
-var:
-  RUN mkdir -p rootfs/var/lib/mysql
-  RUN sudo chown -v nonroot:nonroot /run/mysqld
-  RUN sudo mariadb-install-db --user=nonroot --datadir=$HOME/rootfs/var/lib/mysql
-
+datadir:
+  FROM +buildenv
+  RUN sudo mariadb-install-db --user=nonroot --datadir=/var/lib/mysql
+  RUN sudo chown -v nonroot:nonroot /run/mysqld /var/lib/mysql
   COPY install.sql install.sql
-  RUN mariadbd --datadir=$HOME/rootfs/var/lib/mysql & sleep 2 && \
-    mariadb -u nonroot -e "$(cat install.sql)" && \
-    killall mariadbd
+  ARG exec
+  RUN echo $exec >> install.sql
+  RUN mariadbd & sleep 2 && mariadb -u nonroot -e "$(cat install.sql)"
   
-  SAVE ARTIFACT --keep-own rootfs/var
+  SAVE ARTIFACT /var/lib/mysql
 
-var-container:
-  FROM base+cp
-  COPY --keep-own +var/ /
-
-  CMD [ "/var/lib/mysql", "/mnt" ]
-  VOLUME /var/lib/mysql
-  DO builder+PUSH --name=mariadb/var --tag=$version
+datadir-init-container:
+  FROM base+overlay-init
+  ARG exec
+  ARG name=mariadb/datadir-init
+  COPY --chown=nonroot:nonroot (+datadir/mysql --exec=$exec) /init-contents
+  DO builder+PUSH --name=$name --tag=$version

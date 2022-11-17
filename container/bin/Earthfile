@@ -40,5 +40,9 @@ busybox:
     "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_SLEEP"
   RUN sudo curl -L -o command/cp \
     "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_CP"
+  RUN sudo curl -L -o command/mount \
+    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_MOUNT"
+  RUN sudo curl -L -o command/umount \
+    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_UMOUNT"
   RUN sudo chmod -vR 755 command/
   SAVE ARTIFACT --keep-own command/*

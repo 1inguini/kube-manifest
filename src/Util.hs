@@ -146,11 +146,11 @@ containerPort :: (?name :: Text) => Int -> Record _
 containerPort port =
   ANON{containerPort = port, name = ?name}
 
-probe :: Record _ -> Record _
-probe httpGet = ANON{httpGet = httpGet}
+httpGetProbe :: (?name :: Text) => Text -> Record _
+httpGetProbe path = ANON{httpGet = ANON{port = ?name, path = path}}
 
-httpGet :: (?name :: Text) => Text -> Record ["port" := Text, "path" := Text]
-httpGet path = ANON{port = ?name, path = path}
+tcpSocketProbe :: (?name :: Text) => Record _
+tcpSocketProbe = ANON{tcpSocket = ANON{port = ?name}}
 
 namespace ::
   (?namespace :: Text, ?app :: Text) =>
@@ -224,7 +224,6 @@ persistentVolumeClaimVolume =
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 
--- uid of nonroot of distroless
 nonroot :: Int
 nonroot = 65532
 

@@ -60,8 +60,8 @@ dns =
                                 , toJSON $ health $ Util.containerPort 8080
                                 , toJSON $ ready $ Util.containerPort 8081
                                 ]
-                            , livenessProbe = health $ Util.probe $ Util.httpGet "health"
-                            , readinessProbe = ready $ Util.probe $ Util.httpGet "ready"
+                            , livenessProbe = health $ Util.httpGetProbe "health"
+                            , readinessProbe = ready $ Util.httpGetProbe "ready"
                             , securityContext =
                                 ANON
                                   { capabilities =
@@ -164,32 +164,67 @@ gitbucket =
   let ?namespace = "git"
       ?app = "gitbucket"
    in let plugins = Util.name "plugins"
+          pluginsWork = Util.name "plugins-work"
+          pluginsLower = Util.name "plugins-lower"
           database = Util.name "database"
+          databaseWork = Util.name "database-work"
+          databaseLower = Util.name "database-lower"
           gitbucketHome = "/home/nonroot/.gitbucket/"
           databaseData = "/var/lib/mysql/"
+          mariadbVersion = "10.9.4-2"
        in [ Util.manifest Util.namespace
           , Util.manifest $
               Util.statefulSet
                 ANON
-                  { containers =
-                      [ Util.container
-                          (Util.registry <> "gitbucket:4.38.4")
-                          ANON
-                            { ports =
-                                [ Util.containerPort 8080
-                                , database $ Util.containerPort 3306
-                                ]
-                            , livenessProbe = Util.probe $ Util.httpGet "/api/v3"
-                            , readinessProbe = Util.probe $ Util.httpGet "/api/v3"
-                            , volumeMounts =
-                                [ Util.volumeMount gitbucketHome
-                                , database $ Util.volumeMount databaseData
-                                ]
-                            }
+                  { initContainers =
+                      [ toJSON $
+                          Util.container
+                            (Util.registry <> "gitbucket/plugins-init:latest")
+                            ANON{volumeMounts = [plugins $ Util.volumeMount "/mnt"]}
+                      , toJSON $
+                          database $
+                            Util.container
+                              (Util.registry <> "gitbucket/mariadb-init:" <> mariadbVersion)
+                              ANON
+                                { volumeMounts =
+                                    [ toJSON $ databaseWork $ Util.volumeMount "/workdir"
+                                    , toJSON $ databaseLower $ Util.volumeMount "/lowerdir"
+                                    , toJSON $
+                                        Util.volumeMount "/upperdir"
+                                          `merge` ANON{mountPropagation = "Bidirectional" :: Text}
+                                    ]
+                                }
+                      ]
+                  , containers =
+                      [ toJSON $
+                          Util.container
+                            (Util.registry <> "gitbucket/main:4.38.4")
+                            ANON
+                              { ports = [Util.containerPort 8080]
+                              , livenessProbe = Util.httpGetProbe "/api/v3"
+                              , readinessProbe = Util.httpGetProbe "/api/v3"
+                              , volumeMounts =
+                                  [ Util.volumeMount gitbucketHome
+                                  , plugins $ Util.volumeMount $ gitbucketHome <> "plugins/"
+                                  ]
+                              }
+                      , toJSON $
+                          database $
+                            Util.container
+                              (Util.registry <> "mariadb/main:" <> mariadbVersion)
+                              ANON
+                                { ports = [Util.containerPort 3306]
+                                , livenessProbe = Util.tcpSocketProbe
+                                , readinessProbe = Util.tcpSocketProbe
+                                , volumeMounts = [Util.volumeMount databaseData]
+                                }
                       ]
                   , volumes =
                       [ toJSON Util.persistentVolumeClaimVolume
+                      , toJSON $ plugins Util.emptyDirVolume
                       , toJSON $ database Util.persistentVolumeClaimVolume
+                      , toJSON $ databaseWork Util.emptyDirVolume
+                      , toJSON $ databaseLower Util.emptyDirVolume
                       ]
                   , securityContext = ANON{fsGroup = Util.nonroot}
                   }
