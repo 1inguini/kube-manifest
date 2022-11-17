@@ -122,9 +122,10 @@ PUSH:
   LABEL org.opencontainers.image.documentation=https://github.com/1inguini/kube-manifest/$name
   LABEL org.opencontainers.image.source=https://git.1inguini.com/1inguini/kube-manifest/$name
   LABEL org.opencontainers.image.source=https://github.com/1inguini/kube-manifest/$name
-  SAVE IMAGE --push registry.1inguini.com/library/$name:latest
-  SAVE IMAGE --push registry.1inguini.com/library/$name:$tag
-  # SAVE IMAGE --push ghcr.io/1inguini/kube-manifest/$name:latest
-  # SAVE IMAGE --push ghcr.io/1inguini/kube-manifest/$name:$tag
-  SAVE IMAGE --push docker.io/1inguini/$name:latest
-  SAVE IMAGE --push docker.io/1inguini/$name:$tag
+  SAVE IMAGE --push \
+    # ghcr.io/1inguini/kube-manifest/$name:latest \
+    # ghcr.io/1inguini/kube-manifest/$name:$tag \
+    # docker.io/1inguini/$name:latest \
+    # docker.io/1inguini/$name:$tag \
+    registry.1inguini.com/library/$name:latest \
+    registry.1inguini.com/library/$name:$tag

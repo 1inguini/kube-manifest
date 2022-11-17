@@ -27,12 +27,13 @@ plugins:
     -O 'https://github.com/onukura/gitbucket-swagger-plugin/releases/download/1.0.7/gitbucket-swagger-plugin-1.0.7.jar'
   SAVE ARTIFACT plugins
 
-git: # only git binary, requires ld, libc, libpthread, libz
-  FROM docker.io/bitnami/git
-  SAVE ARTIFACT --keep-own /opt/bitnami/git/bin/git
+git:
+  RUN $pacman -S git
+  RUN echo $(which git) >> files.txt
+  DO builder+ROOTFS --infile=files.txt
 
 rootfs:
-  COPY --keep-own +git/git rootfs/usr/bin/
+  COPY --keep-own +git/rootfs rootfs
   COPY --keep-own bin+execline/background rootfs/usr/bin/
   COPY --chown=nonroot:nonroot +gitbucket.war/gitbucket.war rootfs/home/nonroot/
   COPY --chown=nonroot:nonroot --chmod=644 database.conf rootfs/home/nonroot/.gitbucket/
@@ -47,7 +48,6 @@ rootfs:
     killall mariadbd
   DO builder+ROOTFS
 
-
 container:
   # BUILD +plugins-container
   FROM ../openjdk+container
@@ -55,4 +55,5 @@ container:
   ENTRYPOINT [ "background", "mariadbd", "", "java", "-jar" ]
   CMD [ "gitbucket.war", "--port=8080" ]
   EXPOSE 8080
+  LABEL org.opencontainers.image.description="gitbucket with mariadb"
   DO builder+PUSH --name=gitbucket --tag=$version

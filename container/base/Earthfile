@@ -20,6 +20,7 @@ scratch:
   COPY --keep-own +scratch-rootfs/ /
   WORKDIR /home/nonroot
   USER nonroot
+  LABEL org.opencontainers.image.description="scratch with nonroot user, ssl certs, nssswitch.conf"
   DO builder+PUSH --name=scratch
 
 SAVE_FULLPATH:
