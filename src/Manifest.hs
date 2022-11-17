@@ -173,7 +173,7 @@ gitbucket =
                 ANON
                   { containers =
                       [ Util.container
-                          (Util.registry <> "gitbucket:4.38.3")
+                          (Util.registry <> "gitbucket:4.38.4")
                           ANON
                             { ports =
                                 [ Util.containerPort 8080
