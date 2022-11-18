@@ -41,10 +41,11 @@ cp-init:
 
 overlay: # use with kubernetes bind propagation bidirectional
   FROM +root
-  COPY bin+busybox/mount bin+busybox/umount bin+busybox/cp bin+execline/foreground /bin/
+  COPY bin+busybox/mount bin+busybox/umount bin+busybox/cp bin+execline/foreground bin+s6-portable-utils/s6-pause /bin/
   COPY empty /initial-contents
   COPY empty /lowerdir
   COPY empty /upperdir
   COPY empty /workdir
-  ENTRYPOINT [ "foreground", "cp", "-rn", "/initial-contents", "/lowerdir", "" ]
-  CMD [ "mount", "-t", "overlay", "overlay", "-o", "lowerdir=/lowerdir,upperdir=/upperdir,workdir=/workdir", "/upperdir" ]
+  ENTRYPOINT [ "foreground", "cp", "-rn", "/initial-contents", "/lowerdir", "", \
+    "foreground", "mount", "-t", "overlay", "overlay", "-o", "lowerdir=/lowerdir,upperdir=/upperdir,workdir=/workdir", "/upperdir", "" ]
+  CMD [ "s6-pause" ]
