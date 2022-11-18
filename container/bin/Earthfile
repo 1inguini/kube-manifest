@@ -10,11 +10,10 @@ skalibs:
   RUN echo $version > version.txt
   SAVE ARTIFACT version.txt
   COPY --keep-own +musl/rootfs/usr/lib/musl /usr
-  GIT CLONE --branch v$version https://github.com/skarnet/skalibs.git skalibs
-  WORKDIR skalibs
-  RUN ./configure --disable-dynamic --prefix=$HOME/rootfs/usr
+  GIT CLONE --branch v$version https://github.com/skarnet/skalibs.git src
+  WORKDIR src
+  RUN ./configure --disable-dynamic --prefix=$PWD/rootfs/usr
   RUN make && sudo make install
-  WORKDIR ..
   SAVE ARTIFACT --keep-own rootfs
 
 execline:
@@ -47,7 +46,6 @@ s6-portable-utils:
   RUN strip command/*
   SAVE ARTIFACT command/* AS LOCAL s6-portable-utils/
 
-
 busybox:
   ARG version=1.35.0
   RUN echo $version > version.txt
@@ -62,4 +60,4 @@ busybox:
   RUN sudo curl -L -o command/umount \
     "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_UMOUNT"
   RUN sudo chmod -vR 755 command/
-  SAVE ARTIFACT --keep-own command/* AS LOCAL busybox/
+  SAVE ARTIFACT command/* AS LOCAL busybox/
