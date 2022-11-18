@@ -39,7 +39,7 @@ cp-init:
   ENTRYPOINT [ "cp", "-rn" ]
   CMD [ "/contents", "/mnt" ]
 
-overlay-init: # use with kubernetes bind propagation bidirectional
+overlay: # use with kubernetes bind propagation bidirectional
   FROM +root
   COPY bin+busybox/mount bin+busybox/umount bin+busybox/cp bin+execline/foreground /bin/
   COPY empty /initial-contents

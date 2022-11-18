@@ -23,13 +23,30 @@ execline:
   SAVE ARTIFACT version.txt
   COPY --keep-own +musl/rootfs/usr/lib/musl /usr
   COPY --keep-own +skalibs/rootfs/usr /usr
-  GIT CLONE --branch v$version https://github.com/skarnet/execline.git execline
-  WORKDIR execline
-  RUN ./configure --bindir=$HOME/command --enable-static-libc \
+  GIT CLONE --branch v$version https://github.com/skarnet/execline.git src
+  WORKDIR src
+  RUN ./configure --bindir=$PWD/command --prefix=$PWD/rootfs --enable-static-libc \
     --with-sysdeps=/usr/lib/skalibs/sysdeps --with-lib=/usr/lib/skalibs
-  RUN make && sudo make install
-  WORKDIR ..
-  SAVE ARTIFACT --keep-own command/*
+  RUN make
+  RUN make install
+  RUN strip command/*
+  SAVE ARTIFACT command/* AS LOCAL execline/
+
+s6-portable-utils:
+  ARG version=2.2.5.0
+  RUN echo $version > version.txt
+  SAVE ARTIFACT version.txt
+  COPY --keep-own +musl/rootfs/usr/lib/musl /usr
+  COPY --keep-own +skalibs/rootfs/usr /usr
+  GIT CLONE --branch v$version https://github.com/skarnet/s6-portable-utils.git src
+  WORKDIR src
+  RUN ./configure --bindir=$PWD/command --prefix=$PWD/rootfs --enable-static-libc \
+    --with-sysdeps=/usr/lib/skalibs/sysdeps --with-lib=/usr/lib/skalibs
+  RUN make
+  RUN make install
+  RUN strip command/*
+  SAVE ARTIFACT command/* AS LOCAL s6-portable-utils/
+
 
 busybox:
   ARG version=1.35.0
@@ -45,4 +62,4 @@ busybox:
   RUN sudo curl -L -o command/umount \
     "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_UMOUNT"
   RUN sudo chmod -vR 755 command/
-  SAVE ARTIFACT --keep-own command/*
+  SAVE ARTIFACT --keep-own command/* AS LOCAL busybox/
