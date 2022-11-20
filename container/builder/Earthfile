@@ -33,7 +33,10 @@ pacman:
     -e '$aNoExtract  = usr/share/systemd/*' \
     -e '$aNoExtract  = usr/share/bash-completion/*' \
     -e '$aNoExtract  = usr/share/fish/*' \
-    -e '$aNoExtract  = usr/share/zsh/*'
+    -e '$aNoExtract  = usr/share/zsh/*' \
+    -e '$aNoExtract  = usr/lib/systemd/*' \
+    -e '$aNoExtract  = usr/lib/sysusers.d/*' \
+    -e '$aNoExtract  = usr/lib/tmpfiles.d/*'
 
   COPY --chmod=644 --chown=root:root mirrorlist /etc/pacman.d/mirrorlist
   RUN sudo pacman --noconfirm -Sy
