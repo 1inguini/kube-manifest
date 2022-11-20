@@ -85,9 +85,11 @@ processYaml written yaml =
         "manifest/"
           <> Text.unpack ?namespace
           <> "/"
-          <> ( case preview (key "kind") object of
-                Just "PersistentVolumeClaim" -> "never-delete/"
-                _ -> mempty
+          <> ( let neverDelete = "never-delete/"
+                in case preview (key "kind") object of
+                    Just "PersistentVolumeClaim" -> neverDelete
+                    Just "Namespace" -> neverDelete
+                    _ -> mempty
              )
     putStrLn $ "# writing to: " <> path
     ( if path `elem` written

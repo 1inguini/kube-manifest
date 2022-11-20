@@ -163,14 +163,11 @@ gitbucket :: [Yaml]
 gitbucket =
   let ?namespace = "git"
       ?app = "gitbucket"
-   in let plugins = Util.name "plugins"
-          pluginsWork = Util.name "plugins-work"
-          pluginsLower = Util.name "plugins-lower"
-          database = Util.name "database"
-          databaseWork = Util.name "database-work"
-          databaseLower = Util.name "database-lower"
-          gitbucketHome = "/home/nonroot/.gitbucket/"
-          databaseData = "/var/lib/mysql/"
+   in let plugins = "plugins"
+          pluginsInit = "plugins-init"
+          database = "mariadb"
+          gitbucketHomePath = "/home/nonroot/.gitbucket/"
+          databaseDataPath = "/var/lib/mysql/"
           mariadbVersion = "10.9.4-2"
        in [ Util.manifest Util.namespace
           , Util.manifest $
@@ -178,30 +175,10 @@ gitbucket =
                 ANON
                   { initContainers =
                       [ toJSON $
-                          Util.name "gitbucket-init" $
+                          Util.name pluginsInit $
                             Util.container
                               (Util.registry <> "gitbucket/plugins-init:latest")
-                              ANON{volumeMounts = [plugins $ Util.volumeMount "/mnt"]}
-                      , toJSON $
-                          Util.name "database-init" $
-                            Util.container
-                              (Util.registry <> "gitbucket/mariadb-init:" <> mariadbVersion)
-                              ANON
-                                { securityContext = ANON{privileged = True}
-                                , -- , lifecycle =
-                                  --     ANON
-                                  --       { preStop =
-                                  --           ANON{exec = ANON{command = ["umount", "/upperdir"] :: [Text]}}
-                                  --       }
-                                  volumeMounts =
-                                    [ toJSON $ databaseWork $ Util.volumeMount "/workdir"
-                                    , toJSON $ databaseLower $ Util.volumeMount "/lowerdir"
-                                    , toJSON $
-                                        database $
-                                          Util.volumeMount "/upperdir"
-                                            `merge` ANON{mountPropagation = "Bidirectional" :: Text}
-                                    ]
-                                }
+                              ANON{volumeMounts = [Util.name plugins $ Util.volumeMount "/mnt"]}
                       ]
                   , containers =
                       [ toJSON $
@@ -212,32 +189,49 @@ gitbucket =
                               , livenessProbe = Util.httpGetProbe "/api/v3"
                               , readinessProbe = Util.httpGetProbe "/api/v3"
                               , volumeMounts =
-                                  [ Util.volumeMount gitbucketHome
-                                  , plugins $ Util.volumeMount $ gitbucketHome <> "plugins/"
+                                  [ Util.volumeMount gitbucketHomePath
+                                  , Util.name plugins $ Util.volumeMount $ gitbucketHomePath <> "plugins/"
                                   ]
                               }
                       , toJSON $
-                          database $
+                          Util.name database $
                             Util.container
                               (Util.registry <> "mariadb/main:" <> mariadbVersion)
                               ANON
                                 { ports = [Util.containerPort 3306]
                                 , livenessProbe = Util.tcpSocketProbe
                                 , readinessProbe = Util.tcpSocketProbe
-                                , volumeMounts = [Util.volumeMount databaseData]
+                                , volumeMounts = [Util.volumeMount databaseDataPath]
+                                }
+                      , toJSON $
+                          Util.name (database <> "-data") $
+                            Util.container
+                              (Util.registry <> "gitbucket/mariadb-datadir:" <> mariadbVersion)
+                              ANON
+                                { securityContext = ANON{privileged = True}
+                                , lifecycle =
+                                    ANON
+                                      { preStop =
+                                          ANON{exec = ANON{command = ["umount", "/upperdir"] :: [Text]}}
+                                      }
+                                , readinessProbe = Util.execCommandProbe ["touch", "/upperdir/test/test"]
+                                , volumeMounts =
+                                    [ toJSON $
+                                        Util.name database $
+                                          Util.volumeMount "/upperdir"
+                                            `merge` ANON{mountPropagation = "Bidirectional" :: Text}
+                                    ]
                                 }
                       ]
                   , volumes =
                       [ toJSON Util.persistentVolumeClaimVolume
-                      , toJSON $ plugins Util.emptyDirVolume
-                      , toJSON $ database Util.persistentVolumeClaimVolume
-                      , toJSON $ databaseWork Util.emptyDirVolume
-                      , toJSON $ databaseLower Util.emptyDirVolume
+                      , toJSON $ Util.name plugins Util.emptyDirVolume
+                      , toJSON $ Util.name database Util.persistentVolumeClaimVolume
                       ]
                   , securityContext = ANON{fsGroup = Util.nonroot}
                   }
                 [ Util.openebsLvmClaim "5Gi"
-                , database $ Util.openebsLvmClaim "1Gi"
+                , Util.name database $ Util.openebsLvmClaim "1Gi"
                 ]
           , Util.manifest $ Util.service ANON{ports = [Util.httpServicePort]}
           , Util.manifest $ Util.ingressContourTls [Util.ingressRule "/"]

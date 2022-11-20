@@ -153,6 +153,9 @@ httpGetProbe path = ANON{httpGet = ANON{port = ?name, path = path}}
 tcpSocketProbe :: (?name :: Text) => Record _
 tcpSocketProbe = ANON{tcpSocket = ANON{port = ?name}}
 
+execCommandProbe :: [Text] -> Record _
+execCommandProbe command = ANON{exec = ANON{command = command}}
+
 namespace ::
   (?namespace :: Text, ?app :: Text) =>
   Record _
