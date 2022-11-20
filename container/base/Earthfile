@@ -34,8 +34,8 @@ SAVE_FULLPATH:
 cp-init:
   FROM +root
   COPY bin+busybox/cp /bin/
-  COPY empty /contents
-  COPY empty /mnt
+  COPY --chmod=755 emptydir /contents
+  COPY --chmod=755 emptydir /mnt
   ENTRYPOINT [ "cp", "-rn" ]
   CMD [ "/contents", "/mnt" ]
 
