@@ -44,12 +44,11 @@ rootfs:
     COPY --chown=nonroot:nonroot +plugins/plugins rootfs/home/nonroot/.gitbucket/plugins
     COPY --keep-own ../mariadb+rootfs/rootfs rootfs
   END
-  
   DO builder+ROOTFS
 
 plugins-init-container:
   FROM base+cp-init
-  COPY --chown=nonroot:nonroot +plugins/ /contents
+  COPY --chown=nonroot:nonroot +plugins/plugins /contents
   DO builder+PUSH --name=gitbucket/plugins-init
 
 container:
