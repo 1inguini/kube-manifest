@@ -217,7 +217,7 @@ gitbucket =
                                       { preStop =
                                           ANON{exec = ANON{command = ["umount", "/mnt/upperdir"] :: [Text]}}
                                       }
-                                , readinessProbe = Util.execCommandProbe ["touch", "/upperdir/test/test"]
+                                , readinessProbe = Util.execCommandProbe ["mkdir", "/mnt/upperdir/test/test"]
                                 , volumeMounts =
                                     [ toJSON $
                                         Util.name database $

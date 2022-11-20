@@ -59,7 +59,7 @@ busybox:
     "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_MOUNT"
   RUN sudo curl -L -o command/umount \
     "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_UMOUNT"
-  RUN sudo curl -L -o command/touch \
-    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_TOUCH"
+  RUN sudo curl -L -o command/mkdir \
+    "https://busybox.net/downloads/binaries/${version}-x86_64-linux-musl/busybox_mkdir"
   RUN sudo chmod -vR 755 command/
   SAVE ARTIFACT command/* AS LOCAL busybox/
