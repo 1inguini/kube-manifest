@@ -201,7 +201,10 @@ gitbucket =
                                 { ports = [Util.containerPort 3306]
                                 , livenessProbe = Util.tcpSocketProbe
                                 , readinessProbe = Util.tcpSocketProbe
-                                , volumeMounts = [Util.volumeMount databaseDataPath]
+                                , volumeMounts =
+                                    [ Util.volumeMount databaseDataPath
+                                        `merge` ANON{subPath = "upperdir" :: Text}
+                                    ]
                                 }
                       , toJSON $
                           Util.name (database <> "-data") $
@@ -212,13 +215,13 @@ gitbucket =
                                 , lifecycle =
                                     ANON
                                       { preStop =
-                                          ANON{exec = ANON{command = ["umount", "/upperdir"] :: [Text]}}
+                                          ANON{exec = ANON{command = ["umount", "/mnt/upperdir"] :: [Text]}}
                                       }
                                 , readinessProbe = Util.execCommandProbe ["touch", "/upperdir/test/test"]
                                 , volumeMounts =
                                     [ toJSON $
                                         Util.name database $
-                                          Util.volumeMount "/upperdir"
+                                          Util.volumeMount "/mnt"
                                             `merge` ANON{mountPropagation = "Bidirectional" :: Text}
                                     ]
                                 }
