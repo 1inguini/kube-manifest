@@ -56,7 +56,7 @@ container:
   IF [ $kube = yes ]
     BUILD +plugins-init-container
     BUILD mariadb+container
-    BUILD mariadb+datadir-init-container --exec='CREATE DATABASE gitbucket' --name=gitbucket/mariadb-init
+    BUILD mariadb+datadir-container --exec='CREATE DATABASE gitbucket' --name=gitbucket/mariadb-datadir
     ARG suffix=/main
   END
   FROM ../openjdk+container
