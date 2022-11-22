@@ -57,11 +57,11 @@ locale-archive:
     -e '$aen_US.UTF-8 UTF-8' \
     -e '$aja_JP.UTF-8 UTF-8'
   RUN sudo locale-gen
-  SAVE ARTIFACT --keep-own /usr/lib/locale/locale-archive
+  SAVE ARTIFACT /usr/lib/locale/locale-archive
 
 buildenv:
   FROM +aur-helper
-  COPY --keep-own +locale-archive/locale-archive /usr/lib/locale/
+  COPY --chown=root:root +locale-archive/locale-archive /usr/lib/locale/
   RUN $pacman -S git moreutils rsync
   ENV cpr='rsync --archive --acls --xattrs -hh --partial --info=stats1,progress2 --modify-window=1 --no-inc-recursive'
   DO +PUSH --name=builder
@@ -84,7 +84,7 @@ PACKAGE:
   END
   RUN mkdir rootfs && \
     $pacman -S --root rootfs --dbpath=/var/lib/pacman $targets
-  SAVE ARTIFACT --keep-own rootfs
+  SAVE ARTIFACT rootfs
 
 ROOTFS:
   COMMAND
@@ -99,13 +99,13 @@ ROOTFS:
   RUN xargs readlink -f <$infile | sponge -a $infile
   RUN sort <$infile | uniq | sed -e 's:^/::' | sponge $infile
 
-  RUN sudo mkdir -p rootfs/etc
-  RUN sudo tar --ignore-failed-read --no-recursion -C / -T $infile -cpf - | \
-    sudo tar -C rootfs/ -xpf -
+  RUN mkdir -p rootfs/etc
+  RUN sudo tar --ignore-failed-read --no-recursion -C / -T $infile -cf - | \
+    tar -C rootfs/ -xf -
   RUN sudo ldconfig -r rootfs
 
   IF [ $save = 'yes' ]
-    SAVE ARTIFACT --keep-own rootfs
+    SAVE ARTIFACT rootfs
   END
 
 REMOVE_SH:

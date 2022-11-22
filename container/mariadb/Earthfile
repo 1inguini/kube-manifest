@@ -15,11 +15,11 @@ all:
   BUILD +container
 
 buildenv:
-  COPY --chown=nonroot:nonroot empty /run/mysqld
-  COPY --chown=nonroot:nonroot empty /var/lib/mysql
+  COPY empty /run/mysqld
+  COPY empty /var/lib/mysql
 
 bins:
-  COPY --keep-own +strip/rootfs rootfs
+  COPY +strip/rootfs rootfs
   RUN $pacman -Qql mariadb | grep -P '^/usr/bin' > files.txt
   DO builder+ROOTFS --infile=files.txt
 
@@ -44,7 +44,7 @@ container:
     FROM base+scratch
     ENTRYPOINT [ "mariadbd" ]
   END
-  COPY --keep-own +rootfs/rootfs /
+  COPY +rootfs/rootfs /
   WORKDIR /var/lib/mysql
   DO builder+PUSH --name=mariadb$suffix --tag=$version
 
