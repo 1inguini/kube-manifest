@@ -48,7 +48,7 @@ aur-helper:
   WORKDIR aur-helper
   RUN makepkg --noconfirm -sir
   WORKDIR ../
-  ENV pacman=yay --noconfirm
+  ENV pacman=yay --noconfirm --noprovides
 
 locale-archive:
   FROM +pacman
@@ -134,5 +134,5 @@ PUSH:
     # ghcr.io/1inguini/kube-manifest/$name:$tag \
     # docker.io/1inguini/$name:latest \
     # docker.io/1inguini/$name:$tag \
-    registry.1inguini.com/library/$name:latest \
-    registry.1inguini.com/library/$name:$tag
+    registry.1inguini.com/library/$name:latest # \
+    # registry.1inguini.com/library/$name:$tag

@@ -2,7 +2,7 @@ VERSION --use-chmod 0.6
 IMPORT ../base
 IMPORT ../bin
 IMPORT ../builder
-IMPORT ../mariadb
+IMPORT ../mysql
 FROM builder+buildenv
 
 ARG version=4.38.4
@@ -37,30 +37,32 @@ git:
 
 rootfs:
   COPY --chown=nonroot:nonroot +gitbucket.war/gitbucket.war rootfs/home/nonroot/
-  COPY --chown=nonroot:nonroot --chmod=644 database.conf rootfs/home/nonroot/.gitbucket/
   COPY --keep-own +git/rootfs rootfs
   IF [ $kube = no ]
+    COPY --chown=nonroot:nonroot --chmod=644 database.conf rootfs/home/nonroot/.gitbucket/
     COPY --keep-own bin+execline/background rootfs/usr/bin/
     COPY --chown=nonroot:nonroot +plugins/plugins rootfs/home/nonroot/.gitbucket/plugins
     COPY --keep-own ../mariadb+rootfs/rootfs rootfs
   END
   DO builder+ROOTFS
 
-plugins-init-container:
+home-init-container:
   FROM base+cp-init
-  COPY --chown=nonroot:nonroot +plugins/plugins /contents
-  DO builder+PUSH --name=gitbucket/plugins-init
+  COPY --chown=nonroot:nonroot +plugins/plugins /contents/plugins
+  COPY --chown=nonroot:nonroot --chmod=644 database.conf /contents/
+  DO builder+PUSH --name=gitbucket/home-init
 
 container:
   IF [ $kube = yes ]
-    BUILD +plugins-init-container
+    BUILD +home-init-container
     BUILD mariadb+container
-    BUILD mariadb+datadir-container --exec='CREATE DATABASE gitbucket' --name=gitbucket/mariadb-datadir
+    BUILD mariadb+datadir-container --name=gitbucket/mysql-datadir \
+      --exec="CREATE DATABASE gitbucket; GRANT ALL PRIVILEGES ON gitbucket.* TO 'nonroot'@'localhost' IDENTIFIED VIA mysql_native_password USING 'secret';"
     ARG suffix=/main
   END
   FROM ../openjdk+container
   COPY --keep-own +rootfs/rootfs /
   CMD [ "gitbucket.war", "--port=8080" ]
   EXPOSE 8080
-  LABEL org.opencontainers.image.description="gitbucket with mariadb"
+  LABEL org.opencontainers.image.description="gitbucket with mysql"
   DO builder+PUSH --name=gitbucket$suffix --tag=$version

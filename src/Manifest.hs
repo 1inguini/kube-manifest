@@ -163,22 +163,22 @@ gitbucket :: [Yaml]
 gitbucket =
   let ?namespace = "git"
       ?app = "gitbucket"
-   in let plugins = "plugins"
-          pluginsInit = "plugins-init"
-          database = "mariadb"
-          gitbucketHomePath = "/home/nonroot/.gitbucket/"
+   in let home = "home"
+          homeInit = "home-init"
+          homePath = "/home/nonroot/.gitbucket/"
+          database = "mysql"
           databaseDataPath = "/var/lib/mysql/"
-          mariadbVersion = "10.9.4-2"
+          mysqlVersion = "latest" -- "10.9.4-2"
        in [ Util.manifest Util.namespace
           , Util.manifest $
               Util.statefulSet
                 ANON
                   { initContainers =
                       [ toJSON $
-                          Util.name pluginsInit $
+                          Util.name homeInit $
                             Util.container
-                              (Util.registry <> "gitbucket/plugins-init:latest")
-                              ANON{volumeMounts = [Util.name plugins $ Util.volumeMount "/mnt"]}
+                              (Util.registry <> "gitbucket/home-init:latest")
+                              ANON{volumeMounts = [Util.name home $ Util.volumeMount "/mnt/"]}
                       ]
                   , containers =
                       [ toJSON $
@@ -189,14 +189,21 @@ gitbucket =
                               , livenessProbe = Util.httpGetProbe "/api/v3"
                               , readinessProbe = Util.httpGetProbe "/api/v3"
                               , volumeMounts =
-                                  [ Util.volumeMount gitbucketHomePath
-                                  , Util.name plugins $ Util.volumeMount $ gitbucketHomePath <> "plugins/"
+                                  [ toJSON $ Util.volumeMount homePath
+                                  , toJSON $
+                                      Util.name home $
+                                        Util.volumeMount (homePath <> "plugins")
+                                          `merge` ANON{subPath = "plugins" :: Text}
+                                  , toJSON $
+                                      Util.name home $
+                                        Util.volumeMount (homePath <> "database.conf")
+                                          `merge` ANON{subPath = "database.conf" :: Text}
                                   ]
                               }
                       , toJSON $
                           Util.name database $
                             Util.container
-                              (Util.registry <> "mariadb/main:" <> mariadbVersion)
+                              (Util.registry <> "mysql/main:" <> mysqlVersion)
                               ANON
                                 { ports = [Util.containerPort 3306]
                                 , livenessProbe = Util.tcpSocketProbe
@@ -209,7 +216,7 @@ gitbucket =
                       , toJSON $
                           Util.name (database <> "-data") $
                             Util.container
-                              (Util.registry <> "gitbucket/mariadb-datadir:" <> mariadbVersion)
+                              (Util.registry <> "gitbucket/mysql-datadir:" <> mysqlVersion)
                               ANON
                                 { securityContext = ANON{privileged = True}
                                 , lifecycle =
@@ -217,7 +224,7 @@ gitbucket =
                                       { preStop =
                                           ANON{exec = ANON{command = ["umount", "/mnt/upperdir"] :: [Text]}}
                                       }
-                                , readinessProbe = Util.execCommandProbe ["mkdir", "/mnt/upperdir/test/test"]
+                                , readinessProbe = Util.execCommandProbe ["test", "-e", "/mnt/upperdir/test"]
                                 , volumeMounts =
                                     [ toJSON $
                                         Util.name database $
@@ -228,7 +235,7 @@ gitbucket =
                       ]
                   , volumes =
                       [ toJSON Util.persistentVolumeClaimVolume
-                      , toJSON $ Util.name plugins Util.emptyDirVolume
+                      , toJSON $ Util.name home Util.emptyDirVolume
                       , toJSON $ Util.name database Util.persistentVolumeClaimVolume
                       ]
                   , securityContext = ANON{fsGroup = Util.nonroot}

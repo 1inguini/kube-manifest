@@ -27,8 +27,9 @@ rootfs:
   COPY --chown=nonroot:nonroot empty rootfs/run/mysqld
   IF [ $kube = yes ]
     COPY --chown=nonroot:nonroot empty rootfs/var/lib/mysql
+    COPY --chown=root:root bin+execline/if bin+execline/loopwhilex bin+busybox/test rootfs/usr/bin/
   ELSE
-    COPY --chown=nonroot:nonroot +datadir/mysql rootfs/var/lib/mysql
+    COPY --chown=nonroot:nonroot +datadir/data rootfs/var/lib/mysql
   END
   RUN $pacman -Qql mariadb mariadb-libs | grep -P '^/(etc|usr/(share|lib)/mysql).*[^/]$' > files.txt
   RUN echo '/usr/bin/mariadbd' >> files.txt
@@ -37,26 +38,30 @@ rootfs:
 container:
   IF [ $kube = yes ]
     ARG suffix=/main
+    FROM base+scratch
+    ENTRYPOINT [ "if", " loopwhilex", " -x", " 0", " test", " -e", " /var/lib/mysql/mysql", "", "mariadbd" ]
+  ELSE
+    FROM base+scratch
+    ENTRYPOINT [ "mariadbd" ]
   END
-  FROM base+scratch
   COPY --keep-own +rootfs/rootfs /
-  ENTRYPOINT [ "mariadbd" ]
+  WORKDIR /var/lib/mysql
   DO builder+PUSH --name=mariadb$suffix --tag=$version
 
 datadir:
   FROM +buildenv
-  RUN sudo mariadb-install-db --user=nonroot --datadir=/var/lib/mysql
-  RUN sudo chown -v nonroot:nonroot /run/mysqld /var/lib/mysql
+  RUN sudo chown -v nonroot:nonroot /run/mysqld
+  RUN mariadb-install-db
   COPY install.sql install.sql
   ARG exec
   RUN echo $exec >> install.sql
-  RUN mariadbd & sleep 2 && mariadb -u nonroot -e "$(cat install.sql)"
+  RUN mariadbd --datadir=$PWD/data & sleep 2 && sudo mariadb -u root -e "$(cat install.sql)"
   
-  SAVE ARTIFACT /var/lib/mysql
+  SAVE ARTIFACT data
 
 datadir-container:
   FROM base+overlay
   ARG exec
   ARG name=mariadb/datadir
-  COPY --chown=nonroot:nonroot (+datadir/mysql --exec=$exec) /lowerdir
+  COPY --chown=nonroot:nonroot (+datadir/data --exec=$exec) /lowerdir
   DO builder+PUSH --name=$name --tag=$version
