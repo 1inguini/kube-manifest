@@ -31,7 +31,7 @@ rootfs:
   ELSE
     COPY --chown=nonroot:nonroot +datadir/data rootfs/var/lib/mysql
   END
-  RUN $pacman -Qql mariadb mariadb-libs | grep -P '^/(etc|usr/(share|lib)/mysql).*[^/]$' > files.txt
+  RUN $pacman -Qql mariadb mariadb-libs > files.txt
   RUN echo '/usr/bin/mariadbd' >> files.txt
   DO builder+ROOTFS --infile=files.txt
 
