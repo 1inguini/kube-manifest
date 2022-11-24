@@ -22,6 +22,6 @@ rootfs:
 
 container:
   FROM base+scratch
-  COPY --keep-own +rootfs/rootfs /
+  COPY +rootfs/rootfs /
   ENTRYPOINT [ "java", "-jar" ]
   DO builder+PUSH --name=openjdk --tag=$version

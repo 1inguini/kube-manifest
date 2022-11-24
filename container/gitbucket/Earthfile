@@ -2,7 +2,7 @@ VERSION --use-chmod 0.6
 IMPORT ../base
 IMPORT ../bin
 IMPORT ../builder
-IMPORT ../mysql
+IMPORT ../mariadb
 FROM builder+buildenv
 
 ARG version=4.38.4
@@ -10,13 +10,26 @@ ARG kube=yes
 
 all:
   BUILD +container
+  IF [ $kube = yes ]
+    BUILD +home-init-container
+    BUILD mariadb+container --kube=$kube
+    COPY +secret/secret .
+    ARG secret=$(cat secret)
+    BUILD mariadb+datadir-container --name=gitbucket/mariadb-datadir \
+      --sql="CREATE DATABASE gitbucket;
+      GRANT ALL PRIVILEGES ON gitbucket.* TO 'nonroot' @'localhost' IDENTIFIED VIA ed25519 USING PASSWORD('$secret');"
+  END
+
+secret:
+  RUN head -c 32 /dev/random | base64 --wrap=0 > secret
+  SAVE ARTIFACT secret
+
 
 gitbucket.war:
   RUN curl -LO "https://github.com/gitbucket/gitbucket/releases/download/$version/gitbucket.war"
   SAVE ARTIFACT gitbucket.war
 
 plugins:
-  # plugins
   RUN curl --parallel --create-dirs --output-dir plugins -L \
     -O 'https://github.com/yoshiyoshifujii/gitbucket-commitgraphs-plugin/releases/download/4.35.0/gitbucket-commitgraphs-plugin_2.13-4.35.0.jar' \
     -O 'https://github.com/mrkm4ntr/gitbucket-network-plugin/releases/download/1.9.2/gitbucket-network-plugin_2.13-1.9.2.jar' \
@@ -35,34 +48,36 @@ git:
   RUN echo $(which git) >> files.txt
   DO builder+ROOTFS --infile=files.txt
 
+home:
+  COPY database.conf .gitbucket/
+  COPY +secret/secret .
+  RUN sed -e "s:secret:$(cat secret):" -i .gitbucket/database.conf
+  COPY +plugins/plugins .gitbucket/plugins
+  SAVE ARTIFACT .gitbucket
+
 rootfs:
-  COPY --chown=nonroot:nonroot +gitbucket.war/gitbucket.war rootfs/home/nonroot/
-  COPY --keep-own +git/rootfs rootfs
+  COPY +gitbucket.war/gitbucket.war rootfs/home/nonroot/
+  COPY +git/rootfs rootfs
+  COPY bin+execline/background rootfs/usr/bin/
+  COPY (mariadb+rootfs/rootfs --kube=$kube) rootfs
   IF [ $kube = no ]
-    COPY --chown=nonroot:nonroot --chmod=644 database.conf rootfs/home/nonroot/.gitbucket/
-    COPY --keep-own bin+execline/background rootfs/usr/bin/
-    COPY --chown=nonroot:nonroot +plugins/plugins rootfs/home/nonroot/.gitbucket/plugins
-    COPY --keep-own ../mariadb+rootfs/rootfs rootfs
+    COPY +home/.gitbucket rootfs/home/nonroot/.gitbucket
   END
-  DO builder+ROOTFS
+  SAVE ARTIFACT rootfs
 
 home-init-container:
   FROM base+cp-init
-  COPY --chown=nonroot:nonroot +plugins/plugins /contents/plugins
-  COPY --chown=nonroot:nonroot --chmod=644 database.conf /contents/
+  COPY --chown=nonroot:nonroot +home/.gitbucket /contents
   DO builder+PUSH --name=gitbucket/home-init
 
 container:
-  IF [ $kube = yes ]
-    BUILD +home-init-container
-    BUILD mariadb+container
-    BUILD mariadb+datadir-container --name=gitbucket/mysql-datadir \
-      --exec="CREATE DATABASE gitbucket; GRANT ALL PRIVILEGES ON gitbucket.* TO 'nonroot'@'localhost' IDENTIFIED VIA mysql_native_password USING 'secret';"
+  IF [ $kube = 'yes' ]
     ARG suffix=/main
   END
   FROM ../openjdk+container
-  COPY --keep-own +rootfs/rootfs /
+  COPY +rootfs/rootfs /
+  ENTRYPOINT [ "if", " loopwhilex", " -x", " 0", " test", " -e", " /var/lib/mysql/mysql", "", "background", " mariadbd", "", "if", " loopwhilex", " -x", " 0", " test", " -e", " /run/mysqld/mysqld.sock", "", "java", "-jar" ]
   CMD [ "gitbucket.war", "--port=8080" ]
   EXPOSE 8080
-  LABEL org.opencontainers.image.description="gitbucket with mysql"
+  LABEL org.opencontainers.image.description="gitbucket with mariadb"
   DO builder+PUSH --name=gitbucket$suffix --tag=$version

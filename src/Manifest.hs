@@ -166,9 +166,10 @@ gitbucket =
    in let home = "home"
           homeInit = "home-init"
           homePath = "/home/nonroot/.gitbucket/"
-          database = "mysql"
+          database = "mariadb"
           databaseDataPath = "/var/lib/mysql/"
-          mysqlVersion = "latest" -- "10.9.4-2"
+          mariadbVersion = "latest" -- "10.9.4-2"
+          gitbucketVersion = "latest" -- 4.38.4
        in [ Util.manifest Util.namespace
           , Util.manifest $
               Util.statefulSet
@@ -183,7 +184,7 @@ gitbucket =
                   , containers =
                       [ toJSON $
                           Util.container
-                            (Util.registry <> "gitbucket/main:4.38.4")
+                            (Util.registry <> "gitbucket/main:" <> gitbucketVersion)
                             ANON
                               { ports = [Util.containerPort 8080]
                               , livenessProbe = Util.httpGetProbe "/api/v3"
@@ -198,25 +199,16 @@ gitbucket =
                                       Util.name home $
                                         Util.volumeMount (homePath <> "database.conf")
                                           `merge` ANON{subPath = "database.conf" :: Text}
+                                  , toJSON $
+                                      Util.name database $
+                                        Util.volumeMount databaseDataPath
+                                          `merge` ANON{subPath = "upperdir" :: Text}
                                   ]
                               }
                       , toJSON $
-                          Util.name database $
-                            Util.container
-                              (Util.registry <> "mysql/main:" <> mysqlVersion)
-                              ANON
-                                { ports = [Util.containerPort 3306]
-                                , livenessProbe = Util.tcpSocketProbe
-                                , readinessProbe = Util.tcpSocketProbe
-                                , volumeMounts =
-                                    [ Util.volumeMount databaseDataPath
-                                        `merge` ANON{subPath = "upperdir" :: Text}
-                                    ]
-                                }
-                      , toJSON $
                           Util.name (database <> "-data") $
                             Util.container
-                              (Util.registry <> "gitbucket/mysql-datadir:" <> mysqlVersion)
+                              (Util.registry <> "gitbucket/mariadb-datadir:" <> mariadbVersion)
                               ANON
                                 { securityContext = ANON{privileged = True}
                                 , lifecycle =

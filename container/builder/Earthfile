@@ -92,6 +92,7 @@ ROOTFS:
   ARG save=yes
   RUN touch $infile && cat $infile | xargs ldd | grep -Po ' /[^ ]*' | sed -e 's/^ //' | sponge -a $infile
   RUN f=( \
+      '/etc/ld.so.conf' \
       '/usr/lib/locale/locale-archive' \
       '/lib64/ld-linux-x86-64.so.2' \
     ) && printf '%s\n' ${f[@]} >> $infile
@@ -100,8 +101,8 @@ ROOTFS:
   RUN sort <$infile | uniq | sed -e 's:^/::' | sponge $infile
 
   RUN mkdir -p rootfs/etc
-  RUN sudo tar --ignore-failed-read --no-recursion -C / -T $infile -cf - | \
-    tar -C rootfs/ -xf -
+  RUN sudo tar --ignore-failed-read --no-recursion -C / -T $infile -cpf - | \
+    sudo tar -C rootfs/ --skip-old-files -xpf -
   RUN sudo ldconfig -r rootfs
 
   IF [ $save = 'yes' ]

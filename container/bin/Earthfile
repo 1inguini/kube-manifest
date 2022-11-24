@@ -9,19 +9,19 @@ skalibs:
   ARG version=2.12.0.1
   RUN echo $version > version.txt
   SAVE ARTIFACT version.txt
-  COPY --keep-own +musl/rootfs/usr/lib/musl /usr
+  COPY +musl/rootfs/usr/lib/musl /usr
   GIT CLONE --branch v$version https://github.com/skarnet/skalibs.git src
   WORKDIR src
   RUN ./configure --disable-dynamic --prefix=$PWD/rootfs/usr
   RUN make && sudo make install
-  SAVE ARTIFACT --keep-own rootfs
+  SAVE ARTIFACT rootfs
 
 execline:
   ARG version=2.9.0.1
   RUN echo $version > version.txt
   SAVE ARTIFACT version.txt
-  COPY --keep-own +musl/rootfs/usr/lib/musl /usr
-  COPY --keep-own +skalibs/rootfs/usr /usr
+  COPY +musl/rootfs/usr/lib/musl /usr
+  COPY +skalibs/rootfs/usr /usr
   GIT CLONE --branch v$version https://github.com/skarnet/execline.git src
   WORKDIR src
   RUN ./configure --bindir=$PWD/command --prefix=$PWD/rootfs --enable-static-libc \
@@ -35,8 +35,8 @@ s6-portable-utils:
   ARG version=2.2.5.0
   RUN echo $version > version.txt
   SAVE ARTIFACT version.txt
-  COPY --keep-own +musl/rootfs/usr/lib/musl /usr
-  COPY --keep-own +skalibs/rootfs/usr /usr
+  COPY +musl/rootfs/usr/lib/musl /usr
+  COPY +skalibs/rootfs/usr /usr
   GIT CLONE --branch v$version https://github.com/skarnet/s6-portable-utils.git src
   WORKDIR src
   RUN ./configure --bindir=$PWD/command --prefix=$PWD/rootfs --enable-static-libc \

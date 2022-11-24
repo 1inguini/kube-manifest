@@ -13,6 +13,9 @@ ARG kube=yes # yes | no
 
 all:
   BUILD +container
+  IF [ $kube = yes ]
+    BUILD +datadir-container --name=mariadb/datadir
+  END
 
 buildenv:
   COPY empty /run/mysqld
@@ -24,15 +27,17 @@ bins:
   DO builder+ROOTFS --infile=files.txt
 
 rootfs:
-  COPY --chown=nonroot:nonroot empty rootfs/run/mysqld
+  COPY empty rootfs/run/mysqld
   IF [ $kube = yes ]
-    COPY --chown=nonroot:nonroot empty rootfs/var/lib/mysql
-    COPY --chown=root:root bin+execline/if bin+execline/loopwhilex bin+busybox/test rootfs/usr/bin/
+    COPY empty rootfs/var/lib/mysql
+    COPY bin+execline/if bin+execline/loopwhilex bin+busybox/test rootfs/usr/bin/
   ELSE
-    COPY --chown=nonroot:nonroot +datadir/data rootfs/var/lib/mysql
+    COPY +datadir/data rootfs/var/lib/mysql
   END
-  RUN $pacman -Qql mariadb mariadb-libs > files.txt
+  RUN $pacman -Qql mariadb mariadb-libs | grep -Pv '/(bin|include)/' > files.txt
   RUN echo '/usr/bin/mariadbd' >> files.txt
+  COPY empty rootfs/etc/ld.so.conf.d
+  RUN echo '/usr/lib/mysql/plugin' > rootfs/etc/ld.so.conf.d/mariadb.conf
   DO builder+ROOTFS --infile=files.txt
 
 container:
@@ -53,15 +58,16 @@ datadir:
   RUN sudo chown -v nonroot:nonroot /run/mysqld
   RUN mariadb-install-db
   COPY install.sql install.sql
-  ARG exec
-  RUN echo $exec >> install.sql
-  RUN mariadbd --datadir=$PWD/data & sleep 2 && sudo mariadb -u root -e "$(cat install.sql)"
-  
+  ARG sql
+  RUN mariadbd --datadir=./data & until test -e /run/mysqld/mysqld.sock; do sleep 1; done && \
+    sudo mariadb -u root -e "$(cat install.sql)" && killall --wait mariadbd
+  RUN mariadbd --datadir=./data & until test -e /run/mysqld/mysqld.sock; do sleep 1; done && \
+    sudo mariadb -u root -e "$sql" && killall --wait mariadbd
   SAVE ARTIFACT data
 
 datadir-container:
   FROM base+overlay
-  ARG exec
-  ARG name=mariadb/datadir
-  COPY --chown=nonroot:nonroot (+datadir/data --exec=$exec) /lowerdir
+  ARG sql
+  ARG --required name
+  COPY --chown=nonroot:nonroot (+datadir/data --sql=$sql) /lowerdir
   DO builder+PUSH --name=$name --tag=$version

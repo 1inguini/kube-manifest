@@ -17,32 +17,35 @@ scratch-rootfs:
 
 root:
   FROM scratch
-  COPY --keep-own +scratch-rootfs/ /
+  COPY +scratch-rootfs/ /
 
 scratch:
   FROM +root
   WORKDIR /home/nonroot
   USER nonroot
-  LABEL org.opencontainers.image.description="scratch with nonroot user, ssl certs, nssswitch.conf"
+  LABEL org.opencontainers.image.description="scratch with nonroot user, ssl certs, nsswitch.conf"
   DO builder+PUSH --name=scratch
 
 SAVE_FULLPATH:
   COMMAND
   ARG --required path
-  SAVE ARTIFACT --keep-own "$path" "$path"
+  SAVE ARTIFACT "$path" "$path"
 
 cp-init:
-  FROM +root
+  FROM +scratch
   COPY bin+busybox/cp /bin/
-  COPY --chmod=755 emptydir /contents
-  COPY --chmod=755 emptydir /mnt
-  ENTRYPOINT [ "cp", "-r" ]
+  COPY emptydir /contents
+  COPY emptydir /mnt
+  ENTRYPOINT [ "cp", "-pr" ]
   CMD [ "/contents/.", "/mnt" ]
+  VOLUME /contents
 
 overlay: # use with kubernetes bind propagation bidirectional
-  FROM +root
+  FROM +scratch
   COPY bin+busybox/mkdir bin+busybox/test bin+busybox/mount bin+busybox/umount bin+execline/foreground bin+s6-portable-utils/s6-pause /bin/
-  COPY --chmod=755 emptydir /lowerdir/test
-  COPY --chmod=755 emptydir /mnt
+  COPY emptydir /lowerdir/test
+  COPY emptydir /mnt
+  USER root
   ENTRYPOINT [ "foreground", "mkdir", "-p", "/mnt/upperdir", "/mnt/workdir", "", "foreground", "mount", "-t", "overlay", "overlay", "-o", "lowerdir=/lowerdir,upperdir=/mnt/upperdir,workdir=/mnt/workdir", "/mnt/upperdir", "" ]
   CMD [ "s6-pause" ]
+  VOLUME /lowerdir
