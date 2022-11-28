@@ -3,7 +3,7 @@ module Main (
 ) where
 
 import Manifest (yamls)
-import Util (Yaml, YamlType (..))
+import Util (Yaml, YamlType (..), nonroot, tshow)
 import qualified Util
 
 -- import Control.Applicative ((<|>))
@@ -20,10 +20,13 @@ import qualified Util
 -- import System.Process (readProcess)
 
 import Control.Exception.Safe (throwString)
+import Control.Lens ((^.))
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Optics (AsValue (_Object, _String), key, _Key)
+import Data.ByteString.Lazy (ByteString)
+import Data.ByteString.Lazy as ByteString
 import Data.Either (partitionEithers)
 import Data.Hashable (hash)
 import Data.Record.Anon
@@ -35,11 +38,10 @@ import qualified Data.Text as Text
 import Development.Shake (Lint (LintBasic), getShakeOptionsRules, progressSimple)
 import Development.Shake.Plus
 import GHC.Stack (HasCallStack)
+import qualified Network.Wreq as Wreq (get, responseBody)
 import Optics (modifying, over, preview, set, view, (%), _head)
 import Path.IO (createDir, createDirIfMissing, doesPathExist)
-import System.Environment (getArgs, getExecutablePath)
-import System.Linux.Namespaces (Namespace (Mount, Network, User), UserMapping (UserMapping), unshare, writeUserMappings)
-import System.Posix (getEffectiveUserID)
+import Text.Heredoc (here)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 -- processYaml written yaml =
@@ -132,94 +134,65 @@ s = id
 newtype ListDynamicDep = ListDynamicDep () deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
 type instance RuleResult ListDynamicDep = [Path Abs File]
 
-withUnsharedRoot :: IO a -> IO a
-withUnsharedRoot act = do
-  uid <- getEffectiveUserID
-  unshare [User]
-  writeUserMappings Nothing [UserMapping 0 uid 1]
-  x <- act
-  writeUserMappings Nothing [UserMapping uid 0 1]
-  pure x
+newtype Download = Download String deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
+type instance RuleResult Download = ByteString
 
-mountFile :: Path b File -> Path b' File -> RAction _ ()
-mountFile from to = do
-  exist <- doesPathExist to
-  writeFile' to mempty
-  unless exist $ do
-    cmd_ (s "mount --bind") (toFilePath from) (toFilePath to)
+passwd :: Text
+passwd =
+  Text.unlines
+    [ "root:x:0:0:root:/root:/sbin/nologin"
+    , "nonroot:x:" <> tshow nonroot <> ":" <> tshow nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
+    ]
+
+group :: Text
+group =
+  Text.unlines
+    [ "root:x:0:"
+    , "nonroot:x:" <> tshow nonroot
+    ]
+
+nsswitch :: Text
+nsswitch =
+  [here|
+group:          files
+gshadow:         files
+passwd:         files
+shadow:         files
+
+hosts:          files dns
+networks:       files
+
+ethers:         files
+protocols:      files
+rpc:            files
+services:       files
+|]
 
 main :: IO ()
-main = do
-  uid <- getEffectiveUserID
-  exe <- getExecutablePath
-  args <- getArgs
-  if uid /= 0
-    then cmd_ (s "unshare --fork --map-root-user --mount") exe args
-    else shakeArgs
-      shakeOptions
-        { shakeThreads = 0
-        , shakeLint = Just LintBasic
-        , shakeColor = True
-        , shakeProgress = progressSimple
-        , shakeShare = Just ".shake"
-        }
-      $ runShakePlus ()
-      $ do
-        exePath <- parseAbsFile =<< liftIO getExecutablePath
-        shakeOptions <- liftRules getShakeOptionsRules
-        shakeDir <- parseRelDir $ shakeFiles shakeOptions
-        let buildDir = shakeDir </> [reldir|build|]
-        let artifactDir = shakeDir </> [reldir|artifact|]
-        let image = buildDir </> [reldir|image|]
+main = shakeArgs
+  shakeOptions
+    { shakeThreads = 0
+    , shakeLint = Just LintBasic
+    , shakeColor = True
+    , shakeProgress = progressSimple
+    , shakeShare = Just ".shake"
+    }
+  $ runShakePlus ()
+  $ do
+    let artifactDir = [reldir|artifact|]
+    shakeOptions <- liftRules getShakeOptionsRules
+    shakeDir <- parseRelDir $ shakeFiles shakeOptions
+    let buildDir = shakeDir </> [reldir|build|]
+    let image = buildDir </> [reldir|image|]
 
-        phony "image/scratch" $ do
-          let ruleDir = buildDir </> [reldir|image/scratch|]
-          sandboxed <- doesPathExist $ ruleDir </> [relfile|rootfs/run|]
-          if not sandboxed
-            then do
-              createDirIfMissing True $ ruleDir </> [reldir|rootfs|]
-              ociSpec <- readFile' [relfile|src/config.json|]
-              ociSpec <- either throwString pure $ Aeson.eitherDecode (convertString ociSpec) :: _ Aeson.Value
-              writeFile' (ruleDir </> [relfile|config.json|]) . convertString . Aeson.encode $
-                set
-                  (key "process" % key "args")
-                  ( Aeson.toJSON $
-                      "/run"
-                        : filter
-                          ( \case
-                              '-' : _ -> True
-                              arg -> arg == "image/scratch"
-                          )
-                          args
-                  )
-                  ociSpec
-              mountFile exePath (ruleDir </> [relfile|rootfs/run|])
-              let bindInRootfs :: Path Abs File -> RAction _ ()
-                  bindInRootfs path = do
-                    to <- replaceProperPrefix [absdir|/|] (ruleDir </> [reldir|rootfs|]) path
-                    mountFile path to
-              bindInRootfs [absfile|/lib64/ld-linux-x86-64.so.2|]
-              bindInRootfs [absfile|/usr/lib/libc.so.6|]
-              bindInRootfs [absfile|/usr/lib/libgmp.so.10|]
-              bindInRootfs [absfile|/usr/lib/libm.so.6|]
-              bindInRootfs [absfile|/usr/lib/libncursesw.so.6|]
-              cmd_
-                (Cwd $ toFilePath ruleDir)
-                -- (s "unshare --fork")
-                -- ["--wd=" <> toFilePath ruleDir, "--map-user=" <> show 1000]
-                (s "runsc --rootless --network=none run")
-                (show $ hash $ s "image/scratch")
-            else do
-              -- needIn
-              --   (build </> [reldir|image/scratch|])
-              --   [ [relfile|bin/tmp|]
-              --   , [relfile|home/nonroot|]
-              --   , [relfile|bin/etc/passwd|]
-              --   , [relfile|etc/passwd|]
-              --   , [relfile|etc/group|]
-              --   , [relfile|etc/nsswitch.conf|]
-              --   , [relfile|etc/ssl|]
-              --   ]
-              -- "container/"
-              liftIO $ putStrLn "ok"
-              pure ()
+    _ <- addOracleCache $ \(Download url) ->
+      liftIO $ (^. Wreq.responseBody) <$> Wreq.get url
+    let askDownload = askOracle . Download
+
+    phony "image/scratch" $ do
+      let ruleDir = buildDir </> [reldir|image/scratch|]
+      cacert <-
+        askDownload
+          "https://ccadb-public.secure.force.com/mozilla/IncludedRootsPEMTxt?TrustBitsInclude=Websites"
+      -- "container/"
+      pure ()

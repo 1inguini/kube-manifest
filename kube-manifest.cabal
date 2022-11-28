@@ -75,25 +75,26 @@ executable kube-manifest
     , directory
     , file-embed
     , hashable
+    , heredoc
     , large-anon
-    , linux-namespaces
+    , lens
     , mtl
     , optics
     , optics-th
     , path-io
-    , process
     , safe
     , safe-exceptions
     , scientific
     , shake
     , shake-plus
     , string-conversions
+    , tar
     , template-haskell
     , text
     , time
-    , unix
     , unordered-containers
     , vector
+    , wreq
     , yaml
 
   hs-source-dirs:   src secret

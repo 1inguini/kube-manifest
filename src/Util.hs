@@ -36,6 +36,9 @@ import TH (deriveJSON)
 -- import Manifest.Io.K8s.Api.Core.V1 (Namespace)
 -- import Manifest.Io.K8s.Apimachinery.Pkg.Apis.Meta.V1 (ObjectMeta (..))
 
+tshow :: Show a => a -> Text
+tshow = Text.pack . show
+
 registry :: Text
 registry = "registry." <> host <> "/library/"
 
