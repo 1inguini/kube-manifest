@@ -27,12 +27,15 @@ common option
     DuplicateRecordFields
     FlexibleContexts
     FlexibleInstances
+    GeneralizedNewtypeDeriving
     ImplicitParams
+    LambdaCase
     MultiParamTypeClasses
     NamedFieldPuns
     OverloadedLabels
     OverloadedStrings
     PartialTypeSignatures
+    QuasiQuotes
     RankNTypes
     ScopedTypeVariables
     StandaloneDeriving
@@ -65,23 +68,30 @@ executable kube-manifest
   build-depends:
     , aeson
     , aeson-optics
-    , base                  ^>=4.16.3.0
+    , base
     , bytestring
     , casing
     , containers
     , directory
     , file-embed
+    , hashable
     , large-anon
+    , linux-namespaces
     , mtl
     , optics
     , optics-th
+    , path-io
     , process
     , safe
+    , safe-exceptions
     , scientific
+    , shake
+    , shake-plus
     , string-conversions
     , template-haskell
     , text
     , time
+    , unix
     , unordered-containers
     , vector
     , yaml
