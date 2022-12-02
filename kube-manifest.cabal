@@ -24,6 +24,7 @@ common option
     NoFieldSelectors
     BinaryLiterals
     DataKinds
+    DeriveGeneric
     DuplicateRecordFields
     FlexibleContexts
     FlexibleInstances
@@ -73,6 +74,7 @@ executable kube-manifest
     , casing
     , containers
     , directory
+    , exceptions
     , file-embed
     , hashable
     , heredoc
@@ -91,6 +93,7 @@ executable kube-manifest
     , tar
     , template-haskell
     , text
+    , these
     , time
     , unordered-containers
     , vector
