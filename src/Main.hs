@@ -322,7 +322,11 @@ imageRuleTagless name act = do
     _ -> Nothing
 
   phonys $ \image -> do
-    tag <- List.stripPrefix (toFilePath name <> ":") image
+    colTag <- List.stripPrefix (toFilePath name) image
+    tag <- case colTag of
+      "" -> pure "latest"
+      ':' : tag -> pure tag
+      _ -> Nothing
     pure $ needImage $ Image (name, Tag tag)
 
 newtype ListDynamicDep = ListDynamicDep () deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
