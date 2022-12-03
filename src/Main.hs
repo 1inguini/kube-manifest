@@ -27,7 +27,7 @@ import Control.Lens ((^.))
 import Control.Monad (unless, void)
 import Control.Monad.Catch (MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Reader (MonadReader)
+import Control.Monad.Reader (MonadReader (ask))
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Optics (AsValue (_Object, _String), key, _Key)
 import Data.ByteString (ByteString)
@@ -51,15 +51,13 @@ import Development.Shake (
   addOracle,
   addOracleCache,
   addTarget,
-  askOracle,
   getShakeOptionsRules,
   phony,
   phonys,
   progressSimple,
  )
 import Development.Shake.Command (CmdArgument, IsCmdArgument (toCmdArgument))
-import Development.Shake.Plus (fromRelDir, parseRelDir)
-import Development.Shake.Plus hiding (addOracle, addOracleCache, askOracle, phony, (%>))
+import Development.Shake.Plus hiding (addOracle, addOracleCache, phony, (%>))
 import qualified Development.Shake.Plus as Shake ((%>))
 import Development.Shake.Rule (
   BuiltinRun,
@@ -165,27 +163,6 @@ import Text.Heredoc (here)
 
 s :: String -> String
 s = id
-
--- tar
-fileEntry :: MonadThrow m => Path Rel File -> ByteString -> m Tar.Entry
-fileEntry path content = do
-  path <- either throwString pure . Tar.toTarPath False . cs $ toFilePath path
-  pure (Tar.fileEntry path $ cs content){entryOwnership = nonrootOwn}
-
-nonrootOwn :: Ownership
-nonrootOwn =
-  Ownership
-    { ownerName = "nonroot"
-    , groupName = "nonroot"
-    , ownerId = Util.nonroot
-    , groupId = Util.nonroot
-    }
-
-directoryEntry :: MonadThrow m => Path Rel Dir -> m Tar.Entry
-directoryEntry path = do
-  path <- either throwString pure . Tar.toTarPath True . cs $ toFilePath path
-  pure (Tar.directoryEntry path){entryOwnership = nonrootOwn}
-
 instance MonadThrow Action where
   throwM = liftIO . throwM
 
@@ -218,20 +195,24 @@ infixl 4 %>
 
 docker :: CmdArgument
 docker = cmd $ s "podman"
-from :: Image -> Image -> [String] -> (ContainerId -> Action ()) -> Action ()
-from base image changes act = do
+from :: Image -> Image -> [String] -> RAction ContainerId () -> Action ()
+from image base changes act = do
   Stdout container <- cmd docker (s "container create") (imageName base) (s "sh")
-  act $ ContainerId $ filter (not . isSpace) container
+  container <- ContainerId <$> singleLine container
   labels <- labels image
-  commit image (labels <> changes) $ ContainerId container
-copy :: [Tar.Entry] -> ContainerId -> Action ()
-copy entries (ContainerId container) = cmd_ (StdinBS (Tar.write entries)) docker (s "cp -") $ container <> ":/"
-commit :: Image -> [String] -> ContainerId -> Action ()
-commit image changes (ContainerId container) = do
+  runRAction container $
+    act *> commit image (labels <> changes)
+copy :: [Tar.Entry] -> RAction ContainerId ()
+copy entries = do
+  ContainerId container <- ask
+  cmd_ (StdinBS (Tar.write entries)) docker (s "cp --archive=false -") $ container <> ":/"
+commit :: Image -> [String] -> RAction ContainerId ()
+commit image changes = do
+  ContainerId container <- ask
   cmd_ docker (s "commit") (concatMap (\x -> ["--change", x]) changes) container $ imageName image
-labels :: Image -> Action [String]
+labels :: MonadAction m => Image -> m [String]
 labels image = do
-  dateTime <- askUTCTime
+  dateTime <- getUTCTime
   pure
     [ "LABEL org.opencontainers.image.created=" <> dateTime
     , "LABEL org.opencontainers.image.authors=1inguini <9647142@gmail.com>"
@@ -310,17 +291,23 @@ addContainerImageRule = do
         current
       $ ImageHash current
 
-imageRule :: Image -> (Image -> Action ()) -> Rules ()
-imageRule image action = do
-  liftRules $ addUserRule $ ImageRule (\i -> if image == i then Just $ action i else Nothing)
+infix 4 `imageRuleFrom`
+infix 4 `imageRuleTaglessFrom`
+
+imageRuleFrom :: Image -> Image -> [String] -> RAction ContainerId () -> Rules ()
+imageRuleFrom image base changes action = do
   phony (imageName image) $ needImage image
+  liftRules $
+    addUserRule $
+      ImageRule
+        ( \i ->
+            if image == i
+              then Just $ (image `from` base) changes action
+              else Nothing
+        )
 
-imageRuleTagless :: Path Rel File -> (Image -> Action ()) -> Rules ()
-imageRuleTagless name act = do
-  liftRules . addUserRule . ImageRule $ \case
-    image@(Image (n, _)) | n == name -> Just $ act image
-    _ -> Nothing
-
+imageRuleTaglessFrom :: Path Rel File -> Image -> [String] -> RAction ContainerId () -> Rules ()
+imageRuleTaglessFrom name base changes act = do
   phonys $ \image -> do
     colTag <- List.stripPrefix (toFilePath name) image
     tag <- case colTag of
@@ -328,6 +315,10 @@ imageRuleTagless name act = do
       ':' : tag -> pure tag
       _ -> Nothing
     pure $ needImage $ Image (name, Tag tag)
+
+  liftRules . addUserRule . ImageRule $ \case
+    image@(Image (n, _)) | n == name -> Just $ (image `from` base) changes act
+    _ -> Nothing
 
 newtype ListDynamicDep = ListDynamicDep () deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
 type instance RuleResult ListDynamicDep = [Path Abs File]
@@ -339,17 +330,11 @@ addDownloadRule :: Rules ()
 addDownloadRule = void . addOracleCache $ \(Download url) ->
   liftIO $ ByteString.toStrict . (^. Wreq.responseBody) <$> Wreq.get url
 
-needDownload :: String -> Action ByteString
+needDownload :: MonadAction m => String -> m ByteString
 needDownload = askOracle . Download
 
-newtype ISO8601DateTime = ISO8601DateTime () deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
-type instance RuleResult ISO8601DateTime = String
-
-addUTCTimeRule :: Rules ()
-addUTCTimeRule = void . addOracle $ \(ISO8601DateTime ()) -> liftIO $ iso8601Show <$> getCurrentTime
-
-askUTCTime :: MonadAction m => m String
-askUTCTime = liftAction . askOracle $ ISO8601DateTime ()
+getUTCTime :: MonadAction m => m String
+getUTCTime = liftIO $ iso8601Show <$> getCurrentTime
 
 instance Binary (Path Rel t)
 instance Binary Tar.Entry where
@@ -365,15 +350,35 @@ newtype TarEntry t c = TarEntry (Path Rel t, c) deriving (Show, Typeable, Eq, Ha
 type instance RuleResult (TarEntry File ByteString) = Tar.Entry
 type instance RuleResult (TarEntry Dir ()) = Tar.Entry
 
+nonrootOwn :: Ownership
+nonrootOwn =
+  Ownership
+    { ownerName = "nonroot"
+    , groupName = "nonroot"
+    , ownerId = Util.nonroot
+    , groupId = Util.nonroot
+    }
+
+-- tar
+fileEntry :: MonadThrow m => Path Rel File -> ByteString -> m Tar.Entry
+fileEntry path content = do
+  path <- either throwString pure . Tar.toTarPath False . cs $ toFilePath path
+  pure (Tar.fileEntry path $ cs content){entryOwnership = nonrootOwn}
+
+directoryEntry :: MonadThrow m => Path Rel Dir -> m Tar.Entry
+directoryEntry path = do
+  path <- either throwString pure . Tar.toTarPath True . cs $ toFilePath path
+  pure (Tar.directoryEntry path){entryOwnership = nonrootOwn}
+
 addTarEntryRule :: Rules ()
 addTarEntryRule = do
   void . addOracleCache $ \(TarEntry (path, content)) -> fileEntry path content
   void . addOracleCache $ \(TarEntry (path, ())) -> directoryEntry path
 
-needFileEntry :: Path Rel File -> ByteString -> Action Tar.Entry
+needFileEntry :: MonadAction m => Path Rel File -> ByteString -> m Tar.Entry
 needFileEntry path = askOracle . curry TarEntry path
 
-needDirEntry :: Path Rel Dir -> Action Tar.Entry
+needDirEntry :: MonadAction m => Path Rel Dir -> m Tar.Entry
 needDirEntry path = askOracle $ TarEntry (path, ())
 
 main :: IO ()
@@ -393,53 +398,27 @@ main = shakeArgs
     let rootfs = buildDir </> [reldir|rootfs|]
 
     addDownloadRule
-    addUTCTimeRule
     addTarEntryRule
     addContainerImageRule
 
-    -- rootfs </> [relfile|passwd|] %> \out -> do
-    --   let passwd =
-    --         fileEntry "etc/passwd" $
-    --           ByteString.unlines
-    --             [ "root:x:0:0:root:/root:/sbin/nologin"
-    --             , "nonroot:x:" <> tshow nonroot <> ":" <> tshow nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
-    --             ]
-    --   pure ()
-
-    -- rootfs </> [relfile|group|] %> \out ->
-    --   writeFile' out $
-    --     Text.unlines
-    --       [ "root:x:0:"
-    --       , "nonroot:x:" <> tshow nonroot
-    --       ]
-
-    -- cacert <-
-    --   askDownload
-    --     "https://ccadb-public.secure.force.com/mozilla/IncludedRootsPEMTxt?TrustBitsInclude=Websites"
-
-    imageRuleTagless (registry </> [relfile|nonroot|]) $ \image@(Image (name, _)) -> do
-      let ruleDir = buildDir </> name
-
-      tar <-
-        parallel
-          [ needDirEntry [reldir|tmp|]
-          , needDirEntry [reldir|home/nonroot|]
-          , needFileEntry [relfile|etc/passwd|]
-              . cs
-              $ Text.unlines
-                [ "root:x:0:0:root:/root:/sbin/nologin"
-                , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
-                ]
-          , needFileEntry [relfile|etc/group|] . cs $
-              Text.unlines ["root:x:0:", "nonroot:x:" <> tshow Util.nonroot]
-          ]
-      from
-        scratch
-        image
-        [ "WORKDIR /home/nonroot"
-        , "USER nonroot"
-        , description "scratch with nonroot user"
-        ]
-        $ copy tar
-
-      pure ()
+    (registry </> [relfile|nonroot|] `imageRuleTaglessFrom` scratch)
+      [ "WORKDIR /home/nonroot"
+      , "USER nonroot"
+      , description "scratch with nonroot user"
+      ]
+      $ do
+        tar <-
+          parallel
+            [ needDirEntry [reldir|tmp|]
+            , needDirEntry [reldir|home/nonroot|]
+            , needFileEntry [relfile|etc/passwd|]
+                . cs
+                $ Text.unlines
+                  [ "root:x:0:0:root:/root:/sbin/nologin"
+                  , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
+                  , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
+                  ]
+            , needFileEntry [relfile|etc/group|] . cs $
+                Text.unlines ["root:x:0:", "nobody:x:65534:", "nonroot:x:" <> tshow Util.nonroot <> ":"]
+            ]
+        copy tar
