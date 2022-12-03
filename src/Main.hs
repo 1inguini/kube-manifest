@@ -24,7 +24,7 @@ import Codec.Archive.Tar.Entry (Entry (entryOwnership), Ownership (Ownership, ow
 import qualified Codec.Archive.Tar.Entry as Tar
 import Control.Exception.Safe (throwString)
 import Control.Lens ((^.))
-import Control.Monad (unless, void)
+import Control.Monad (foldM, unless, void, when)
 import Control.Monad.Catch (MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (MonadReader (ask))
@@ -56,9 +56,9 @@ import Development.Shake (
   phonys,
   progressSimple,
  )
-import Development.Shake.Command (CmdArgument, IsCmdArgument (toCmdArgument))
-import Development.Shake.Plus hiding (addOracle, addOracleCache, phony, (%>))
-import qualified Development.Shake.Plus as Shake ((%>))
+import Development.Shake.Command (CmdArgument (CmdArgument), IsCmdArgument (toCmdArgument))
+import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, phony, (%>))
+import qualified Development.Shake.Plus as Shake (CmdOption (Env), (%>))
 import Development.Shake.Rule (
   BuiltinRun,
   RunChanged (ChangedNothing, ChangedRecomputeDiff, ChangedRecomputeSame),
@@ -79,7 +79,7 @@ import qualified Network.Wreq as Wreq (get, responseBody)
 import Optics (modifying, over, preview, set, view, (%), _head)
 import Path.IO (createDir, createDirIfMissing, doesPathExist)
 import qualified Secret as Util
-import Text.Heredoc (here)
+import Text.Heredoc (here, str)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 -- processYaml written yaml =
@@ -193,35 +193,108 @@ infixl 4 %>
   m ()
 (%>) file act = runShakePlus () $ toFilePath file Shake.%> (liftAction . act)
 
+data ImageConfig
+  = Cmd [String]
+  | Entrypoint [String]
+  | Env String String
+  | Expose String
+  | Label String String
+  | User String
+  | Volume String
+  | Workdir String
+  deriving (Show, Eq, Generic)
+
+toChange :: ImageConfig -> String
+toChange (Cmd cmds) = "CMD " <> show cmds
+toChange (Entrypoint cmds) = "ENTRYPOINT " <> show cmds
+toChange (Env var val) = "ENV " <> var <> "=" <> val
+toChange (Expose port) = "EXPOSE " <> port
+toChange (Label label val) = "LABEL " <> label <> "=" <> val
+toChange (User user) = "USER " <> user
+toChange (Volume dir) = "VOLUME " <> dir
+toChange (Workdir dir) = "WORKDIR " <> dir
+
 docker :: CmdArgument
 docker = cmd $ s "podman"
-from :: Image -> Image -> [String] -> RAction ContainerId () -> Action ()
-from image base changes act = do
-  Stdout container <- cmd docker (s "container create") (imageName base) (s "sh")
+from :: Image -> Image -> [ImageConfig] -> RAction ContainerId () -> Action ()
+from image base confs act = do
+  Stdout container <- cmd docker (s "container create") (imageName base)
   container <- ContainerId <$> singleLine container
   labels <- labels image
   runRAction container $
-    act *> commit image (labels <> changes)
+    act *> commit image (labels <> confs)
 copy :: [Tar.Entry] -> RAction ContainerId ()
 copy entries = do
   ContainerId container <- ask
   cmd_ (StdinBS (Tar.write entries)) docker (s "cp --archive=false -") $ container <> ":/"
-commit :: Image -> [String] -> RAction ContainerId ()
-commit image changes = do
+data Exec = Exec
+  { execBy :: forall r. CmdResult r => String -> CmdArgument -> Action r
+  , exec :: forall r. CmdResult r => CmdArgument -> Action r
+  , rootExec :: forall r. CmdResult r => CmdArgument -> Action r
+  , exec_ :: CmdArgument -> Action ()
+  , rootExec_ :: CmdArgument -> Action ()
+  }
+execWith :: (Exec -> Action a) -> RAction ContainerId a
+execWith run = do
   ContainerId container <- ask
-  cmd_ docker (s "commit") (concatMap (\x -> ["--change", x]) changes) container $ imageName image
-labels :: MonadAction m => Image -> m [String]
+  cmd_ docker (s "container start") container
+  let execBy :: CmdResult r => String -> CmdArgument -> Action r
+      execBy user (CmdArgument args) = do
+        let (opts, commands) = partitionEithers args
+        (dockerOpts, execOpts) <-
+          foldM
+            ( \(dockerOpts, execOpts) ->
+                \case
+                  (Cwd cwd) -> pure (dockerOpts, ("--workdir=" <> cwd) : execOpts)
+                  (Shake.Env envs) ->
+                    pure
+                      ( dockerOpts
+                      , foldl
+                          (\execOpts (var, val) -> ["--env", var <> "=" <> val] <> execOpts)
+                          execOpts
+                          envs
+                      )
+                  (AddEnv var val) -> pure (dockerOpts, ["--env", var <> "=" <> val] <> execOpts)
+                  (RemEnv var) -> throwString "Removing environment variable is not supported"
+                  opt -> pure (opt : dockerOpts, execOpts)
+            )
+            ([], [])
+            opts
+        cmd dockerOpts docker (s "exec --user=" <> user) execOpts container commands
+
+      exec, rootExec :: CmdResult r => CmdArgument -> Action r
+      exec = execBy "nonroot"
+      rootExec = execBy "root"
+
+      exec_, rootExec_ :: CmdArgument -> Action ()
+      exec_ = exec
+      rootExec_ = rootExec
+  x <- liftAction $ run Exec{execBy, exec, rootExec, exec_, rootExec_}
+  cmd_ docker (s "container stop") container
+  pure x
+
+commit :: Image -> [ImageConfig] -> RAction ContainerId ()
+commit image confs = do
+  ContainerId container <- ask
+  cmd_ docker (s "commit") (concatMap (\x -> ["--change", toChange x]) confs) container $ imageName image
+labels :: MonadAction m => Image -> m [ImageConfig]
 labels image = do
   dateTime <- getUTCTime
-  pure
-    [ "LABEL org.opencontainers.image.created=" <> dateTime
-    , "LABEL org.opencontainers.image.authors=1inguini <9647142@gmail.com>"
-    , "LABEL org.opencontainers.image.url=" <> cs (imageName image)
-    , "LABEL org.opencontainers.image.documentation=https://git.1inguini.com/1inguini/kube-manifest/README.md"
-    , "LABEL org.opencontainers.image.source=https://git.1inguini.com/1inguini/kube-manifest"
-    ]
-description :: String -> String
-description = ("LABEL org.opencontainers.image.description=" <>)
+  pure $
+    uncurry Label
+      <$> [ ("org.opencontainers.image.created", dateTime)
+          , ("org.opencontainers.image.authors", "1inguini <9647142@gmail.com>")
+          , ("org.opencontainers.image.url", cs (imageName image))
+          , ("org.opencontainers.image.documentation", "https://git.1inguini.com/1inguini/kube-manifest/README.md")
+          , ("org.opencontainers.image.source", "https://git.1inguini.com/1inguini/kube-manifest")
+          ]
+
+description :: String -> ImageConfig
+description = Label "org.opencontainers.image.description"
+
+pacman, aur :: CmdArgument
+aur = cmd $ s "yay --noconfirm --noprovides"
+pacman = cmd $ s "pacman --noconfirm" :: CmdArgument
 
 -- https://stackoverflow.com/q/54050016
 newtype Tag = Tag String
@@ -239,8 +312,11 @@ imageName (Image (name, Tag tag)) =
 registry :: Path Rel Dir
 registry = $(TH.lift =<< TH.runIO ((</> [reldir|library|]) <$> parseRelDir ("registry." <> cs Util.host)))
 
-scratch :: Image
-scratch = Image (registry </> [relfile|scratch|], latest)
+registryImage :: Path Rel File -> Tag -> Image
+registryImage name = curry Image (registry </> name)
+scratch, nonroot :: Image
+scratch = registryImage [relfile|scratch|] latest
+nonroot = registryImage [relfile|nonroot|] latest
 
 newtype ImageHash = ImageHash ByteString
   deriving (Show, Eq, Hashable, Binary, NFData)
@@ -294,20 +370,21 @@ addContainerImageRule = do
 infix 4 `imageRuleFrom`
 infix 4 `imageRuleTaglessFrom`
 
-imageRuleFrom :: Image -> Image -> [String] -> RAction ContainerId () -> Rules ()
-imageRuleFrom image base changes action = do
+imageRuleFrom :: Image -> Image -> [ImageConfig] -> RAction ContainerId () -> Rules ()
+imageRuleFrom image@(Image (name, tag)) base confs action = do
   phony (imageName image) $ needImage image
+  when (tag == latest) $ phony (toFilePath name) $ needImage image
   liftRules $
     addUserRule $
       ImageRule
         ( \i ->
             if image == i
-              then Just $ (image `from` base) changes action
+              then Just $ (image `from` base) confs action
               else Nothing
         )
 
-imageRuleTaglessFrom :: Path Rel File -> Image -> [String] -> RAction ContainerId () -> Rules ()
-imageRuleTaglessFrom name base changes act = do
+imageRuleTaglessFrom :: Path Rel File -> Image -> [ImageConfig] -> RAction ContainerId () -> Rules ()
+imageRuleTaglessFrom name base confs act = do
   phonys $ \image -> do
     colTag <- List.stripPrefix (toFilePath name) image
     tag <- case colTag of
@@ -317,7 +394,7 @@ imageRuleTaglessFrom name base changes act = do
     pure $ needImage $ Image (name, Tag tag)
 
   liftRules . addUserRule . ImageRule $ \case
-    image@(Image (n, _)) | n == name -> Just $ (image `from` base) changes act
+    image@(Image (n, _)) | n == name -> Just $ (image `from` base) confs act
     _ -> Nothing
 
 newtype ListDynamicDep = ListDynamicDep () deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
@@ -401,24 +478,77 @@ main = shakeArgs
     addTarEntryRule
     addContainerImageRule
 
-    (registry </> [relfile|nonroot|] `imageRuleTaglessFrom` scratch)
-      [ "WORKDIR /home/nonroot"
-      , "USER nonroot"
+    (nonroot `imageRuleFrom` scratch)
+      [ Workdir "/home/nonroot"
+      , User "nonroot"
       , description "scratch with nonroot user"
       ]
+      $ parallel
+        [ needDirEntry [reldir|tmp|]
+        , needDirEntry [reldir|home/nonroot|]
+        , needFileEntry [relfile|etc/passwd|]
+            . cs
+            $ Text.unlines
+              [ "root:x:0:0:root:/root:/sbin/nologin"
+              , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
+              , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
+              ]
+        , needFileEntry [relfile|etc/group|] . cs $
+            Text.unlines ["root:x:0:", "nobody:x:65534:", "nonroot:x:" <> tshow Util.nonroot <> ":"]
+        ]
+        >>= copy
+
+    (registry </> [relfile|archlinux|] `imageRuleTaglessFrom` Image ([relfile|docker.io/library/archlinux|], latest))
+      [ Workdir "/home/nonroot"
+      , User "nonroot"
+      , description "Arch Linux with nonroot user and aur helper"
+      ]
       $ do
-        tar <-
-          parallel
-            [ needDirEntry [reldir|tmp|]
-            , needDirEntry [reldir|home/nonroot|]
-            , needFileEntry [relfile|etc/passwd|]
-                . cs
-                $ Text.unlines
-                  [ "root:x:0:0:root:/root:/sbin/nologin"
-                  , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
-                  , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
-                  ]
-            , needFileEntry [relfile|etc/group|] . cs $
-                Text.unlines ["root:x:0:", "nobody:x:65534:", "nonroot:x:" <> tshow Util.nonroot <> ":"]
-            ]
-        copy tar
+        let nonroot = show Util.nonroot
+        execWith $ \Exec{rootExec_} ->
+          void $
+            parallel
+              [ rootExec_ $ cmd (s "groupadd --gid") nonroot (s "nonroot")
+              , rootExec_ $ cmd (s "useradd --uid") nonroot (s "--gid") nonroot (s "-m -s /usr/bin/nologin nonroot")
+              , rootExec_ $ cmd (Stdin "nonroot ALL=(ALL:ALL) NOPASSWD: ALL") (s "tee -a /etc/sudoers")
+              , let noExtract =
+                      [str|
+                          |NoExtract  = etc/systemd/*
+                          |NoExtract  = usr/share/systemd/*
+                          |NoExtract  = usr/share/man/*
+                          |NoExtract  = usr/share/help/*
+                          |NoExtract  = usr/share/doc/*
+                          |NoExtract  = usr/share/gtk-doc/*
+                          |NoExtract  = usr/share/info/*
+                          |NoExtract  = usr/share/i18n/*
+                          |NoExtract  = !usr/share/i18n/charmaps/UTF-8.gz
+                          |NoExtract  = !usr/share/i18n/locales/en_US !usr/share/i18n/locales/ja_JP
+                          |NoExtract  = usr/share/locale/*
+                          |NoExtract  = !usr/share/locale/en !usr/share/locale/ja
+                          |NoExtract  = usr/share/X11/*
+                          |NoExtract  = usr/share/systemd/*
+                          |NoExtract  = usr/share/bash-completion/*
+                          |NoExtract  = usr/share/fish/*
+                          |NoExtract  = usr/share/zsh/*
+                          |NoExtract  = usr/lib/systemd/*
+                          |NoExtract  = usr/lib/sysusers.d/*
+                          |NoExtract  = usr/lib/tmpfiles.d/*
+                          |]
+                 in rootExec_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
+              ]
+        mirrorlist <- cs <$> readFile' [relfile|container/builder/mirrorlist|]
+        copy . (: []) =<< needFileEntry [relfile|etc/pacman.d/mirrorlist|] mirrorlist
+
+        execWith $ \Exec{exec_, rootExec_} -> do
+          rootExec_ $ cmd pacman (s "-Sy")
+          exec_ $
+            cmd
+              (Cwd "/home/nonroot")
+              (s "git clone https://aur.archlinux.org/yay-bin.git aur-helper")
+          exec_ $ cmd (Cwd "/home/nonroot/aur-helper") (s "makepkg --noconfirm -sir")
+          rootExec_ $ cmd pacman (s "-S glibc")
+        copy . (: [])
+          =<< needFileEntry
+            [relfile|etc/locale.gen|]
+            (cs $ Text.unlines ["en_US.UTF-8 UTF-8", "ja_JP.UTF-8 UTF-8"])
+        execWith $ \Exec{rootExec_} -> rootExec_ . cmd $ s "locale-gen"
