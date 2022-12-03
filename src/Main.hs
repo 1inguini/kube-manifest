@@ -218,11 +218,11 @@ docker :: CmdArgument
 docker = cmd $ s "podman"
 from :: Image -> Image -> [ImageConfig] -> RAction ContainerId () -> Action ()
 from image base confs act = do
-  Stdout container <- cmd docker (s "container create") (imageName base)
+  Stdout container <- cmd docker (s "container create") (s "-v /usr/bin/s6-pause:/s6-pause --stop-signal=KILL") (imageName base) (s "/s6-pause")
   container <- ContainerId <$> singleLine container
   labels <- labels image
   runRAction container $
-    act *> commit image (labels <> confs)
+    act *> commit image (labels <> confs) *> rm
 copy :: [Tar.Entry] -> RAction ContainerId ()
 copy entries = do
   ContainerId container <- ask
@@ -260,7 +260,7 @@ execWith run = do
             )
             ([], [])
             opts
-        cmd dockerOpts docker (s "exec --user=" <> user) execOpts container commands
+        cmd dockerOpts docker (s "exec --interactive --user=" <> user) execOpts container commands
 
       exec, rootExec :: CmdResult r => CmdArgument -> Action r
       exec = execBy "nonroot"
@@ -277,6 +277,10 @@ commit :: Image -> [ImageConfig] -> RAction ContainerId ()
 commit image confs = do
   ContainerId container <- ask
   cmd_ docker (s "commit") (concatMap (\x -> ["--change", toChange x]) confs) container $ imageName image
+rm :: RAction ContainerId ()
+rm = do
+  ContainerId container <- ask
+  cmd_ docker (s "rm -f") container
 labels :: MonadAction m => Image -> m [ImageConfig]
 labels image = do
   dateTime <- getUTCTime
@@ -498,7 +502,7 @@ main = shakeArgs
         ]
         >>= copy
 
-    (registry </> [relfile|archlinux|] `imageRuleTaglessFrom` Image ([relfile|docker.io/library/archlinux|], latest))
+    (registry </> [relfile|archlinux|] `imageRuleTaglessFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
       [ Workdir "/home/nonroot"
       , User "nonroot"
       , description "Arch Linux with nonroot user and aur helper"
@@ -508,23 +512,21 @@ main = shakeArgs
         execWith $ \Exec{rootExec_} ->
           void $
             parallel
-              [ rootExec_ $ cmd (s "groupadd --gid") nonroot (s "nonroot")
-              , rootExec_ $ cmd (s "useradd --uid") nonroot (s "--gid") nonroot (s "-m -s /usr/bin/nologin nonroot")
-              , rootExec_ $ cmd (Stdin "nonroot ALL=(ALL:ALL) NOPASSWD: ALL") (s "tee -a /etc/sudoers")
+              [ do
+                  rootExec_ $ cmd (s "groupadd --gid") nonroot (s "nonroot")
+                  rootExec_ $ cmd (s "useradd --uid") nonroot (s "--gid") nonroot (s "-m -s /usr/bin/nologin nonroot")
+              , rootExec_ $
+                  cmd
+                    (Stdin "nonroot ALL=(ALL:ALL) NOPASSWD: ALL")
+                    (s "tee -a /etc/sudoers")
               , let noExtract =
-                      [str|
-                          |NoExtract  = etc/systemd/*
+                      [str|NoExtract  = etc/systemd/*
                           |NoExtract  = usr/share/systemd/*
                           |NoExtract  = usr/share/man/*
                           |NoExtract  = usr/share/help/*
                           |NoExtract  = usr/share/doc/*
                           |NoExtract  = usr/share/gtk-doc/*
                           |NoExtract  = usr/share/info/*
-                          |NoExtract  = usr/share/i18n/*
-                          |NoExtract  = !usr/share/i18n/charmaps/UTF-8.gz
-                          |NoExtract  = !usr/share/i18n/locales/en_US !usr/share/i18n/locales/ja_JP
-                          |NoExtract  = usr/share/locale/*
-                          |NoExtract  = !usr/share/locale/en !usr/share/locale/ja
                           |NoExtract  = usr/share/X11/*
                           |NoExtract  = usr/share/systemd/*
                           |NoExtract  = usr/share/bash-completion/*
@@ -534,13 +536,15 @@ main = shakeArgs
                           |NoExtract  = usr/lib/sysusers.d/*
                           |NoExtract  = usr/lib/tmpfiles.d/*
                           |]
-                 in rootExec_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
+                 in do
+                      rootExec_ $ cmd (s "sed -i /etc/pacman.conf -e") [s "/^NoExtract/d"]
+                      rootExec_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
               ]
         mirrorlist <- cs <$> readFile' [relfile|container/builder/mirrorlist|]
         copy . (: []) =<< needFileEntry [relfile|etc/pacman.d/mirrorlist|] mirrorlist
 
         execWith $ \Exec{exec_, rootExec_} -> do
-          rootExec_ $ cmd pacman (s "-Sy")
+          rootExec_ $ cmd pacman (s "-Sy git moreutils rsync")
           exec_ $
             cmd
               (Cwd "/home/nonroot")
