@@ -34,7 +34,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Char (isSpace)
 import Data.Either (partitionEithers)
-import Data.Foldable (traverse_)
+import Data.Foldable (concatMap, traverse_)
 import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable (hashWithSalt), hash)
 import qualified Data.List as List
@@ -215,78 +215,58 @@ toChange (User user) = "USER " <> user
 toChange (Volume dir) = "VOLUME " <> dir
 toChange (Workdir dir) = "WORKDIR " <> dir
 
-docker :: CmdArgument
-docker = cmd $ s "podman"
-from :: Image -> Image -> [ImageConfig] -> RAction ContainerId () -> Action ()
-from image base confs act = do
-  Stdout container <- cmd docker (s "container create") (s "-v /usr/bin/s6-pause:/s6-pause --stop-signal=KILL") (imageName base) (s "/s6-pause")
+toArgs :: ImageConfig -> [String]
+toArgs (Cmd cmds) = "--cmd" : cmds
+toArgs (Entrypoint cmds) = "--entrypoint" : cmds
+toArgs (Env var val) = ["--env", var, val]
+toArgs (Expose port) = ["--port", port]
+toArgs (Label label val) = ["--label", label <> "=" <> val]
+toArgs (User user) = ["--user", user]
+toArgs (Volume dir) = ["--volume", dir]
+toArgs (Workdir dir) = ["--workingdir", dir]
+
+buildah :: CmdArgument
+buildah = cmd $ s "buildah"
+from :: Image -> Image -> RAction ContainerId () -> Action ()
+from image base act = do
+  Stdout container <- cmd buildah (s "from") $ imageName base
   container <- ContainerId <$> singleLine container
   labels <- labels image
   runRAction container $
-    act *> commit image (labels <> confs) *> rm
+    act *> commit image
 copy :: Path b t -> RAction ContainerId ()
 copy path = do
   ContainerId container <- ask
-  cmd_ docker (s "cp --archive=false") (toFilePath path) $ container <> ":/"
-data Exec = Exec
-  { execBy :: forall r. CmdResult r => String -> CmdArgument -> Action r
-  , exec :: forall r. CmdResult r => CmdArgument -> Action r
-  , rootExec :: forall r. CmdResult r => CmdArgument -> Action r
-  , exec_ :: CmdArgument -> Action ()
-  , rootExec_ :: CmdArgument -> Action ()
-  }
-execWith :: (Exec -> Action a) -> RAction ContainerId a
-execWith run = do
+  -- TODO: chmod
+  cmd_ [s "copy", "--chown=" <> show Util.nonroot] (toFilePath path) $ container <> ":/"
+runBy :: CmdResult r => String -> CmdArgument -> RAction ContainerId r
+runBy user (CmdArgument args) = do
   ContainerId container <- ask
-  cmd_ docker (s "container start") container
-  let execBy :: CmdResult r => String -> CmdArgument -> Action r
-      execBy user (CmdArgument args) = do
-        let (opts, commands) = partitionEithers args
-        (dockerOpts, execOpts) <-
-          foldM
-            ( \(dockerOpts, execOpts) ->
-                \case
-                  (Cwd cwd) -> pure (dockerOpts, ("--workdir=" <> cwd) : execOpts)
-                  (Shake.Env envs) ->
-                    pure
-                      ( dockerOpts
-                      , foldl
-                          (\execOpts (var, val) -> ["--env", var <> "=" <> val] <> execOpts)
-                          execOpts
-                          envs
-                      )
-                  (AddEnv var val) -> pure (dockerOpts, ["--env", var <> "=" <> val] <> execOpts)
-                  (RemEnv var) -> throwString "Removing environment variable is not supported"
-                  opt -> pure (opt : dockerOpts, execOpts)
-            )
-            ([], [])
-            opts
-        cmd dockerOpts docker (s "exec --interactive --user=" <> user) execOpts container commands
-
-      exec, rootExec :: CmdResult r => CmdArgument -> Action r
-      exec = execBy "nonroot"
-      rootExec = execBy "root"
-
-      exec_, rootExec_ :: CmdArgument -> Action ()
-      exec_ = exec
-      rootExec_ = rootExec
-  x <- liftAction $ run Exec{execBy, exec, rootExec, exec_, rootExec_}
-  cmd_ docker (s "container stop") container
-  pure x
-
-commit :: Image -> [ImageConfig] -> RAction ContainerId ()
-commit image confs = do
+  let (opts, commands) = partitionEithers args
+  let (buildahOpts, execOpts) =
+        foldl
+          ( \(buildahOpts, execOpts) ->
+              \case
+                (Cwd cwd) -> (buildahOpts, ("--workdir=" <> cwd) : execOpts)
+                opt -> (opt : buildahOpts, execOpts)
+          )
+          ([], [])
+          opts
+  cmd buildahOpts buildah ("run --user=" <> user) execOpts container commands
+run, rootRun :: CmdResult r => CmdArgument -> RAction ContainerId r
+run = runBy "nonroot"
+rootRun = runBy "root"
+run_, rootRun_ :: CmdArgument -> RAction ContainerId ()
+run_ = run
+rootRun_ = rootRun
+config :: [ImageConfig] -> RAction ContainerId ()
+config config = do
   ContainerId container <- ask
-  cmd_
-    docker
-    (s "commit --include-volumes=false")
-    (concatMap (\x -> ["--change", toChange x]) $ [Entrypoint [], Cmd []] <> confs)
-    container
-    $ imageName image
-rm :: RAction ContainerId ()
-rm = do
+  cmd_ buildah (s "config") (concatMap toArgs config) container
+commit :: Image -> RAction ContainerId ()
+commit image = do
   ContainerId container <- ask
-  cmd_ docker (s "rm -f") container
+  cmd_ buildah (s "commit --rm") container $ imageName image
 labels :: MonadAction m => Image -> m [ImageConfig]
 labels image = do
   dateTime <- getUTCTime
@@ -357,7 +337,7 @@ addContainerImageRule = do
   imageIdentity _ (ImageHash hash) = Just hash
 
   imageSha image = do
-    Stdout out <- cmd docker (s "image list --no-trunc --quiet") $ imageName image
+    Stdout out <- cmd buildah (s "containers --notruncate --quiet") $ imageName image
     case lines out of
       [] -> pure mempty
       out : _ -> singleLine out
@@ -379,10 +359,10 @@ addContainerImageRule = do
       else pure $ RunResult ChangedNothing current $ ImageHash current
 
 infix 4 `imageRuleFrom`
-infix 4 `imageRuleTaglessFrom`
+infix 4 `imageRuleArbitaryTagsFrom`
 
-imageRuleFrom :: Image -> Image -> [ImageConfig] -> RAction ContainerId () -> Rules ()
-imageRuleFrom image@(Image (name, tag)) base confs action = do
+imageRuleFrom :: Image -> Image -> RAction ContainerId () -> Rules ()
+imageRuleFrom image@(Image (name, tag)) base action = do
   phony (imageName image) $ needImage image
   when (tag == latest) $ phony (toFilePath name) $ needImage image
   liftRules $
@@ -390,12 +370,12 @@ imageRuleFrom image@(Image (name, tag)) base confs action = do
       ImageRule
         ( \i ->
             if image == i
-              then Just $ (image `from` base) confs action
+              then Just $ (image `from` base) action
               else Nothing
         )
 
-imageRuleTaglessFrom :: Path Rel File -> Image -> [ImageConfig] -> RAction ContainerId () -> Rules ()
-imageRuleTaglessFrom name base confs act = do
+imageRuleArbitaryTagsFrom :: Path Rel File -> Image -> [ImageConfig] -> RAction ContainerId () -> Rules ()
+imageRuleArbitaryTagsFrom name base confs act = do
   phonys $ \image -> do
     colTag <- List.stripPrefix (toFilePath name) image
     tag <- case colTag of
@@ -405,7 +385,7 @@ imageRuleTaglessFrom name base confs act = do
     pure $ needImage $ Image (name, Tag tag)
 
   liftRules . addUserRule . ImageRule $ \case
-    image@(Image (n, _)) | n == name -> Just $ (image `from` base) confs act
+    image@(Image (n, _)) | n == name -> Just $ (image `from` base) act
     _ -> Nothing
 
 newtype ListDynamicDep = ListDynamicDep () deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
@@ -499,12 +479,8 @@ nonrootImageRules =
             , "nonroot:x:" <> tshow Util.nonroot <> ":"
             ]
 
-    (nonroot `imageRuleFrom` scratch)
-      [ Workdir "/home/nonroot"
-      , User "nonroot"
-      , description "scratch with nonroot user"
-      ]
-      $ do
+    (nonroot `imageRuleFrom` scratch) $
+      do
         needIn
           (workDir </> [reldir|etc|])
           [ [relfile|passwd|]
@@ -517,6 +493,11 @@ nonrootImageRules =
           , [reldir|home/nonroot|]
           ]
 
+        config
+          [ Workdir "/home/nonroot"
+          , User "nonroot"
+          , description "scratch with nonroot user"
+          ]
         copy $ workDir </> [reldir|etc|]
         copy $ workDir </> [reldir|tmp|]
         copy $ workDir </> [reldir|home|]
@@ -546,7 +527,7 @@ main = shakeArgs
 
     nonrootImageRules
 
--- (registry </> [relfile|archlinux|] `imageRuleTaglessFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
+-- (registry </> [relfile|archlinux|] `imageRuleArbitaryTagsFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
 --   [ Workdir "/home/nonroot"
 --   , User "nonroot"
 --   , description "Arch Linux with nonroot user and aur helper"
