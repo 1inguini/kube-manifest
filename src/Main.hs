@@ -276,7 +276,12 @@ execWith run = do
 commit :: Image -> [ImageConfig] -> RAction ContainerId ()
 commit image confs = do
   ContainerId container <- ask
-  cmd_ docker (s "commit") (concatMap (\x -> ["--change", toChange x]) confs) container $ imageName image
+  cmd_
+    docker
+    (s "commit --include-volumes=false")
+    (concatMap (\x -> ["--change", toChange x]) $ [Entrypoint [], Cmd []] <> confs)
+    container
+    $ imageName image
 rm :: RAction ContainerId ()
 rm = do
   ContainerId container <- ask
@@ -285,12 +290,12 @@ labels :: MonadAction m => Image -> m [ImageConfig]
 labels image = do
   dateTime <- getUTCTime
   pure $
-    uncurry Label
-      <$> [ ("org.opencontainers.image.created", dateTime)
-          , ("org.opencontainers.image.authors", "1inguini <9647142@gmail.com>")
-          , ("org.opencontainers.image.url", cs (imageName image))
-          , ("org.opencontainers.image.documentation", "https://git.1inguini.com/1inguini/kube-manifest/README.md")
-          , ("org.opencontainers.image.source", "https://git.1inguini.com/1inguini/kube-manifest")
+    (\(l, v) -> Label ("org.opencontainers.image." <> l) v)
+      <$> [ ("created", dateTime)
+          , ("authors", "1inguini <9647142@gmail.com>")
+          , ("url", cs (imageName image))
+          , ("documentation", "https://git.1inguini.com/1inguini/kube-manifest/README.md")
+          , ("source", "https://git.1inguini.com/1inguini/kube-manifest")
           ]
 
 description :: String -> ImageConfig
