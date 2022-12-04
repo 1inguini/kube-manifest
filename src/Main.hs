@@ -25,7 +25,7 @@ import qualified Codec.Archive.Tar.Entry as Tar
 import Control.Exception.Safe (handle, throwString)
 import Control.Lens ((^.))
 import Control.Monad (foldM, unless, void, when)
-import Control.Monad.Catch (MonadThrow (throwM))
+import Control.Monad.Catch (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (MonadReader (ask))
 import qualified Data.Aeson as Aeson
@@ -49,6 +49,7 @@ import Data.Time (UTCTime, ZonedTime, getCurrentTime, getZonedTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Development.Shake (
   Lint (LintBasic),
+  actionCatch,
   addOracle,
   addOracleCache,
   addTarget,
@@ -80,6 +81,7 @@ import qualified Network.Wreq as Wreq (get, responseBody)
 import Optics (modifying, over, preview, set, view, (%), _head)
 import Path.IO (createDir, createDirIfMissing, doesPathExist, ensureDir)
 import qualified Secret as Util
+import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import Text.Heredoc (here, str)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
@@ -167,6 +169,9 @@ s = id
 instance MonadThrow Action where
   throwM = liftIO . throwM
 
+instance MonadCatch Action where
+  catch = actionCatch
+
 instance MonadThrow Rules where
   throwM = liftIO . throwM
 instance CmdResult r => CmdArguments (RAction e r) where
@@ -234,11 +239,10 @@ from image base act = do
   labels <- labels image
   runRAction container $
     act *> commit image
-copy :: Path b t -> RAction ContainerId ()
+copy :: Path b Dir -> RAction ContainerId ()
 copy path = do
   ContainerId container <- ask
-  -- TODO: chmod
-  cmd_ [s "copy", "--chown=" <> show Util.nonroot] (toFilePath path) $ container <> ":/"
+  cmd_ buildah [s "copy", "--chown=" <> show Util.nonroot, "--chmod=755"] container (toFilePath path) (s "/")
 runBy :: CmdResult r => String -> CmdArgument -> RAction ContainerId r
 runBy user (CmdArgument args) = do
   ContainerId container <- ask
@@ -337,10 +341,10 @@ addContainerImageRule = do
   imageIdentity _ (ImageHash hash) = Just hash
 
   imageSha image = do
-    Stdout out <- cmd buildah (s "containers --notruncate --quiet") $ imageName image
-    case lines out of
-      [] -> pure mempty
-      out : _ -> singleLine out
+    (Stdout out, Exit code) <- cmd buildah (s "images --no-trunc --quiet") $ imageName image
+    case code of
+      ExitSuccess -> singleLine out
+      ExitFailure 125 -> pure ""
 
   run :: BuiltinRun Image ImageHash
   run key oldStore RunDependenciesChanged = do
@@ -461,10 +465,16 @@ writeFileInRule path = writeFileRule (?dir </> path)
 writeFileLinesInRule :: (?dir :: Path a Dir) => Path Rel File -> [Text] -> Rules ()
 writeFileLinesInRule path = writeFileLinesRule (?dir </> path)
 
-nonrootImageRules :: (?artifactDir :: Path a Dir, ?shakeDir :: Path b Dir) => Rules ()
+imageRules :: (?shakeDir :: Path b Dir) => Rules ()
+imageRules = do
+  let ?workDir = buildDir </> [reldir|image/nonroot|]
+  nonrootImageRules
+
+nonrootImageRules :: (?workDir :: Path b Dir) => Rules ()
 nonrootImageRules =
   do
-    let ?dir = workDir
+    let ?workDir = ?workDir </> [reldir|nonroot|]
+    let ?dir = ?workDir
      in do
           writeFileLinesInRule
             [relfile|etc/passwd|]
@@ -482,13 +492,13 @@ nonrootImageRules =
     (nonroot `imageRuleFrom` scratch) $
       do
         needIn
-          (workDir </> [reldir|etc|])
+          (?workDir </> [reldir|etc|])
           [ [relfile|passwd|]
           , [relfile|group|]
           ]
 
         traverse_
-          (ensureDir . (workDir </>))
+          (ensureDir . (?workDir </>))
           [ [reldir|tmp|]
           , [reldir|home/nonroot|]
           ]
@@ -498,11 +508,7 @@ nonrootImageRules =
           , User "nonroot"
           , description "scratch with nonroot user"
           ]
-        copy $ workDir </> [reldir|etc|]
-        copy $ workDir </> [reldir|tmp|]
-        copy $ workDir </> [reldir|home|]
- where
-  workDir = buildDir </> [reldir|image/nonroot|]
+        copy ?workDir
 
 main :: IO ()
 main = shakeArgs
@@ -513,19 +519,15 @@ main = shakeArgs
     , shakeProgress = progressSimple
     }
   $ do
-    let ?artifactDir = [reldir|artifact|]
-    shakeOptions <- liftRules getShakeOptionsRules
-    shakeDir <- parseRelDir $ shakeFiles shakeOptions
+    shakeDir <- parseRelDir . shakeFiles =<< getShakeOptionsRules
     let ?shakeDir = shakeDir
-    let buildDir = shakeDir </> [reldir|build|]
-    let image = buildDir </> [reldir|image|]
-    let rootfs = buildDir </> [reldir|rootfs|]
+        ?artifactDir = [reldir|artifact|]
+     in do
+          addDownloadRule
+          addTarEntryRule
+          addContainerImageRule
 
-    addDownloadRule
-    addTarEntryRule
-    addContainerImageRule
-
-    nonrootImageRules
+          imageRules
 
 -- (registry </> [relfile|archlinux|] `imageRuleArbitaryTagsFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
 --   [ Workdir "/home/nonroot"
