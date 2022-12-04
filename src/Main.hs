@@ -22,7 +22,7 @@ import qualified Util
 import qualified Codec.Archive.Tar as Tar
 import Codec.Archive.Tar.Entry (Entry (entryOwnership), Ownership (Ownership, ownerName))
 import qualified Codec.Archive.Tar.Entry as Tar
-import Control.Exception.Safe (throwString)
+import Control.Exception.Safe (handle, throwString)
 import Control.Lens ((^.))
 import Control.Monad (foldM, unless, void, when)
 import Control.Monad.Catch (MonadThrow (throwM))
@@ -34,6 +34,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Char (isSpace)
 import Data.Either (partitionEithers)
+import Data.Foldable (traverse_)
 import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable (hashWithSalt), hash)
 import qualified Data.List as List
@@ -77,7 +78,7 @@ import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Syntax as TH
 import qualified Network.Wreq as Wreq (get, responseBody)
 import Optics (modifying, over, preview, set, view, (%), _head)
-import Path.IO (createDir, createDirIfMissing, doesPathExist)
+import Path.IO (createDir, createDirIfMissing, doesPathExist, ensureDir)
 import qualified Secret as Util
 import Text.Heredoc (here, str)
 
@@ -188,8 +189,8 @@ instance IsCmdArgument [ByteString] where
 infixl 4 %>
 (%>) ::
   (HasCallStack, MonadRules m) =>
-  Path Rel File ->
-  (Path Rel File -> Action ()) ->
+  Path b File ->
+  (forall b. Path b File -> Action ()) ->
   m ()
 (%>) file act = runShakePlus () $ toFilePath file Shake.%> (liftAction . act)
 
@@ -223,10 +224,10 @@ from image base confs act = do
   labels <- labels image
   runRAction container $
     act *> commit image (labels <> confs) *> rm
-copy :: [Tar.Entry] -> RAction ContainerId ()
-copy entries = do
+copy :: Path b t -> RAction ContainerId ()
+copy path = do
   ContainerId container <- ask
-  cmd_ (StdinBS (Tar.write entries)) docker (s "cp --archive=false -") $ container <> ":/"
+  cmd_ docker (s "cp --archive=false") (toFilePath path) $ container <> ":/"
 data Exec = Exec
   { execBy :: forall r. CmdResult r => String -> CmdArgument -> Action r
   , exec :: forall r. CmdResult r => CmdArgument -> Action r
@@ -346,7 +347,8 @@ newtype ContainerId = ContainerId String
 singleLine :: (MonadThrow m, ConvertibleStrings String s) => String -> m s
 singleLine str = case lines str of
   [line] -> pure $ cs line
-  lines -> throwString $ "multiple corresponding Images" <> show lines
+  [] -> throwString "no lines"
+  lines -> throwString $ "multiple lines" <> show lines
 
 addContainerImageRule :: Rules ()
 addContainerImageRule = do
@@ -356,7 +358,9 @@ addContainerImageRule = do
 
   imageSha image = do
     Stdout out <- cmd docker (s "image list --no-trunc --quiet") $ imageName image
-    singleLine out
+    case lines out of
+      [] -> pure mempty
+      out : _ -> singleLine out
 
   run :: BuiltinRun Image ImageHash
   run key oldStore RunDependenciesChanged = do
@@ -370,11 +374,9 @@ addContainerImageRule = do
       $ ImageHash current
   run key oldStore RunDependenciesSame = do
     current <- imageSha key
-    pure
-      $ RunResult
-        (if Just current == oldStore then ChangedNothing else ChangedRecomputeDiff)
-        current
-      $ ImageHash current
+    if ByteString.null current
+      then run key oldStore RunDependenciesChanged
+      else pure $ RunResult ChangedNothing current $ ImageHash current
 
 infix 4 `imageRuleFrom`
 infix 4 `imageRuleTaglessFrom`
@@ -467,6 +469,60 @@ needFileEntry path = askOracle . curry TarEntry path
 needDirEntry :: MonadAction m => Path Rel Dir -> m Tar.Entry
 needDirEntry path = askOracle $ TarEntry (path, ())
 
+buildDir :: (?shakeDir :: Path a Dir) => Path a Dir
+buildDir = ?shakeDir </> [reldir|build|]
+
+writeFileRule :: Path a File -> Text -> Rules ()
+writeFileRule path content = path %> flip writeFile' content
+writeFileLinesRule :: Path a File -> [Text] -> Rules ()
+writeFileLinesRule path content = path %> flip writeFileLines content
+writeFileInRule :: (?dir :: Path a Dir) => Path Rel File -> Text -> Rules ()
+writeFileInRule path = writeFileRule (?dir </> path)
+writeFileLinesInRule :: (?dir :: Path a Dir) => Path Rel File -> [Text] -> Rules ()
+writeFileLinesInRule path = writeFileLinesRule (?dir </> path)
+
+nonrootImageRules :: (?artifactDir :: Path a Dir, ?shakeDir :: Path b Dir) => Rules ()
+nonrootImageRules =
+  do
+    let ?dir = workDir
+     in do
+          writeFileLinesInRule
+            [relfile|etc/passwd|]
+            [ "root:x:0:0:root:/root:/sbin/nologin"
+            , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
+            , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
+            ]
+          writeFileLinesInRule
+            [relfile|etc/group|]
+            [ "root:x:0:"
+            , "nobody:x:65534:"
+            , "nonroot:x:" <> tshow Util.nonroot <> ":"
+            ]
+
+    (nonroot `imageRuleFrom` scratch)
+      [ Workdir "/home/nonroot"
+      , User "nonroot"
+      , description "scratch with nonroot user"
+      ]
+      $ do
+        needIn
+          (workDir </> [reldir|etc|])
+          [ [relfile|passwd|]
+          , [relfile|group|]
+          ]
+
+        traverse_
+          (ensureDir . (workDir </>))
+          [ [reldir|tmp|]
+          , [reldir|home/nonroot|]
+          ]
+
+        copy $ workDir </> [reldir|etc|]
+        copy $ workDir </> [reldir|tmp|]
+        copy $ workDir </> [reldir|home|]
+ where
+  workDir = buildDir </> [reldir|image/nonroot|]
+
 main :: IO ()
 main = shakeArgs
   shakeOptions
@@ -476,9 +532,10 @@ main = shakeArgs
     , shakeProgress = progressSimple
     }
   $ do
-    let artifactDir = [reldir|artifact|]
+    let ?artifactDir = [reldir|artifact|]
     shakeOptions <- liftRules getShakeOptionsRules
     shakeDir <- parseRelDir $ shakeFiles shakeOptions
+    let ?shakeDir = shakeDir
     let buildDir = shakeDir </> [reldir|build|]
     let image = buildDir </> [reldir|image|]
     let rootfs = buildDir </> [reldir|rootfs|]
@@ -487,77 +544,59 @@ main = shakeArgs
     addTarEntryRule
     addContainerImageRule
 
-    (nonroot `imageRuleFrom` scratch)
-      [ Workdir "/home/nonroot"
-      , User "nonroot"
-      , description "scratch with nonroot user"
-      ]
-      $ parallel
-        [ needDirEntry [reldir|tmp|]
-        , needDirEntry [reldir|home/nonroot|]
-        , needFileEntry [relfile|etc/passwd|]
-            . cs
-            $ Text.unlines
-              [ "root:x:0:0:root:/root:/sbin/nologin"
-              , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
-              , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
-              ]
-        , needFileEntry [relfile|etc/group|] . cs $
-            Text.unlines ["root:x:0:", "nobody:x:65534:", "nonroot:x:" <> tshow Util.nonroot <> ":"]
-        ]
-        >>= copy
+    nonrootImageRules
 
-    (registry </> [relfile|archlinux|] `imageRuleTaglessFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
-      [ Workdir "/home/nonroot"
-      , User "nonroot"
-      , description "Arch Linux with nonroot user and aur helper"
-      ]
-      $ do
-        let nonroot = show Util.nonroot
-        execWith $ \Exec{rootExec_} ->
-          void $
-            parallel
-              [ do
-                  rootExec_ $ cmd (s "groupadd --gid") nonroot (s "nonroot")
-                  rootExec_ $ cmd (s "useradd --uid") nonroot (s "--gid") nonroot (s "-m -s /usr/bin/nologin nonroot")
-              , rootExec_ $
-                  cmd
-                    (Stdin "nonroot ALL=(ALL:ALL) NOPASSWD: ALL")
-                    (s "tee -a /etc/sudoers")
-              , let noExtract =
-                      [str|NoExtract  = etc/systemd/*
-                          |NoExtract  = usr/share/systemd/*
-                          |NoExtract  = usr/share/man/*
-                          |NoExtract  = usr/share/help/*
-                          |NoExtract  = usr/share/doc/*
-                          |NoExtract  = usr/share/gtk-doc/*
-                          |NoExtract  = usr/share/info/*
-                          |NoExtract  = usr/share/X11/*
-                          |NoExtract  = usr/share/systemd/*
-                          |NoExtract  = usr/share/bash-completion/*
-                          |NoExtract  = usr/share/fish/*
-                          |NoExtract  = usr/share/zsh/*
-                          |NoExtract  = usr/lib/systemd/*
-                          |NoExtract  = usr/lib/sysusers.d/*
-                          |NoExtract  = usr/lib/tmpfiles.d/*
-                          |]
-                 in do
-                      rootExec_ $ cmd (s "sed -i /etc/pacman.conf -e") [s "/^NoExtract/d"]
-                      rootExec_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
-              ]
-        mirrorlist <- cs <$> readFile' [relfile|container/builder/mirrorlist|]
-        copy . (: []) =<< needFileEntry [relfile|etc/pacman.d/mirrorlist|] mirrorlist
+-- (registry </> [relfile|archlinux|] `imageRuleTaglessFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
+--   [ Workdir "/home/nonroot"
+--   , User "nonroot"
+--   , description "Arch Linux with nonroot user and aur helper"
+--   ]
+--   $ do
+--     let nonroot = show Util.nonroot
+--     execWith $ \Exec{rootExec_} ->
+--       void $
+--         parallel
+--           [ do
+--               rootExec_ $ cmd (s "groupadd --gid") nonroot (s "nonroot")
+--               rootExec_ $ cmd (s "useradd --uid") nonroot (s "--gid") nonroot (s "-m -s /usr/bin/nologin nonroot")
+--           , rootExec_ $
+--               cmd
+--                 (Stdin "nonroot ALL=(ALL:ALL) NOPASSWD: ALL")
+--                 (s "tee -a /etc/sudoers")
+--           , let noExtract =
+--                   [str|NoExtract  = etc/systemd/*
+--                       |NoExtract  = usr/share/systemd/*
+--                       |NoExtract  = usr/share/man/*
+--                       |NoExtract  = usr/share/help/*
+--                       |NoExtract  = usr/share/doc/*
+--                       |NoExtract  = usr/share/gtk-doc/*
+--                       |NoExtract  = usr/share/info/*
+--                       |NoExtract  = usr/share/X11/*
+--                       |NoExtract  = usr/share/systemd/*
+--                       |NoExtract  = usr/share/bash-completion/*
+--                       |NoExtract  = usr/share/fish/*
+--                       |NoExtract  = usr/share/zsh/*
+--                       |NoExtract  = usr/lib/systemd/*
+--                       |NoExtract  = usr/lib/sysusers.d/*
+--                       |NoExtract  = usr/lib/tmpfiles.d/*
+--                       |]
+--              in do
+--                   rootExec_ $ cmd (s "sed -i /etc/pacman.conf -e") [s "/^NoExtract/d"]
+--                   rootExec_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
+--           ]
+--     mirrorlist <- cs <$> readFile' [relfile|container/builder/mirrorlist|]
+--     copy . (: []) =<< needFileEntry [relfile|etc/pacman.d/mirrorlist|] mirrorlist
 
-        execWith $ \Exec{exec_, rootExec_} -> do
-          rootExec_ $ cmd pacman (s "-Sy git moreutils rsync")
-          exec_ $
-            cmd
-              (Cwd "/home/nonroot")
-              (s "git clone https://aur.archlinux.org/yay-bin.git aur-helper")
-          exec_ $ cmd (Cwd "/home/nonroot/aur-helper") (s "makepkg --noconfirm -sir")
-          rootExec_ $ cmd pacman (s "-S glibc")
-        copy . (: [])
-          =<< needFileEntry
-            [relfile|etc/locale.gen|]
-            (cs $ Text.unlines ["en_US.UTF-8 UTF-8", "ja_JP.UTF-8 UTF-8"])
-        execWith $ \Exec{rootExec_} -> rootExec_ . cmd $ s "locale-gen"
+--     execWith $ \Exec{exec_, rootExec_} -> do
+--       rootExec_ $ cmd pacman (s "-Sy git moreutils rsync")
+--       exec_ $
+--         cmd
+--           (Cwd "/home/nonroot")
+--           (s "git clone https://aur.archlinux.org/yay-bin.git aur-helper")
+--       exec_ $ cmd (Cwd "/home/nonroot/aur-helper") (s "makepkg --noconfirm -sir")
+--       rootExec_ $ cmd pacman (s "-S glibc")
+--     copy . (: [])
+--       =<< needFileEntry
+--         [relfile|etc/locale.gen|]
+--         (cs $ Text.unlines ["en_US.UTF-8 UTF-8", "ja_JP.UTF-8 UTF-8"])
+--     execWith $ \Exec{rootExec_} -> rootExec_ . cmd $ s "locale-gen"
