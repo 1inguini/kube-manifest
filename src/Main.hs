@@ -58,12 +58,13 @@ import Development.Shake (
   addTarget,
   getShakeOptionsRules,
   liftIO,
+  parallel,
   phony,
   phonys,
   progressSimple,
  )
 import Development.Shake.Command (CmdArgument (CmdArgument), IsCmdArgument (toCmdArgument))
-import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, need, needIn, phony, (%>))
+import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, need, needIn, parallel, phony, (%>))
 import qualified Development.Shake.Plus as Shake (CmdOption (Env), (%>))
 import Development.Shake.Rule (
   BuiltinRun,
@@ -478,11 +479,11 @@ nonrootImageRules =
               , [relfile|group|]
               ]
 
-        traverse_
-          (ensureDir . (?workdir </>))
-          [ [reldir|tmp|]
-          , [reldir|home/nonroot|]
-          ]
+        parallel $
+          ensureDir . (?workdir </>)
+            <$> [ [reldir|tmp|]
+                , [reldir|home/nonroot|]
+                ]
 
         config
           [ Workdir "/home/nonroot"

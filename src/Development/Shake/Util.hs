@@ -8,19 +8,11 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import Development.Shake (
   Action,
-  Lint (LintBasic),
   Rules,
   actionCatch,
-  addOracle,
-  addOracleCache,
-  addTarget,
-  getShakeOptionsRules,
   liftIO,
-  phony,
-  phonys,
  )
 import qualified Development.Shake as Shake (need, (%>))
-import Development.Shake.Command (CmdArgument (CmdArgument), IsCmdArgument (toCmdArgument))
 import Development.Shake.Rule (
   BuiltinRun,
   RunChanged (ChangedNothing, ChangedRecomputeDiff, ChangedRecomputeSame),
@@ -35,16 +27,13 @@ import Development.Shake.Rule (
  )
 import Path
 import Path.IO (
-  createDir,
-  createDirIfMissing,
-  doesPathExist,
   ensureDir,
   getPermissions,
   removeFile,
   setOwnerWritable,
   setPermissions,
  )
-import System.IO.Error (IOError, isDoesNotExistError)
+import System.IO.Error (isDoesNotExistError)
 import Prelude hiding (writeFile)
 
 -- import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, phony, (%>))
