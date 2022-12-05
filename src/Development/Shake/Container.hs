@@ -40,7 +40,7 @@ import Development.Shake.Rule (
   getUserRuleOne,
   noLint,
  )
-import Development.Shake.Util ()
+import Development.Shake.Util (need)
 import GHC.Generics (Generic)
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Syntax as TH
@@ -93,6 +93,11 @@ copy :: (?container :: ContainerId) => Path b Dir -> Action ()
 copy path =
   let ContainerId container = ?container
    in cmd_ buildah ["copy", "--chown=" <> show Util.nonroot, "--chmod=755"] container (toFilePath path) "/"
+copyFile :: (?container :: ContainerId) => Path a File -> Path Abs File -> Action ()
+copyFile src dst = do
+  let ContainerId container = ?container
+  need [src]
+  cmd_ buildah ["copy", "--chown=" <> show Util.nonroot, "--chmod=644"] container (toFilePath src) (toFilePath dst)
 runBy :: (?container :: ContainerId) => CmdResult r => String -> CmdArgument -> Action r
 runBy user (CmdArgument args) =
   let (opts, commands) = partitionEithers args
@@ -226,8 +231,8 @@ imageRuleFrom image@(Image (name, tag)) base action = do
             else Nothing
       )
 
-imageRuleArbitaryTagsFrom :: Path Rel File -> Image -> [ImageConfig] -> ((?container :: ContainerId) => Action ()) -> Rules ()
-imageRuleArbitaryTagsFrom name base confs act = do
+imageRuleArbitaryTagsFrom :: Path Rel File -> Image -> ((?container :: ContainerId) => Action ()) -> Rules ()
+imageRuleArbitaryTagsFrom name base act = do
   phonys $ \image -> do
     colTag <- List.stripPrefix (toFilePath name) image
     tag <- case colTag of

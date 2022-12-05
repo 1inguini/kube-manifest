@@ -2,7 +2,9 @@ module Main (
   main,
 ) where
 
-import Development.Shake.Container
+import Prelude hiding (readFile, writeFile)
+
+import Development.Shake.Container as Container
 import Development.Shake.Util
 import Manifest (yamls)
 import Util (Yaml, YamlType (..), s, tshow)
@@ -60,7 +62,7 @@ import Development.Shake (
   progressSimple,
  )
 import Development.Shake.Command (CmdArgument (CmdArgument), IsCmdArgument (toCmdArgument))
-import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, need, needIn, parallel, phony, (%>))
+import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, copyFile, need, needIn, parallel, phony, (%>))
 import qualified Development.Shake.Plus as Shake (CmdOption (Env), (%>))
 import Development.Shake.Rule (
   BuiltinRun,
@@ -204,47 +206,105 @@ buildDir = ?shakedir </> [reldir|build|]
 imageRules :: (?shakedir :: Path b Dir) => Rules ()
 imageRules = do
   let ?workdir = buildDir </> [reldir|image|]
-  nonrootImageRules
+  nonrootImage
+  archlinuxImage
 
-nonrootImageRules :: (?workdir :: Path b Dir) => Rules ()
-nonrootImageRules =
-  do
-    let ?workdir = ?workdir </> [reldir|nonroot|]
-    let etc = ?workdir </> [reldir|etc|]
+nonrootImage :: (?workdir :: Path b Dir) => Rules ()
+nonrootImage = do
+  let ?workdir = ?workdir </> [reldir|nonroot|]
+  let etc = ?workdir </> [reldir|etc|]
+  let ?workdir = etc
+   in do
+        writeFileLinesIn
+          [relfile|passwd|]
+          [ "root:x:0:0:root:/root:/sbin/nologin"
+          , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
+          , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
+          ]
+        writeFileLinesIn
+          [relfile|group|]
+          [ "root:x:0:"
+          , "nobody:x:65534:"
+          , "nonroot:x:" <> tshow Util.nonroot <> ":"
+          ]
+
+  (nonroot `imageRuleFrom` scratch) $ do
+    config
+      [ Workdir "/home/nonroot"
+      , User "nonroot"
+      , description "scratch with nonroot user"
+      ]
     let ?workdir = etc
-     in do
-          writeFileLinesIn
-            [relfile|passwd|]
-            [ "root:x:0:0:root:/root:/sbin/nologin"
-            , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
-            , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
+     in needIn
+          [ [relfile|passwd|]
+          , [relfile|group|]
+          ]
+    parallel $
+      ensureDir . (?workdir </>)
+        <$> [ [reldir|tmp|]
+            , [reldir|home/nonroot|]
             ]
-          writeFileLinesIn
-            [relfile|group|]
-            [ "root:x:0:"
-            , "nobody:x:65534:"
-            , "nonroot:x:" <> tshow Util.nonroot <> ":"
-            ]
+    copy ?workdir
 
-    (nonroot `imageRuleFrom` scratch) $ do
-      let ?workdir = etc
-       in needIn
-            [ [relfile|passwd|]
-            , [relfile|group|]
-            ]
+archlinuxImage :: (?workdir :: Path b Dir) => Rules ()
+archlinuxImage = do
+  let ?workdir = ?workdir </> [reldir|archlinux|]
 
-      parallel $
-        ensureDir . (?workdir </>)
-          <$> [ [reldir|tmp|]
-              , [reldir|home/nonroot|]
-              ]
+  writeFileLinesIn [relfile|etc/locale.gen|] ["en_US.UTF-8 UTF-8", "ja_JP.UTF-8 UTF-8"]
 
-      config
-        [ Workdir "/home/nonroot"
-        , User "nonroot"
-        , description "scratch with nonroot user"
+  (registry </> [relfile|archlinux|] `imageRuleArbitaryTagsFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel")) $ do
+    config
+      [ Workdir "/home/nonroot"
+      , User "nonroot"
+      , description "Arch Linux with nonroot user and aur helper"
+      ]
+    let nonroot = show Util.nonroot
+    void $
+      parallel
+        [ do
+            rootRun_ $ cmd (s "groupadd --gid") nonroot (s "nonroot")
+            rootRun_ $ cmd (s "useradd --uid") nonroot (s "--gid") nonroot (s "-m -s /usr/bin/nologin nonroot")
+        , rootRun_ $
+            cmd
+              (Stdin "nonroot ALL=(ALL:ALL) NOPASSWD: ALL")
+              (s "tee -a /etc/sudoers")
+        , let noExtract =
+                [str|NoExtract  = etc/systemd/*
+                      |NoExtract  = usr/share/systemd/*
+                      |NoExtract  = usr/share/man/*
+                      |NoExtract  = usr/share/help/*
+                      |NoExtract  = usr/share/doc/*
+                      |NoExtract  = usr/share/gtk-doc/*
+                      |NoExtract  = usr/share/info/*
+                      |NoExtract  = usr/share/X11/*
+                      |NoExtract  = usr/share/systemd/*
+                      |NoExtract  = usr/share/bash-completion/*
+                      |NoExtract  = usr/share/fish/*
+                      |NoExtract  = usr/share/zsh/*
+                      |NoExtract  = usr/lib/systemd/*
+                      |NoExtract  = usr/lib/sysusers.d/*
+                      |NoExtract  = usr/lib/tmpfiles.d/*
+                      |]
+           in do
+                rootRun_ $ cmd (s "sed -i /etc/pacman.conf -e") [s "/^NoExtract/d"]
+                rootRun_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
+        , Container.copyFile
+            [relfile|container/builder/mirrorlist|]
+            [absfile|/etc/pacman.d/mirrorlist|]
         ]
-      copy ?workdir
+    rootRun_ $ cmd pacman (s "-Sy git glibc moreutils rsync")
+    void $
+      parallel
+        [ do
+            run_ $
+              cmd
+                (Cwd "/home/nonroot")
+                (s "git clone https://aur.archlinux.org/yay-bin.git aur-helper")
+            run_ $ cmd (Cwd "/home/nonroot/aur-helper") (s "makepkg --noconfirm -sir")
+        , do
+            copyFile (?workdir </> [relfile|etc/locale.gen|]) [absfile|/etc/locale.gen|]
+            rootRun_ . cmd $ s "locale-gen"
+        ]
 
 main :: IO ()
 main = shakeArgs
@@ -263,58 +323,3 @@ main = shakeArgs
           addContainerImageRule
 
           imageRules
-
--- (registry </> [relfile|archlinux|] `imageRuleArbitaryTagsFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
---   [ Workdir "/home/nonroot"
---   , User "nonroot"
---   , description "Arch Linux with nonroot user and aur helper"
---   ]
---   $ do
---     let nonroot = show Util.nonroot
---     execWith $ \Exec{rootExec_} ->
---       void $
---         parallel
---           [ do
---               rootExec_ $ cmd (s "groupadd --gid") nonroot (s "nonroot")
---               rootExec_ $ cmd (s "useradd --uid") nonroot (s "--gid") nonroot (s "-m -s /usr/bin/nologin nonroot")
---           , rootExec_ $
---               cmd
---                 (Stdin "nonroot ALL=(ALL:ALL) NOPASSWD: ALL")
---                 (s "tee -a /etc/sudoers")
---           , let noExtract =
---                   [str|NoExtract  = etc/systemd/*
---                       |NoExtract  = usr/share/systemd/*
---                       |NoExtract  = usr/share/man/*
---                       |NoExtract  = usr/share/help/*
---                       |NoExtract  = usr/share/doc/*
---                       |NoExtract  = usr/share/gtk-doc/*
---                       |NoExtract  = usr/share/info/*
---                       |NoExtract  = usr/share/X11/*
---                       |NoExtract  = usr/share/systemd/*
---                       |NoExtract  = usr/share/bash-completion/*
---                       |NoExtract  = usr/share/fish/*
---                       |NoExtract  = usr/share/zsh/*
---                       |NoExtract  = usr/lib/systemd/*
---                       |NoExtract  = usr/lib/sysusers.d/*
---                       |NoExtract  = usr/lib/tmpfiles.d/*
---                       |]
---              in do
---                   rootExec_ $ cmd (s "sed -i /etc/pacman.conf -e") [s "/^NoExtract/d"]
---                   rootExec_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
---           ]
---     mirrorlist <- cs <$> readFile' [relfile|container/builder/mirrorlist|]
---     copy . (: []) =<< needFileEntry [relfile|etc/pacman.d/mirrorlist|] mirrorlist
-
---     execWith $ \Exec{exec_, rootExec_} -> do
---       rootExec_ $ cmd pacman (s "-Sy git moreutils rsync")
---       exec_ $
---         cmd
---           (Cwd "/home/nonroot")
---           (s "git clone https://aur.archlinux.org/yay-bin.git aur-helper")
---       exec_ $ cmd (Cwd "/home/nonroot/aur-helper") (s "makepkg --noconfirm -sir")
---       rootExec_ $ cmd pacman (s "-S glibc")
---     copy . (: [])
---       =<< needFileEntry
---         [relfile|etc/locale.gen|]
---         (cs $ Text.unlines ["en_US.UTF-8 UTF-8", "ja_JP.UTF-8 UTF-8"])
---     execWith $ \Exec{rootExec_} -> rootExec_ . cmd $ s "locale-gen"

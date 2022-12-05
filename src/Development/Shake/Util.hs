@@ -50,6 +50,11 @@ need = Shake.need . fmap toFilePath . Foldable.toList
 needIn :: (?workdir :: Path a Dir, Functor t, Foldable t) => t (Path Rel File) -> Action ()
 needIn = need . fmap (?workdir </>)
 
+readFile :: Path a File -> Action Text
+readFile path = do
+  need [path]
+  liftIO $ Text.readFile $ toFilePath path
+
 writeFile :: Path a File -> Text -> Rules ()
 writeFile path content =
   path %> \path -> do
