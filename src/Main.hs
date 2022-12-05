@@ -2,6 +2,7 @@ module Main (
   main,
 ) where
 
+import Development.Shake.Util
 import Manifest (yamls)
 import Util (Yaml, YamlType (..), tshow)
 import qualified Util
@@ -48,18 +49,21 @@ import Data.These (These (That, These, This))
 import Data.Time (UTCTime, ZonedTime, getCurrentTime, getZonedTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Development.Shake (
+  Action,
   Lint (LintBasic),
+  Rules,
   actionCatch,
   addOracle,
   addOracleCache,
   addTarget,
   getShakeOptionsRules,
+  liftIO,
   phony,
   phonys,
   progressSimple,
  )
 import Development.Shake.Command (CmdArgument (CmdArgument), IsCmdArgument (toCmdArgument))
-import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, phony, (%>))
+import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, need, needIn, phony, (%>))
 import qualified Development.Shake.Plus as Shake (CmdOption (Env), (%>))
 import Development.Shake.Rule (
   BuiltinRun,
@@ -79,6 +83,7 @@ import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Syntax as TH
 import qualified Network.Wreq as Wreq (get, responseBody)
 import Optics (modifying, over, preview, set, view, (%), _head)
+import Path
 import Path.IO (createDir, createDirIfMissing, doesPathExist, ensureDir)
 import qualified Secret as Util
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
@@ -166,14 +171,7 @@ import Text.Heredoc (here, str)
 
 s :: String -> String
 s = id
-instance MonadThrow Action where
-  throwM = liftIO . throwM
 
-instance MonadCatch Action where
-  catch = actionCatch
-
-instance MonadThrow Rules where
-  throwM = liftIO . throwM
 instance CmdResult r => CmdArguments (RAction e r) where
   cmdArguments (CmdArgument x) = case partitionEithers x of
     (opts, x : xs) -> liftAction $ command opts x xs
@@ -190,14 +188,6 @@ instance IsCmdArgument ByteString where
 
 instance IsCmdArgument [ByteString] where
   toCmdArgument = toCmdArgument . fmap (cs :: ByteString -> String)
-
-infixl 4 %>
-(%>) ::
-  (HasCallStack, MonadRules m) =>
-  Path b File ->
-  (forall b. Path b File -> Action ()) ->
-  m ()
-(%>) file act = runShakePlus () $ toFilePath file Shake.%> (liftAction . act)
 
 data ImageConfig
   = Cmd [String]
@@ -232,22 +222,20 @@ toArgs (Workdir dir) = ["--workingdir", dir]
 
 buildah :: CmdArgument
 buildah = cmd $ s "buildah"
-from :: Image -> Image -> RAction ContainerId () -> Action ()
+from :: Image -> Image -> ((?container :: ContainerId) => Action ()) -> Action ()
 from image base act = do
   Stdout container <- cmd buildah (s "from") $ imageName base
   container <- ContainerId <$> singleLine container
   labels <- labels image
-  runRAction container $
-    act *> commit image
-copy :: Path b Dir -> RAction ContainerId ()
-copy path = do
-  ContainerId container <- ask
-  cmd_ buildah [s "copy", "--chown=" <> show Util.nonroot, "--chmod=755"] container (toFilePath path) (s "/")
-runBy :: CmdResult r => String -> CmdArgument -> RAction ContainerId r
-runBy user (CmdArgument args) = do
-  ContainerId container <- ask
+  let ?container = container in act *> commit image
+copy :: (?container :: ContainerId) => Path b Dir -> Action ()
+copy path =
+  let ContainerId container = ?container
+   in cmd_ buildah [s "copy", "--chown=" <> show Util.nonroot, "--chmod=755"] container (toFilePath path) (s "/")
+runBy :: (?container :: ContainerId) => CmdResult r => String -> CmdArgument -> Action r
+runBy user (CmdArgument args) =
   let (opts, commands) = partitionEithers args
-  let (buildahOpts, execOpts) =
+      (buildahOpts, execOpts) =
         foldl
           ( \(buildahOpts, execOpts) ->
               \case
@@ -256,21 +244,22 @@ runBy user (CmdArgument args) = do
           )
           ([], [])
           opts
-  cmd buildahOpts buildah ("run --user=" <> user) execOpts container commands
-run, rootRun :: CmdResult r => CmdArgument -> RAction ContainerId r
+      ContainerId container = ?container
+   in cmd buildahOpts buildah ("run --user=" <> user) execOpts container commands
+run, rootRun :: (?container :: ContainerId) => CmdResult r => CmdArgument -> Action r
 run = runBy "nonroot"
 rootRun = runBy "root"
-run_, rootRun_ :: CmdArgument -> RAction ContainerId ()
+run_, rootRun_ :: (?container :: ContainerId) => CmdArgument -> Action ()
 run_ = run
 rootRun_ = rootRun
-config :: [ImageConfig] -> RAction ContainerId ()
-config config = do
-  ContainerId container <- ask
-  cmd_ buildah (s "config") (concatMap toArgs config) container
-commit :: Image -> RAction ContainerId ()
-commit image = do
-  ContainerId container <- ask
-  cmd_ buildah (s "commit --rm") container $ imageName image
+config :: (?container :: ContainerId) => [ImageConfig] -> Action ()
+config config =
+  let ContainerId container = ?container
+   in cmd_ buildah (s "config") (concatMap toArgs config) container
+commit :: (?container :: ContainerId) => Image -> Action ()
+commit image =
+  let ContainerId container = ?container
+   in cmd_ buildah (s "commit --rm") container $ imageName image
 labels :: MonadAction m => Image -> m [ImageConfig]
 labels image = do
   dateTime <- getUTCTime
@@ -365,7 +354,7 @@ addContainerImageRule = do
 infix 4 `imageRuleFrom`
 infix 4 `imageRuleArbitaryTagsFrom`
 
-imageRuleFrom :: Image -> Image -> RAction ContainerId () -> Rules ()
+imageRuleFrom :: Image -> Image -> ((?container :: ContainerId) => Action ()) -> Rules ()
 imageRuleFrom image@(Image (name, tag)) base action = do
   phony (imageName image) $ needImage image
   when (tag == latest) $ phony (toFilePath name) $ needImage image
@@ -378,7 +367,7 @@ imageRuleFrom image@(Image (name, tag)) base action = do
               else Nothing
         )
 
-imageRuleArbitaryTagsFrom :: Path Rel File -> Image -> [ImageConfig] -> RAction ContainerId () -> Rules ()
+imageRuleArbitaryTagsFrom :: Path Rel File -> Image -> [ImageConfig] -> ((?container :: ContainerId) => Action ()) -> Rules ()
 imageRuleArbitaryTagsFrom name base confs act = do
   phonys $ \image -> do
     colTag <- List.stripPrefix (toFilePath name) image
@@ -453,37 +442,29 @@ needFileEntry path = askOracle . curry TarEntry path
 needDirEntry :: MonadAction m => Path Rel Dir -> m Tar.Entry
 needDirEntry path = askOracle $ TarEntry (path, ())
 
-buildDir :: (?shakeDir :: Path a Dir) => Path a Dir
-buildDir = ?shakeDir </> [reldir|build|]
+buildDir :: (?shakedir :: Path a Dir) => Path a Dir
+buildDir = ?shakedir </> [reldir|build|]
 
-writeFileRule :: Path a File -> Text -> Rules ()
-writeFileRule path content = path %> flip writeFile' content
-writeFileLinesRule :: Path a File -> [Text] -> Rules ()
-writeFileLinesRule path content = path %> flip writeFileLines content
-writeFileInRule :: (?dir :: Path a Dir) => Path Rel File -> Text -> Rules ()
-writeFileInRule path = writeFileRule (?dir </> path)
-writeFileLinesInRule :: (?dir :: Path a Dir) => Path Rel File -> [Text] -> Rules ()
-writeFileLinesInRule path = writeFileLinesRule (?dir </> path)
-
-imageRules :: (?shakeDir :: Path b Dir) => Rules ()
+imageRules :: (?shakedir :: Path b Dir) => Rules ()
 imageRules = do
-  let ?workDir = buildDir </> [reldir|image/nonroot|]
+  let ?workdir = buildDir </> [reldir|image|]
   nonrootImageRules
 
-nonrootImageRules :: (?workDir :: Path b Dir) => Rules ()
+nonrootImageRules :: (?workdir :: Path b Dir) => Rules ()
 nonrootImageRules =
   do
-    let ?workDir = ?workDir </> [reldir|nonroot|]
-    let ?dir = ?workDir
+    let ?workdir = ?workdir </> [reldir|nonroot|]
+    let etc = ?workdir </> [reldir|etc|]
+    let ?workdir = etc
      in do
-          writeFileLinesInRule
-            [relfile|etc/passwd|]
+          writeFileLinesIn
+            [relfile|passwd|]
             [ "root:x:0:0:root:/root:/sbin/nologin"
             , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
             , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
             ]
-          writeFileLinesInRule
-            [relfile|etc/group|]
+          writeFileLinesIn
+            [relfile|group|]
             [ "root:x:0:"
             , "nobody:x:65534:"
             , "nonroot:x:" <> tshow Util.nonroot <> ":"
@@ -491,14 +472,14 @@ nonrootImageRules =
 
     (nonroot `imageRuleFrom` scratch) $
       do
-        needIn
-          (?workDir </> [reldir|etc|])
-          [ [relfile|passwd|]
-          , [relfile|group|]
-          ]
+        let ?workdir = etc
+         in needIn
+              [ [relfile|passwd|]
+              , [relfile|group|]
+              ]
 
         traverse_
-          (ensureDir . (?workDir </>))
+          (ensureDir . (?workdir </>))
           [ [reldir|tmp|]
           , [reldir|home/nonroot|]
           ]
@@ -508,7 +489,7 @@ nonrootImageRules =
           , User "nonroot"
           , description "scratch with nonroot user"
           ]
-        copy ?workDir
+        copy ?workdir
 
 main :: IO ()
 main = shakeArgs
@@ -519,8 +500,8 @@ main = shakeArgs
     , shakeProgress = progressSimple
     }
   $ do
-    shakeDir <- parseRelDir . shakeFiles =<< getShakeOptionsRules
-    let ?shakeDir = shakeDir
+    shakedir <- parseRelDir . shakeFiles =<< getShakeOptionsRules
+    let ?shakedir = shakedir
         ?artifactDir = [reldir|artifact|]
      in do
           addDownloadRule

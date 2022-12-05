@@ -57,6 +57,7 @@ executable kube-manifest
   import:           option
   main-is:          Main.hs
   other-modules:
+    Development.Shake.Util
     Manifest
     Secret
     TH
@@ -84,6 +85,7 @@ executable kube-manifest
     , mtl
     , optics
     , optics-th
+    , path
     , path-io
     , safe
     , safe-exceptions

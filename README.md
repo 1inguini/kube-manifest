@@ -51,6 +51,7 @@ helm template --values values/harbor.yaml harbor/harbor > manifest/harbor.yaml
 
 ## TODO
 
+* shake-plus依存をやめる
 * gitbucketにmariadb
 * `embedYamlFromDirectory`、Kubernetesオブジェクトの`Aeson.Value`のリストを`Ix`に
 
