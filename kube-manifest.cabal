@@ -57,6 +57,7 @@ executable kube-manifest
   import:           option
   main-is:          Main.hs
   other-modules:
+    Development.Shake.Container
     Development.Shake.Util
     Manifest
     Secret

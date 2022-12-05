@@ -3,6 +3,7 @@ module Development.Shake.Util where
 import Control.Exception.Safe (catch, handle, throw)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Data.Foldable as Foldable
+import Data.String (IsString (fromString))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
@@ -13,18 +14,8 @@ import Development.Shake (
   liftIO,
  )
 import qualified Development.Shake as Shake (need, (%>))
-import Development.Shake.Rule (
-  BuiltinRun,
-  RunChanged (ChangedNothing, ChangedRecomputeDiff, ChangedRecomputeSame),
-  RunMode (RunDependenciesChanged, RunDependenciesSame),
-  RunResult (RunResult),
-  addBuiltinRule,
-  addUserRule,
-  apply,
-  apply1,
-  getUserRuleOne,
-  noLint,
- )
+import Development.Shake.Classes (Binary)
+import Development.Shake.Command (CmdArgument, IsCmdArgument (toCmdArgument))
 import Path
 import Path.IO (
   ensureDir,
@@ -38,6 +29,8 @@ import Prelude hiding (writeFile)
 
 -- import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, phony, (%>))
 -- import qualified Development.Shake.Plus as Shake (CmdOption (Env), (%>))
+
+instance Binary (Path Rel t)
 
 instance Exceptions.MonadThrow Action where
   throwM = liftIO . Exceptions.throwM

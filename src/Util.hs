@@ -32,6 +32,9 @@ import Optics (
 import Secret (host)
 import TH (deriveJSON)
 
+s :: String -> String
+s = id
+
 -- import Data.
 -- import Manifest.Io.K8s.Api.Core.V1 (Namespace)
 -- import Manifest.Io.K8s.Apimachinery.Pkg.Apis.Meta.V1 (ObjectMeta (..))

@@ -2,9 +2,10 @@ module Main (
   main,
 ) where
 
+import Development.Shake.Container
 import Development.Shake.Util
 import Manifest (yamls)
-import Util (Yaml, YamlType (..), tshow)
+import Util (Yaml, YamlType (..), s, tshow)
 import qualified Util
 
 -- import Control.Applicative ((<|>))
@@ -20,9 +21,6 @@ import qualified Util
 -- import System.Directory (createDirectoryIfMissing)
 -- import System.Process (readProcess)
 
-import qualified Codec.Archive.Tar as Tar
-import Codec.Archive.Tar.Entry (Entry (entryOwnership), Ownership (Ownership, ownerName))
-import qualified Codec.Archive.Tar.Entry as Tar
 import Control.Exception.Safe (handle, throwString)
 import Control.Lens ((^.))
 import Control.Monad (foldM, unless, void, when)
@@ -46,8 +44,6 @@ import Data.String.Conversions (ConvertibleStrings, cs)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.These (These (That, These, This))
-import Data.Time (UTCTime, ZonedTime, getCurrentTime, getZonedTime)
-import Data.Time.Format.ISO8601 (iso8601Show)
 import Development.Shake (
   Action,
   Lint (LintBasic),
@@ -80,8 +76,6 @@ import Development.Shake.Rule (
  )
 import GHC.Generics (Generic)
 import GHC.Stack (HasCallStack)
-import qualified Language.Haskell.TH as TH
-import qualified Language.Haskell.TH.Syntax as TH
 import qualified Network.Wreq as Wreq (get, responseBody)
 import Optics (modifying, over, preview, set, view, (%), _head)
 import Path
@@ -170,217 +164,26 @@ import Text.Heredoc (here, str)
 -- main :: IO ()
 -- main = generate
 
-s :: String -> String
-s = id
-
 instance CmdResult r => CmdArguments (RAction e r) where
   cmdArguments (CmdArgument x) = case partitionEithers x of
     (opts, x : xs) -> liftAction $ command opts x xs
     _ -> error "Error, no executable or arguments given to Development.Shake.cmd"
 
-instance IsCmdArgument Text where
-  toCmdArgument = toCmdArgument . (cs :: Text -> String)
+-- instance IsCmdArgument Text where
+--   toCmdArgument = toCmdArgument . (cs :: Text -> String)
 
-instance IsCmdArgument [Text] where
-  toCmdArgument = toCmdArgument . fmap (cs :: Text -> String)
+-- instance IsCmdArgument [Text] where
+--   toCmdArgument = toCmdArgument . fmap (cs :: Text -> String)
 
-instance IsCmdArgument ByteString where
-  toCmdArgument = toCmdArgument . (cs :: ByteString -> String)
+-- instance IsCmdArgument ByteString where
+--   toCmdArgument = toCmdArgument . (cs :: ByteString -> String)
 
-instance IsCmdArgument [ByteString] where
-  toCmdArgument = toCmdArgument . fmap (cs :: ByteString -> String)
-
-data ImageConfig
-  = Cmd [String]
-  | Entrypoint [String]
-  | Env String String
-  | Expose String
-  | Label String String
-  | User String
-  | Volume String
-  | Workdir String
-  deriving (Show, Eq, Generic)
-
-toChange :: ImageConfig -> String
-toChange (Cmd cmds) = "CMD " <> show cmds
-toChange (Entrypoint cmds) = "ENTRYPOINT " <> show cmds
-toChange (Env var val) = "ENV " <> var <> "=" <> val
-toChange (Expose port) = "EXPOSE " <> port
-toChange (Label label val) = "LABEL " <> label <> "=" <> val
-toChange (User user) = "USER " <> user
-toChange (Volume dir) = "VOLUME " <> dir
-toChange (Workdir dir) = "WORKDIR " <> dir
-
-toArgs :: ImageConfig -> [String]
-toArgs (Cmd cmds) = "--cmd" : cmds
-toArgs (Entrypoint cmds) = "--entrypoint" : cmds
-toArgs (Env var val) = ["--env", var, val]
-toArgs (Expose port) = ["--port", port]
-toArgs (Label label val) = ["--label", label <> "=" <> val]
-toArgs (User user) = ["--user", user]
-toArgs (Volume dir) = ["--volume", dir]
-toArgs (Workdir dir) = ["--workingdir", dir]
-
-buildah :: CmdArgument
-buildah = cmd $ s "buildah"
-from :: Image -> Image -> ((?container :: ContainerId) => Action ()) -> Action ()
-from image base act = do
-  Stdout container <- cmd buildah (s "from") $ imageName base
-  container <- ContainerId <$> singleLine container
-  labels <- labels image
-  let ?container = container in act *> commit image
-copy :: (?container :: ContainerId) => Path b Dir -> Action ()
-copy path =
-  let ContainerId container = ?container
-   in cmd_ buildah [s "copy", "--chown=" <> show Util.nonroot, "--chmod=755"] container (toFilePath path) (s "/")
-runBy :: (?container :: ContainerId) => CmdResult r => String -> CmdArgument -> Action r
-runBy user (CmdArgument args) =
-  let (opts, commands) = partitionEithers args
-      (buildahOpts, execOpts) =
-        foldl
-          ( \(buildahOpts, execOpts) ->
-              \case
-                (Cwd cwd) -> (buildahOpts, ("--workdir=" <> cwd) : execOpts)
-                opt -> (opt : buildahOpts, execOpts)
-          )
-          ([], [])
-          opts
-      ContainerId container = ?container
-   in cmd buildahOpts buildah ("run --user=" <> user) execOpts container commands
-run, rootRun :: (?container :: ContainerId) => CmdResult r => CmdArgument -> Action r
-run = runBy "nonroot"
-rootRun = runBy "root"
-run_, rootRun_ :: (?container :: ContainerId) => CmdArgument -> Action ()
-run_ = run
-rootRun_ = rootRun
-config :: (?container :: ContainerId) => [ImageConfig] -> Action ()
-config config =
-  let ContainerId container = ?container
-   in cmd_ buildah (s "config") (concatMap toArgs config) container
-commit :: (?container :: ContainerId) => Image -> Action ()
-commit image =
-  let ContainerId container = ?container
-   in cmd_ buildah (s "commit --rm") container $ imageName image
-labels :: MonadAction m => Image -> m [ImageConfig]
-labels image = do
-  dateTime <- getUTCTime
-  pure $
-    (\(l, v) -> Label ("org.opencontainers.image." <> l) v)
-      <$> [ ("created", dateTime)
-          , ("authors", "1inguini <9647142@gmail.com>")
-          , ("url", cs (imageName image))
-          , ("documentation", "https://git.1inguini.com/1inguini/kube-manifest/README.md")
-          , ("source", "https://git.1inguini.com/1inguini/kube-manifest")
-          ]
-
-description :: String -> ImageConfig
-description = Label "org.opencontainers.image.description"
+-- instance IsCmdArgument [ByteString] where
+--   toCmdArgument = toCmdArgument . fmap (cs :: ByteString -> String)
 
 pacman, aur :: CmdArgument
 aur = cmd $ s "yay --noconfirm --noprovides"
 pacman = cmd $ s "pacman --noconfirm" :: CmdArgument
-
--- https://stackoverflow.com/q/54050016
-newtype Tag = Tag String
-  deriving (Show, Eq, Hashable, Binary, NFData)
-
-latest :: Tag
-latest = Tag "latest"
-
-newtype Image = Image (Path Rel File, Tag) -- repo/name, tag
-  deriving (Show, Eq, Hashable, Binary, NFData)
-
-imageName (Image (name, Tag tag)) =
-  toFilePath name <> ":" <> tag
-
-registry :: Path Rel Dir
-registry = $(TH.lift =<< TH.runIO ((</> [reldir|library|]) <$> parseRelDir ("registry." <> cs Util.host)))
-
-registryImage :: Path Rel File -> Tag -> Image
-registryImage name = curry Image (registry </> name)
-scratch, nonroot :: Image
-scratch = registryImage [relfile|scratch|] latest
-nonroot = registryImage [relfile|nonroot|] latest
-
-newtype ImageHash = ImageHash ByteString
-  deriving (Show, Eq, Hashable, Binary, NFData)
-
-type instance RuleResult Image = ImageHash -- image id (sha256)
-
-newtype ImageRule = ImageRule (Image -> Maybe (Action ()))
-
-needImages :: MonadAction m => [Image] -> m ()
-needImages = liftAction . void . apply
-
-needImage :: MonadAction m => Image -> m ()
-needImage = liftAction . void . apply1
-
-newtype ContainerId = ContainerId String
-  deriving (Show, Eq, Hashable, Binary, NFData)
-
-singleLine :: (MonadThrow m, ConvertibleStrings String s) => String -> m s
-singleLine str = case lines str of
-  [line] -> pure $ cs line
-  [] -> throwString "no lines"
-  lines -> throwString $ "multiple lines" <> show lines
-
-addContainerImageRule :: Rules ()
-addContainerImageRule = do
-  liftRules $ addBuiltinRule noLint imageIdentity run
- where
-  imageIdentity _ (ImageHash hash) = Just hash
-
-  imageSha image = do
-    (Stdout out, Exit code) <- cmd buildah (s "images --no-trunc --quiet") $ imageName image
-    case code of
-      ExitSuccess -> singleLine out
-      ExitFailure 125 -> pure ""
-
-  run :: BuiltinRun Image ImageHash
-  run key oldStore RunDependenciesChanged = do
-    (_, act) <- getUserRuleOne key (const Nothing) $ \(ImageRule act) -> act key
-    act
-    current <- imageSha key
-    pure
-      $ RunResult
-        (if Just current == oldStore then ChangedRecomputeSame else ChangedRecomputeDiff)
-        current
-      $ ImageHash current
-  run key oldStore RunDependenciesSame = do
-    current <- imageSha key
-    if ByteString.null current
-      then run key oldStore RunDependenciesChanged
-      else pure $ RunResult ChangedNothing current $ ImageHash current
-
-infix 4 `imageRuleFrom`
-infix 4 `imageRuleArbitaryTagsFrom`
-
-imageRuleFrom :: Image -> Image -> ((?container :: ContainerId) => Action ()) -> Rules ()
-imageRuleFrom image@(Image (name, tag)) base action = do
-  phony (imageName image) $ needImage image
-  when (tag == latest) $ phony (toFilePath name) $ needImage image
-  liftRules $
-    addUserRule $
-      ImageRule
-        ( \i ->
-            if image == i
-              then Just $ (image `from` base) action
-              else Nothing
-        )
-
-imageRuleArbitaryTagsFrom :: Path Rel File -> Image -> [ImageConfig] -> ((?container :: ContainerId) => Action ()) -> Rules ()
-imageRuleArbitaryTagsFrom name base confs act = do
-  phonys $ \image -> do
-    colTag <- List.stripPrefix (toFilePath name) image
-    tag <- case colTag of
-      "" -> pure "latest"
-      ':' : tag -> pure tag
-      _ -> Nothing
-    pure $ needImage $ Image (name, Tag tag)
-
-  liftRules . addUserRule . ImageRule $ \case
-    image@(Image (n, _)) | n == name -> Just $ (image `from` base) act
-    _ -> Nothing
 
 newtype ListDynamicDep = ListDynamicDep () deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
 type instance RuleResult ListDynamicDep = [Path Abs File]
@@ -394,54 +197,6 @@ addDownloadRule = void . addOracleCache $ \(Download url) ->
 
 needDownload :: MonadAction m => String -> m ByteString
 needDownload = askOracle . Download
-
-getUTCTime :: MonadAction m => m String
-getUTCTime = liftIO $ iso8601Show <$> getCurrentTime
-
-instance Binary (Path Rel t)
-instance Binary Tar.Entry where
-  put entry = put $ Tar.write [entry]
-  get = do
-    entries <- Tar.read <$> get
-    case entries of
-      Tar.Next entry _ -> pure entry
-      e -> fail $ show e
-instance Hashable Tar.Entry where
-  hashWithSalt salt entry = hashWithSalt salt $ Tar.write [entry]
-newtype TarEntry t c = TarEntry (Path Rel t, c) deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
-type instance RuleResult (TarEntry File ByteString) = Tar.Entry
-type instance RuleResult (TarEntry Dir ()) = Tar.Entry
-
-nonrootOwn :: Ownership
-nonrootOwn =
-  Ownership
-    { ownerName = "nonroot"
-    , groupName = "nonroot"
-    , ownerId = Util.nonroot
-    , groupId = Util.nonroot
-    }
-
--- tar
-fileEntry :: MonadThrow m => Path Rel File -> ByteString -> m Tar.Entry
-fileEntry path content = do
-  path <- either throwString pure . Tar.toTarPath False . cs $ toFilePath path
-  pure (Tar.fileEntry path $ cs content){entryOwnership = nonrootOwn}
-
-directoryEntry :: MonadThrow m => Path Rel Dir -> m Tar.Entry
-directoryEntry path = do
-  path <- either throwString pure . Tar.toTarPath True . cs $ toFilePath path
-  pure (Tar.directoryEntry path){entryOwnership = nonrootOwn}
-
-addTarEntryRule :: Rules ()
-addTarEntryRule = do
-  void . addOracleCache $ \(TarEntry (path, content)) -> fileEntry path content
-  void . addOracleCache $ \(TarEntry (path, ())) -> directoryEntry path
-
-needFileEntry :: MonadAction m => Path Rel File -> ByteString -> m Tar.Entry
-needFileEntry path = askOracle . curry TarEntry path
-
-needDirEntry :: MonadAction m => Path Rel Dir -> m Tar.Entry
-needDirEntry path = askOracle $ TarEntry (path, ())
 
 buildDir :: (?shakedir :: Path a Dir) => Path a Dir
 buildDir = ?shakedir </> [reldir|build|]
@@ -471,26 +226,25 @@ nonrootImageRules =
             , "nonroot:x:" <> tshow Util.nonroot <> ":"
             ]
 
-    (nonroot `imageRuleFrom` scratch) $
-      do
-        let ?workdir = etc
-         in needIn
-              [ [relfile|passwd|]
-              , [relfile|group|]
+    (nonroot `imageRuleFrom` scratch) $ do
+      let ?workdir = etc
+       in needIn
+            [ [relfile|passwd|]
+            , [relfile|group|]
+            ]
+
+      parallel $
+        ensureDir . (?workdir </>)
+          <$> [ [reldir|tmp|]
+              , [reldir|home/nonroot|]
               ]
 
-        parallel $
-          ensureDir . (?workdir </>)
-            <$> [ [reldir|tmp|]
-                , [reldir|home/nonroot|]
-                ]
-
-        config
-          [ Workdir "/home/nonroot"
-          , User "nonroot"
-          , description "scratch with nonroot user"
-          ]
-        copy ?workdir
+      config
+        [ Workdir "/home/nonroot"
+        , User "nonroot"
+        , description "scratch with nonroot user"
+        ]
+      copy ?workdir
 
 main :: IO ()
 main = shakeArgs
@@ -506,7 +260,6 @@ main = shakeArgs
         ?artifactDir = [reldir|artifact|]
      in do
           addDownloadRule
-          addTarEntryRule
           addContainerImageRule
 
           imageRules
