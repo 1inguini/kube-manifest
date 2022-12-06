@@ -1,6 +1,6 @@
 module Development.Shake.Util where
 
-import Control.Exception.Safe (catch, handle, throw)
+import Control.Exception.Safe (Typeable, catch, handle, throw)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Data.Foldable as Foldable
 import Data.String (IsString (fromString))
@@ -30,7 +30,8 @@ import Prelude hiding (writeFile)
 -- import Development.Shake.Plus hiding (CmdOption (Env), addOracle, addOracleCache, phony, (%>))
 -- import qualified Development.Shake.Plus as Shake (CmdOption (Env), (%>))
 
-instance Binary (Path Rel t)
+instance Binary (Path a t)
+deriving instance Typeable (Path a t)
 
 instance Exceptions.MonadThrow Action where
   throwM = liftIO . Exceptions.throwM

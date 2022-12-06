@@ -5,6 +5,7 @@ module Main (
 import Prelude hiding (readFile, writeFile)
 
 import Development.Shake.Container as Container
+import Development.Shake.Tar as Tar
 import Development.Shake.Util
 import Manifest (yamls)
 import Util (Yaml, YamlType (..), s, tshow)
@@ -37,7 +38,6 @@ import Data.Char (isSpace)
 import Data.Either (partitionEithers)
 import Data.Foldable (concatMap, traverse_)
 import Data.HashMap.Strict (HashMap)
-import Data.Hashable (Hashable (hashWithSalt), hash)
 import qualified Data.List as List
 import Data.Record.Anon
 import Data.Record.Anon.Simple (Record)
