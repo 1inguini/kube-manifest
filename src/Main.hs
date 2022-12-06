@@ -228,23 +228,23 @@ nonrootImage = do
           , "nonroot:x:" <> tshow Util.nonroot <> ":"
           ]
 
-  (nonroot `imageRuleFrom` scratch) $ do
-    config
-      [ Workdir "/home/nonroot"
-      , User "nonroot"
-      , description "scratch with nonroot user"
-      ]
-    let ?workdir = etc
-     in needIn
-          [ [relfile|passwd|]
-          , [relfile|group|]
-          ]
-    parallel $
-      ensureDir . (?workdir </>)
-        <$> [ [reldir|tmp|]
-            , [reldir|home/nonroot|]
+  (nonroot `imageRuleFrom` scratch)
+    [ Workdir "/home/nonroot"
+    , User "nonroot"
+    , description "scratch with nonroot user"
+    ]
+    $ do
+      let ?workdir = etc
+       in needIn
+            [ [relfile|passwd|]
+            , [relfile|group|]
             ]
-    copy ?workdir
+      parallel $
+        ensureDir . (?workdir </>)
+          <$> [ [reldir|tmp|]
+              , [reldir|home/nonroot|]
+              ]
+      copy ?workdir
 
 archlinuxImage :: (?workdir :: Path b Dir) => Rules ()
 archlinuxImage = do
@@ -252,24 +252,24 @@ archlinuxImage = do
 
   writeFileLinesIn [relfile|etc/locale.gen|] ["en_US.UTF-8 UTF-8", "ja_JP.UTF-8 UTF-8"]
 
-  (registry </> [relfile|archlinux|] `imageRuleArbitaryTagsFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel")) $ do
-    config
-      [ Workdir "/home/nonroot"
-      , User "nonroot"
-      , description "Arch Linux with nonroot user and aur helper"
-      ]
-    let nonroot = show Util.nonroot
-    void $
-      parallel
-        [ do
-            rootRun_ $ cmd (s "groupadd --gid") nonroot (s "nonroot")
-            rootRun_ $ cmd (s "useradd --uid") nonroot (s "--gid") nonroot (s "-m -s /usr/bin/nologin nonroot")
-        , rootRun_ $
-            cmd
-              (Stdin "nonroot ALL=(ALL:ALL) NOPASSWD: ALL")
-              (s "tee -a /etc/sudoers")
-        , let noExtract =
-                [str|NoExtract  = etc/systemd/*
+  (registry </> [relfile|archlinux|] `imageRuleArbitaryTagsFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
+    [ Workdir "/home/nonroot"
+    , User "nonroot"
+    , description "Arch Linux with nonroot user and aur helper"
+    ]
+    $ do
+      let nonroot = show Util.nonroot
+      void $
+        parallel
+          [ do
+              rootRun_ $ cmd (s "groupadd --gid") nonroot (s "nonroot")
+              rootRun_ $ cmd (s "useradd --uid") nonroot (s "--gid") nonroot (s "-m -s /usr/bin/nologin nonroot")
+          , rootRun_ $
+              cmd
+                (Stdin "nonroot ALL=(ALL:ALL) NOPASSWD: ALL")
+                (s "tee -a /etc/sudoers")
+          , let noExtract =
+                  [str|NoExtract  = etc/systemd/*
                       |NoExtract  = usr/share/systemd/*
                       |NoExtract  = usr/share/man/*
                       |NoExtract  = usr/share/help/*
@@ -285,26 +285,26 @@ archlinuxImage = do
                       |NoExtract  = usr/lib/sysusers.d/*
                       |NoExtract  = usr/lib/tmpfiles.d/*
                       |]
-           in do
-                rootRun_ $ cmd (s "sed -i /etc/pacman.conf -e") [s "/^NoExtract/d"]
-                rootRun_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
-        , Container.copyFile
-            [relfile|container/builder/mirrorlist|]
-            [absfile|/etc/pacman.d/mirrorlist|]
-        ]
-    rootRun_ $ cmd pacman (s "-Sy git glibc moreutils rsync")
-    void $
-      parallel
-        [ do
-            run_ $
-              cmd
-                (Cwd "/home/nonroot")
-                (s "git clone https://aur.archlinux.org/yay-bin.git aur-helper")
-            run_ $ cmd (Cwd "/home/nonroot/aur-helper") (s "makepkg --noconfirm -sir")
-        , do
-            copyFile (?workdir </> [relfile|etc/locale.gen|]) [absfile|/etc/locale.gen|]
-            rootRun_ . cmd $ s "locale-gen"
-        ]
+             in do
+                  rootRun_ $ cmd (s "sed -i /etc/pacman.conf -e") [s "/^NoExtract/d"]
+                  rootRun_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
+          , Container.copyFile
+              [relfile|container/builder/mirrorlist|]
+              [absfile|/etc/pacman.d/mirrorlist|]
+          ]
+      rootRun_ $ cmd pacman (s "-Sy git glibc moreutils rsync")
+      void $
+        parallel
+          [ do
+              run_ $
+                cmd
+                  (Cwd "/home/nonroot")
+                  (s "git clone https://aur.archlinux.org/yay-bin.git aur-helper")
+              run_ $ cmd (Cwd "/home/nonroot/aur-helper") (s "makepkg --noconfirm -sir")
+          , do
+              copyFile (?workdir </> [relfile|etc/locale.gen|]) [absfile|/etc/locale.gen|]
+              rootRun_ . cmd $ s "locale-gen"
+          ]
 
 main :: IO ()
 main = shakeArgs

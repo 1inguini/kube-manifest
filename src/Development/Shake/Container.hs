@@ -2,6 +2,8 @@
 
 module Development.Shake.Container where
 
+import qualified Codec.Archive.Tar as Tar (write)
+import qualified Codec.Archive.Tar.Entry as Tar
 import Control.Exception.Safe (throwString)
 import Control.Monad (void, when)
 import Control.Monad.Catch (MonadCatch (catch), MonadThrow (throwM))
@@ -14,7 +16,7 @@ import Data.Time (getCurrentTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Development.Shake (
   Action,
-  CmdOption (Cwd),
+  CmdOption (Cwd, StdinBS),
   CmdResult,
   Exit (Exit),
   RuleResult,
@@ -81,51 +83,66 @@ toArgs (User user) = ["--user", user]
 toArgs (Volume dir) = ["--volume", dir]
 toArgs (Workdir dir) = ["--workingdir", dir]
 
-buildah :: CmdArgument
-buildah = cmd "buildah"
-from :: Image -> Image -> ((?container :: ContainerId) => Action ()) -> Action ()
-from image base act = do
-  Stdout container <- cmd buildah "from" $ imageName base
-  container <- ContainerId <$> singleLine container
+docker :: CmdArgument
+docker = cmd "podman"
+from :: Image -> Image -> [ImageConfig] -> ((?container :: ContainerId) => Action ()) -> Action ()
+from image base confs act = do
+  let baseImage = imageName base
+  let defConf field = do
+        Stdout conf <-
+          cmd
+            docker
+            "inspect"
+            [ "--format=[{{range $index, $elem := .Config."
+                <> field
+                <> "}}{{if $index}}, {{end}}\"{{$elem}}\"{{end}}]"
+            ]
+            baseImage
+        singleLine conf
+  defEntry <- defConf "Entrypoint"
+  defCmd <- defConf "Cmd"
+  -- TODO: need [s6-pause]
+  Stdout container <-
+    cmd docker "create --volume=/usr/bin/s6-pause:/s6-pause --entrypoint=/s6-pause" baseImage
+  container <- singleLine container
+  cmd_ docker "start" container
   labels <- labels image
-  let ?container = container in act *> commit image
-copy :: (?container :: ContainerId) => Path b Dir -> Action ()
-copy path =
+  let ?container = ContainerId container
+   in act *> commit image (["ENTRYPOINT " <> defEntry, "CMD " <> defCmd] <> fmap toChange confs)
+copy :: (?container :: ContainerId) => [Tar.Entry] -> Action ()
+copy entries =
   let ContainerId container = ?container
-   in cmd_ buildah ["copy", "--chown=" <> show Util.nonroot, "--chmod=755"] container (toFilePath path) "/"
+   in cmd_ (StdinBS $ Tar.write entries) docker "cp -" $ container <> ":/"
 copyFile :: (?container :: ContainerId) => Path a File -> Path Abs File -> Action ()
 copyFile src dst = do
   let ContainerId container = ?container
   need [src]
-  cmd_ buildah ["copy", "--chown=" <> show Util.nonroot, "--chmod=644"] container (toFilePath src) (toFilePath dst)
-runBy :: (?container :: ContainerId) => CmdResult r => String -> CmdArgument -> Action r
+  cmd_ docker "cp" (toFilePath src) $ container <> ":" <> toFilePath dst
+runBy :: (?container :: ContainerId) => CmdResult r => Int -> CmdArgument -> Action r
 runBy user (CmdArgument args) =
   let (opts, commands) = partitionEithers args
-      (buildahOpts, execOpts) =
+      (dockerOpts, execOpts) =
         foldl
-          ( \(buildahOpts, execOpts) ->
+          ( \(dockerOpts, execOpts) ->
               \case
-                (Cwd cwd) -> (buildahOpts, ("--workdir=" <> cwd) : execOpts)
-                opt -> (opt : buildahOpts, execOpts)
+                (Cwd cwd) -> (dockerOpts, ("--workdir=" <> cwd) : execOpts)
+                opt -> (opt : dockerOpts, execOpts)
           )
           ([], [])
           opts
       ContainerId container = ?container
-   in cmd buildahOpts buildah ("run --user=" <> user) execOpts container commands
+   in cmd dockerOpts docker ("exec --user=" <> show user) execOpts container commands
 run, rootRun :: (?container :: ContainerId) => CmdResult r => CmdArgument -> Action r
-run = runBy "nonroot"
-rootRun = runBy "root"
+run = runBy Util.nonroot
+rootRun = runBy 0
 run_, rootRun_ :: (?container :: ContainerId) => CmdArgument -> Action ()
 run_ = run
 rootRun_ = rootRun
-config :: (?container :: ContainerId) => [ImageConfig] -> Action ()
-config config =
+commit :: (?container :: ContainerId) => Image -> [String] -> Action ()
+commit image changes =
   let ContainerId container = ?container
-   in cmd_ buildah "config" (concatMap toArgs config) container
-commit :: (?container :: ContainerId) => Image -> Action ()
-commit image =
-  let ContainerId container = ?container
-   in cmd_ buildah "commit --rm" container $ imageName image
+   in cmd_ docker "commit --rm" (concatMap (\c -> ["--change", c]) changes) container $
+        imageName image
 labels :: Image -> Action [ImageConfig]
 labels image = do
   dateTime <- getUTCTime
@@ -182,7 +199,7 @@ needImage = void . apply1
 newtype ContainerId = ContainerId String
   deriving (Show, Eq, Hashable, Binary, NFData)
 
-singleLine :: (MonadThrow m, ConvertibleStrings String s) => String -> m s
+singleLine :: MonadThrow m => String -> m String
 singleLine str = case lines str of
   [line] -> pure $ cs line
   [] -> throwString "no lines"
@@ -195,9 +212,9 @@ addContainerImageRule = do
   imageIdentity _ (ImageHash hash) = Just hash
 
   imageSha image = do
-    (Stdout out, Exit code) <- cmd buildah "images --no-trunc --quiet" $ imageName image
+    (Stdout out, Exit code) <- cmd docker "images --no-trunc --quiet" $ imageName image
     case code of
-      ExitSuccess -> singleLine out
+      ExitSuccess -> cs <$> singleLine out
       ExitFailure 125 -> pure ""
 
   run :: BuiltinRun Image ImageHash
@@ -219,20 +236,22 @@ addContainerImageRule = do
 infix 4 `imageRuleFrom`
 infix 4 `imageRuleArbitaryTagsFrom`
 
-imageRuleFrom :: Image -> Image -> ((?container :: ContainerId) => Action ()) -> Rules ()
-imageRuleFrom image@(Image (name, tag)) base action = do
+imageRuleFrom ::
+  Image -> Image -> [ImageConfig] -> ((?container :: ContainerId) => Action ()) -> Rules ()
+imageRuleFrom image@(Image (name, tag)) base confs action = do
   phony (imageName image) $ needImage image
   when (tag == latest) $ phony (toFilePath name) $ needImage image
   addUserRule $
     ImageRule
       ( \i ->
           if image == i
-            then Just $ (image `from` base) action
+            then Just $ (image `from` base) confs action
             else Nothing
       )
 
-imageRuleArbitaryTagsFrom :: Path Rel File -> Image -> ((?container :: ContainerId) => Action ()) -> Rules ()
-imageRuleArbitaryTagsFrom name base act = do
+imageRuleArbitaryTagsFrom ::
+  Path Rel File -> Image -> [ImageConfig] -> ((?container :: ContainerId) => Action ()) -> Rules ()
+imageRuleArbitaryTagsFrom name base confs act = do
   phonys $ \image -> do
     colTag <- List.stripPrefix (toFilePath name) image
     tag <- case colTag of
@@ -242,5 +261,5 @@ imageRuleArbitaryTagsFrom name base act = do
     pure $ needImage $ Image (name, Tag tag)
 
   addUserRule . ImageRule $ \case
-    image@(Image (n, _)) | n == name -> Just $ (image `from` base) act
+    image@(Image (n, _)) | n == name -> Just $ (image `from` base) confs act
     _ -> Nothing
