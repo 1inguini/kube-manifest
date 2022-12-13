@@ -82,17 +82,17 @@ directoryEntry path = do
 
 -- type instance RuleResult (TarEntry t) = Tar.Entry
 
-newtype FileRule = FileRule (Path Rel File -> Maybe (Action ByteString))
+newtype FileRule tag = FileRule (tag, Path Rel File -> Maybe (Action ByteString))
 
-addTarRule :: forall a. Proxy a -> ShakeValue a => Rules ()
-addTarRule _ = (addBuiltinRule @(TarEntry a File) @Tar.Entry) (noLint @(TarEntry a File) @Tar.Entry) identity run
+addTarRule :: forall tag. ShakeValue tag => Proxy tag -> Rules ()
+addTarRule _ = (addBuiltinRule @(TarEntry tag File)) (noLint @(TarEntry tag File)) identity run
  where
-  identity :: BuiltinIdentity (TarEntry a File) Tar.Entry
+  identity :: BuiltinIdentity (TarEntry tag File) Tar.Entry
   identity _ entry = Just . Lazy.toStrict $ Tar.write [entry]
 
-  run :: BuiltinRun (TarEntry a File) Tar.Entry
+  run :: BuiltinRun (TarEntry tag File) Tar.Entry
   run (TarEntry (_, key)) oldStore RunDependenciesChanged = do
-    (_, act) <- getUserRuleOne key (const Nothing) $ \(FileRule act) -> act key
+    (_, act) <- getUserRuleOne key (const Nothing) $ \(FileRule (_, act) :: FileRule tag) -> act key
     content <- act
     RunResult
       (if Just content == oldStore then ChangedRecomputeSame else ChangedRecomputeDiff)
@@ -103,20 +103,17 @@ addTarRule _ = (addBuiltinRule @(TarEntry a File) @Tar.Entry) (noLint @(TarEntry
   run key Nothing RunDependenciesSame =
     run key Nothing RunDependenciesChanged
 
-needFileEntries :: ShakeValue a => a -> [Path Rel File] -> Action [Tar.Entry]
+needFileEntries :: ShakeValue tag => tag -> [Path Rel File] -> Action [Tar.Entry]
 needFileEntries tag = apply . fmap (curry TarEntry tag)
 
-needFileEntry :: ShakeValue a => a -> Path Rel File -> Action Tar.Entry
+needFileEntry :: ShakeValue tag => tag -> Path Rel File -> Action Tar.Entry
 needFileEntry tag = apply1 . curry TarEntry tag
 
-addFileEntry path content = do
+addFileEntry :: ShakeValue tag => tag -> Path Rel File -> ByteString -> Rules ()
+addFileEntry tag path content = do
   addUserRule $
     FileRule
-      ( \p ->
-          if path == p
-            then Just $ pure content
-            else Nothing
-      )
+      (tag, \p -> if path == p then Just $ pure content else Nothing)
 
 -- needFileEntry :: Path Rel File -> Action Tar.Entry
 -- needFileEntry path = askOracle $ FileEntry path
