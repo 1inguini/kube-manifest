@@ -131,7 +131,7 @@ runBy user (CmdArgument args) =
           ([], [])
           opts
       ContainerId container = ?container
-   in cmd dockerOpts docker ("exec --user=" <> show user) execOpts container commands
+   in cmd dockerOpts docker ("exec -i --user=" <> show user) execOpts container commands
 run, rootRun :: (?container :: ContainerId) => CmdResult r => CmdArgument -> Action r
 run = runBy Util.nonroot
 rootRun = runBy 0
