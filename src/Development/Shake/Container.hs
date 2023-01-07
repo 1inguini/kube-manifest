@@ -143,7 +143,7 @@ commit image changes =
   let ContainerId container = ?container
    in do
         cmd_ docker "commit" (concatMap (\c -> ["--change", c]) changes) container $ imageName image
-        cmd_ docker "rm" container
+        cmd_ docker "rm -f" container
 labels :: Image -> Action [ImageConfig]
 labels image = do
   dateTime <- getUTCTime

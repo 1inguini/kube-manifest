@@ -59,6 +59,15 @@ type instance RuleResult (TarEntry path a t) = Tar.Entry
 -- type instance RuleResult (TarEntry File ByteString) = Tar.Entry
 -- type instance RuleResult (TarEntry Dir ()) = Tar.Entry
 
+rootOwn :: Ownership
+rootOwn =
+  Ownership
+    { ownerName = "root"
+    , groupName = "root"
+    , ownerId = 0
+    , groupId = 0
+    }
+
 nonrootOwn :: Ownership
 nonrootOwn =
   Ownership

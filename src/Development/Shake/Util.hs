@@ -72,7 +72,7 @@ writeFile path content =
         e -> throw e
     liftIO $ Text.writeFile (toFilePath path) content
 writeFileLines :: Path a File -> [Text] -> Rules ()
-writeFileLines path = writeFile path . Text.unlines
+writeFileLines path = writeFile path . Text.concat . fmap (<> "\n")
 writeFileIn :: (?workdir :: Path a Dir) => Path Rel File -> Text -> Rules ()
 writeFileIn path = writeFile (?workdir </> path)
 writeFileLinesIn :: (?workdir :: Path a Dir) => Path Rel File -> [Text] -> Rules ()
