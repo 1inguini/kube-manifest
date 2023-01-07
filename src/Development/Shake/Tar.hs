@@ -11,6 +11,8 @@ import qualified Data.ByteString.Lazy as Lazy
 import Data.Hashable (Hashable (hashWithSalt), hash)
 import Data.Proxy (Proxy (Proxy))
 import Data.String.Conversions (cs)
+import Data.Text (Text)
+import qualified Data.Text as Text
 import Development.Shake (
   Action,
   RuleResult,
@@ -49,9 +51,9 @@ instance Binary Tar.Entry where
 instance Hashable Tar.Entry where
   hashWithSalt salt entry = hashWithSalt salt $ Tar.write [entry]
 
-newtype TarEntry tag t = TarEntry (tag, Path Rel t)
+newtype TarEntry path a t = TarEntry (path, Path a t)
   deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
-type instance RuleResult (TarEntry tag t) = Tar.Entry
+type instance RuleResult (TarEntry path a t) = Tar.Entry
 
 -- newtype TarEntry t c = TarEntry (Path Rel t, c) deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
 -- type instance RuleResult (TarEntry File ByteString) = Tar.Entry
@@ -66,15 +68,10 @@ nonrootOwn =
     , groupId = Util.nonroot
     }
 
-fileEntry :: MonadThrow m => Path Rel File -> ByteString -> m Tar.Entry
+fileEntry :: MonadThrow m => Path a File -> ByteString -> m Tar.Entry
 fileEntry path content = do
   path <- either throwString pure . Tar.toTarPath False . cs $ toFilePath path
   pure (Tar.fileEntry path $ cs content){entryOwnership = nonrootOwn}
-
-directoryEntry :: MonadThrow m => Path Rel Dir -> m Tar.Entry
-directoryEntry path = do
-  path <- either throwString pure . Tar.toTarPath True . cs $ toFilePath path
-  pure (Tar.directoryEntry path){entryOwnership = nonrootOwn}
 
 -- addFileEntry :: forall path. Typeable path => Proxy (path :: Path Rel File) -> ByteString -> Rules ()
 -- addFileEntry _ content =
@@ -82,17 +79,19 @@ directoryEntry path = do
 
 -- type instance RuleResult (TarEntry t) = Tar.Entry
 
-newtype FileRule tag = FileRule (tag, Path Rel File -> Maybe (Action ByteString))
+newtype FileRule tag a = FileRule (tag, Path a File -> Maybe (Action ByteString))
 
-addTarRule :: forall tag. ShakeValue tag => Proxy tag -> Rules ()
-addTarRule _ = (addBuiltinRule @(TarEntry tag File)) (noLint @(TarEntry tag File)) identity run
+addTarFileRule :: forall tag. ShakeValue tag => Rules ()
+addTarFileRule = do
+  (addBuiltinRule @(TarEntry tag Abs File)) (noLint @(TarEntry tag Abs File)) identity run
+  (addBuiltinRule @(TarEntry tag Rel File)) (noLint @(TarEntry tag Rel File)) identity run
  where
-  identity :: BuiltinIdentity (TarEntry tag File) Tar.Entry
+  identity :: ShakeValue a => BuiltinIdentity (TarEntry tag a File) Tar.Entry
   identity _ entry = Just . Lazy.toStrict $ Tar.write [entry]
 
-  run :: BuiltinRun (TarEntry tag File) Tar.Entry
+  run :: ShakeValue a => BuiltinRun (TarEntry tag a File) Tar.Entry
   run (TarEntry (_, key)) oldStore RunDependenciesChanged = do
-    (_, act) <- getUserRuleOne key (const Nothing) $ \(FileRule (_, act) :: FileRule tag) -> act key
+    (_, act) <- getUserRuleOne key (const Nothing) $ \(FileRule (_, act) :: FileRule tag a) -> act key
     content <- act
     RunResult
       (if Just content == oldStore then ChangedRecomputeSame else ChangedRecomputeDiff)
@@ -103,17 +102,20 @@ addTarRule _ = (addBuiltinRule @(TarEntry tag File)) (noLint @(TarEntry tag File
   run key Nothing RunDependenciesSame =
     run key Nothing RunDependenciesChanged
 
-needFileEntries :: ShakeValue tag => tag -> [Path Rel File] -> Action [Tar.Entry]
-needFileEntries tag = apply . fmap (curry TarEntry tag)
+needFileEntry :: (ShakeValue tag, ShakeValue a, ?tag :: tag) => Path a File -> Action Tar.Entry
+needFileEntry = apply1 . curry TarEntry ?tag
 
-needFileEntry :: ShakeValue tag => tag -> Path Rel File -> Action Tar.Entry
-needFileEntry tag = apply1 . curry TarEntry tag
+addFileEntry :: (ShakeValue tag, ShakeValue a, ?tag :: tag) => Path a File -> ByteString -> Rules ()
+addFileEntry path content =
+  addUserRule $ FileRule (?tag, \p -> if path == p then Just $ pure content else Nothing)
 
-addFileEntry :: ShakeValue tag => tag -> Path Rel File -> ByteString -> Rules ()
-addFileEntry tag path content = do
-  addUserRule $
-    FileRule
-      (tag, \p -> if path == p then Just $ pure content else Nothing)
+addFileEntryLines :: (ShakeValue tag, ShakeValue a, ?tag :: tag) => Path a File -> [Text] -> Rules ()
+addFileEntryLines path = addFileEntry path . cs . Text.unlines
+
+needDirEntry :: MonadThrow m => Path a Dir -> m Tar.Entry
+needDirEntry path = do
+  path <- either throwString pure . Tar.toTarPath True . cs $ toFilePath path
+  pure (Tar.directoryEntry path){entryOwnership = nonrootOwn}
 
 -- needFileEntry :: Path Rel File -> Action Tar.Entry
 -- needFileEntry path = askOracle $ FileEntry path

@@ -10,12 +10,14 @@ import qualified Data.Text.IO as Text
 import Development.Shake (
   Action,
   Rules,
+  ShakeValue,
   actionCatch,
   liftIO,
  )
 import qualified Development.Shake as Shake (need, (%>))
-import Development.Shake.Classes (Binary)
+import Development.Shake.Classes (Binary, Hashable, NFData)
 import Development.Shake.Command (CmdArgument, IsCmdArgument (toCmdArgument))
+import GHC.Generics (Generic)
 import Path
 import Path.IO (
   ensureDir,
@@ -75,3 +77,22 @@ writeFileIn :: (?workdir :: Path a Dir) => Path Rel File -> Text -> Rules ()
 writeFileIn path = writeFile (?workdir </> path)
 writeFileLinesIn :: (?workdir :: Path a Dir) => Path Rel File -> [Text] -> Rules ()
 writeFileLinesIn path = writeFileLines (?workdir </> path)
+
+inDir :: (?workdir :: Path a Dir) => Path Rel t -> Path a t
+inDir path = ?workdir </> path
+
+deriving instance Show Abs
+deriving instance Typeable Abs
+deriving instance Eq Abs
+deriving instance Generic Abs
+instance Hashable Abs
+instance Binary Abs
+instance NFData Abs
+
+deriving instance Show Rel
+deriving instance Typeable Rel
+deriving instance Eq Rel
+deriving instance Generic Rel
+instance Hashable Rel
+instance Binary Rel
+instance NFData Rel

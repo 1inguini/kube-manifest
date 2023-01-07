@@ -28,7 +28,7 @@ import Development.Shake (
   phony,
   phonys,
  )
-import Development.Shake.Classes (Binary, Hashable, NFData)
+import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
 import Development.Shake.Command (CmdArgument (CmdArgument))
 import Development.Shake.Rule (
   BuiltinRun,
@@ -141,8 +141,9 @@ rootRun_ = rootRun
 commit :: (?container :: ContainerId) => Image -> [String] -> Action ()
 commit image changes =
   let ContainerId container = ?container
-   in cmd_ docker "commit --rm" (concatMap (\c -> ["--change", c]) changes) container $
-        imageName image
+   in do
+        cmd_ docker "commit" (concatMap (\c -> ["--change", c]) changes) container $ imageName image
+        cmd_ docker "rm" container
 labels :: Image -> Action [ImageConfig]
 labels image = do
   dateTime <- getUTCTime
@@ -169,7 +170,7 @@ latest :: Tag
 latest = Tag "latest"
 
 newtype Image = Image (Path Rel File, Tag) -- repo/name, tag
-  deriving (Show, Eq, Hashable, Binary, NFData)
+  deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
 
 imageName (Image (name, Tag tag)) =
   toFilePath name <> ":" <> tag
@@ -184,7 +185,7 @@ scratch = registryImage [relfile|scratch|] latest
 nonroot = registryImage [relfile|nonroot|] latest
 
 newtype ImageHash = ImageHash ByteString
-  deriving (Show, Eq, Hashable, Binary, NFData)
+  deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
 
 type instance RuleResult Image = ImageHash -- image id (sha256)
 
@@ -206,8 +207,7 @@ singleLine str = case lines str of
   lines -> throwString $ "multiple lines" <> show lines
 
 addContainerImageRule :: Rules ()
-addContainerImageRule = do
-  addBuiltinRule noLint imageIdentity run
+addContainerImageRule = addBuiltinRule noLint imageIdentity run
  where
   imageIdentity _ (ImageHash hash) = Just hash
 
