@@ -2,6 +2,9 @@ module Development.Shake.Util where
 
 import Control.Exception.Safe (Typeable, catch, handle, throw)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
+import Control.Monad.IO.Class (MonadIO)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as ByteString
 import Data.Foldable as Foldable
 import Data.String (IsString (fromString))
 import Data.Text (Text)
@@ -77,6 +80,9 @@ writeFileIn :: (?workdir :: Path a Dir) => Path Rel File -> Text -> Rules ()
 writeFileIn path = writeFile (?workdir </> path)
 writeFileLinesIn :: (?workdir :: Path a Dir) => Path Rel File -> [Text] -> Rules ()
 writeFileLinesIn path = writeFileLines (?workdir </> path)
+
+writeFileBS :: MonadIO m => Path a File -> ByteString -> m ()
+writeFileBS path content = liftIO $ ByteString.writeFile (toFilePath path) content
 
 inDir :: (?workdir :: Path a Dir) => Path Rel t -> Path a t
 inDir path = ?workdir </> path

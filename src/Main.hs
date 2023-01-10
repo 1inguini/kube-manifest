@@ -24,6 +24,7 @@ import qualified Util
 -- import System.Directory (createDirectoryIfMissing)
 -- import System.Process (readProcess)
 
+import qualified Codec.Archive.Tar as Tar
 import Codec.Archive.Tar.Entry (Entry (entryOwnership))
 import Control.Exception.Safe (handle, throwString)
 import Control.Lens ((^.))
@@ -184,9 +185,13 @@ instance CmdResult r => CmdArguments (RAction e r) where
 -- instance IsCmdArgument [ByteString] where
 --   toCmdArgument = toCmdArgument . fmap (cs :: ByteString -> String)
 
-pacman, aur :: CmdArgument
+pacman, aur, cpr :: CmdArgument
 aur = cmd $ s "yay --noconfirm --noprovides"
-pacman = cmd $ s "pacman --noconfirm" :: CmdArgument
+pacman = cmd $ s "pacman --noconfirm"
+cpr = cmd $ s "rsync --archive --acls --xattrs --partial --modify-window=1"
+
+pacdump :: (?workdir :: Path Abs Dir) => CmdArgument
+pacdump = cmd aur ["-Sy", "--root=" <> toFilePath ?workdir, "--dbpath=/var/lib/pacman"]
 
 newtype ListDynamicDep = ListDynamicDep () deriving (Show, Typeable, Eq, Hashable, Binary, NFData)
 type instance RuleResult ListDynamicDep = [Path Abs File]
@@ -307,6 +312,24 @@ archlinuxImage =
                     rootRun_ . cmd $ s "locale-gen"
                 ]
 
+packageRules :: (?shakedir :: Path b Dir) => Rules ()
+packageRules = do
+  buildDir <- buildDir
+  let ?workdir = buildDir </> [reldir|package|]
+   in do
+        openjdkPackage
+
+openjdkPackage :: (?workdir :: Path Abs Dir) => Rules ()
+openjdkPackage =
+  let ?workdir = ?workdir </> [reldir|openjdk|]
+   in do
+        ?workdir </> [relfile|rootfs.tar|] %> \out -> do
+          let packageDir = ?workdir </> [reldir|package|]
+          ensureDir packageDir
+          let ?workdir = packageDir in cmd_ pacdump $ s "jre-openjdk-headless"
+          liftIO (Tar.pack (toFilePath ?workdir) ["."])
+            >>= writeFileBS out . cs . Tar.write
+
 main :: IO ()
 main = shakeArgs
   shakeOptions
@@ -322,7 +345,8 @@ main = shakeArgs
      in do
           addDownloadRule
           addTarFileRule @Image
-          addTarFileRule @(Path Rel File)
+          addTarFileRule @(Path Abs File)
           addContainerImageRule
 
           imageRules
+          packageRules
