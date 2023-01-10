@@ -111,15 +111,27 @@ addTarFileRule = do
   run key Nothing RunDependenciesSame =
     run key Nothing RunDependenciesChanged
 
-needFileEntry :: (ShakeValue tag, ShakeValue a, ?tag :: tag) => Path a File -> Action Tar.Entry
-needFileEntry = apply1 . curry TarEntry ?tag
+needFileEntry :: (ShakeValue tag, ShakeValue a) => tag -> Path a File -> Action Tar.Entry
+needFileEntry tag = apply1 . curry TarEntry tag
 
-addFileEntry :: (ShakeValue tag, ShakeValue a, ?tag :: tag) => Path a File -> ByteString -> Rules ()
-addFileEntry path content =
-  addUserRule $ FileRule (?tag, \p -> if path == p then Just $ pure content else Nothing)
+addFileEntry :: (ShakeValue tag, ShakeValue a) => tag -> Path a File -> ByteString -> Rules ()
+addFileEntry tag path content =
+  addUserRule $ FileRule (tag, \p -> if path == p then Just $ pure content else Nothing)
 
-addFileEntryLines :: (ShakeValue tag, ShakeValue a, ?tag :: tag) => Path a File -> [Text] -> Rules ()
-addFileEntryLines path = addFileEntry path . cs . Text.unlines
+addFileEntryLines :: (ShakeValue tag, ShakeValue a) => tag -> Path a File -> [Text] -> Rules ()
+addFileEntryLines tag path = addFileEntry tag path . cs . Text.unlines
+
+tmpTarFile :: (?workdir :: Path Abs Dir) => Path Abs File
+tmpTarFile = ?workdir </> [relfile|tmp.tar|]
+
+tmpNeedFileEntry :: (ShakeValue a, ?workdir :: Path Abs Dir) => Path a File -> Action Tar.Entry
+tmpNeedFileEntry = needFileEntry tmpTarFile
+
+tmpAddFileEntry :: (ShakeValue a, ?workdir :: Path Abs Dir) => Path a File -> ByteString -> Rules ()
+tmpAddFileEntry = addFileEntry tmpTarFile
+
+tmpAddFileEntryLines :: (ShakeValue a, ?workdir :: Path Abs Dir) => Path a File -> [Text] -> Rules ()
+tmpAddFileEntryLines = addFileEntryLines tmpTarFile
 
 needDirEntry :: MonadThrow m => Path a Dir -> m Tar.Entry
 needDirEntry path = do

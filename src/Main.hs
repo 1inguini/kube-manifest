@@ -82,7 +82,7 @@ import GHC.Stack (HasCallStack)
 import qualified Network.Wreq as Wreq (get, responseBody)
 import Optics (modifying, over, preview, set, view, (%), _head)
 import Path
-import Path.IO (createDir, createDirIfMissing, doesPathExist, ensureDir)
+import Path.IO (AnyPath (makeAbsolute), createDir, createDirIfMissing, doesPathExist, ensureDir)
 import qualified Secret as Util
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import Text.Heredoc (here, str)
@@ -201,58 +201,58 @@ addDownloadRule = void . addOracleCache $ \(Download url) ->
 needDownload :: MonadAction m => String -> m ByteString
 needDownload = askOracle . Download
 
-buildDir :: (?shakedir :: Path a Dir) => Path a Dir
-buildDir = ?shakedir </> [reldir|build|]
+buildDir :: (MonadIO m, ?shakedir :: Path a Dir) => m (Path Abs Dir)
+buildDir = makeAbsolute $ ?shakedir </> [reldir|build|]
 
 imageRules :: (?shakedir :: Path b Dir) => Rules ()
 imageRules = do
+  buildDir <- buildDir
   let ?workdir = buildDir </> [reldir|image|]
-  nonrootImage
-  archlinuxImage
+   in do
+        nonrootImage
+        archlinuxImage
 
-nonrootImage :: (?workdir :: Path b Dir) => Rules ()
+nonrootImage :: (?workdir :: Path Abs Dir) => Rules ()
 nonrootImage =
   let ?workdir = ?workdir </> [reldir|nonroot|]
-      ?tag = nonroot
    in do
-        addFileEntryLines
+        tmpAddFileEntryLines
           [absfile|/etc/passwd|]
           [ "root:x:0:0:root:/root:/sbin/nologin"
           , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
           , "nonroot:x:" <> tshow Util.nonroot <> ":" <> tshow Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
           ]
-        addFileEntryLines
+        tmpAddFileEntryLines
           [absfile|/etc/group|]
           [ "root:x:0:"
           , "nobody:x:65534:"
           , "nonroot:x:" <> tshow Util.nonroot <> ":"
           ]
 
-        (?tag `imageRuleFrom` scratch)
+        (nonroot `imageRuleFrom` scratch)
           [ Workdir "/home/nonroot"
           , User "nonroot"
           , description "scratch with nonroot user"
           ]
           $ do
             dirs <- traverse needDirEntry [[reldir|tmp|], [reldir|home/nonroot|]]
-            files <- traverse needFileEntry [[absfile|/etc/passwd|], [absfile|/etc/group|]]
+            files <- traverse tmpNeedFileEntry [[absfile|/etc/passwd|], [absfile|/etc/group|]]
             copy $ dirs <> files
 
-archlinuxImage :: (?workdir :: Path b Dir) => Rules ()
+archlinuxImage :: (?workdir :: Path Abs Dir) => Rules ()
 archlinuxImage =
   let ?workdir = ?workdir </> [reldir|archlinux|]
-      ?tag = registry </> [relfile|archlinux|]
    in do
-        addFileEntryLines [absfile|/etc/locale.gen|] ["en_US.UTF-8 UTF-8", "ja_JP.UTF-8 UTF-8"]
-        addFileEntry [absfile|/etc/sudoers|] "nonroot ALL=(ALL:ALL) NOPASSWD: ALL"
-        addFileEntry
+        tmpAddFileEntryLines [absfile|/etc/locale.gen|] ["en_US.UTF-8 UTF-8", "ja_JP.UTF-8 UTF-8"]
+        tmpAddFileEntryLines [absfile|/etc/sudoers|] ["nonroot ALL=(ALL:ALL) NOPASSWD: ALL"]
+        tmpAddFileEntry
           [absfile|/etc/pacman.d/mirrorlist|]
           [str|# Japan
               |Server = https://ftp.jaist.ac.jp/pub/Linux/ArchLinux/$repo/os/$arch
               |Server = https://mirrors.cat.net/archlinux/$repo/os/$arch
               |]
 
-        (?tag `imageRuleArbitaryTagsFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
+        (registry </> [relfile|archlinux|] `imageRuleArbitaryTagsFrom` Image ([relfile|docker.io/library/archlinux|], Tag "base-devel"))
           [ Workdir "/home/nonroot"
           , User "nonroot"
           , description "Arch Linux with nonroot user and aur helper"
@@ -285,8 +285,8 @@ archlinuxImage =
                         rootRun_ $ cmd (s "sed -i /etc/pacman.conf -e") [s "/^NoExtract/d"]
                         rootRun_ $ cmd (Stdin noExtract) (s "tee -a /etc/pacman.conf")
                 , do
-                    sudoers <- needFileEntry [absfile|/etc/sudoers|]
-                    mirrorlist <- needFileEntry [absfile|/etc/pacman.d/mirrorlist|]
+                    sudoers <- tmpNeedFileEntry [absfile|/etc/sudoers|]
+                    mirrorlist <- tmpNeedFileEntry [absfile|/etc/pacman.d/mirrorlist|]
                     copy
                       [ sudoers{entryOwnership = rootOwn}
                       , mirrorlist{entryOwnership = rootOwn}
@@ -302,7 +302,7 @@ archlinuxImage =
                         (s "git clone https://aur.archlinux.org/yay-bin.git aur-helper")
                     run_ $ cmd (Cwd "/home/nonroot/aur-helper") (s "makepkg --noconfirm -sir")
                 , do
-                    localeGen <- needFileEntry [absfile|/etc/locale.gen|]
+                    localeGen <- tmpNeedFileEntry [absfile|/etc/locale.gen|]
                     copy [localeGen{entryOwnership = rootOwn}]
                     rootRun_ . cmd $ s "locale-gen"
                 ]

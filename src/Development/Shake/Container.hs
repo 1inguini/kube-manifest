@@ -237,20 +237,20 @@ infix 4 `imageRuleFrom`
 infix 4 `imageRuleArbitaryTagsFrom`
 
 imageRuleFrom ::
-  Image -> Image -> [ImageConfig] -> ((?container :: ContainerId) => Action ()) -> Rules ()
-imageRuleFrom image@(Image (name, tag)) base confs action = do
+  Image -> Image -> [ImageConfig] -> ((?container :: ContainerId, ?image :: Image) => Action ()) -> Rules ()
+imageRuleFrom image@(Image (name, tag)) base confs act = do
   phony (imageName image) $ needImage image
   when (tag == latest) $ phony (toFilePath name) $ needImage image
   addUserRule $
     ImageRule
       ( \i ->
           if image == i
-            then Just $ (image `from` base) confs action
+            then Just $ (image `from` base) confs $ let ?image = image in act
             else Nothing
       )
 
 imageRuleArbitaryTagsFrom ::
-  Path Rel File -> Image -> [ImageConfig] -> ((?container :: ContainerId) => Action ()) -> Rules ()
+  Path Rel File -> Image -> [ImageConfig] -> ((?container :: ContainerId, ?image :: Image) => Action ()) -> Rules ()
 imageRuleArbitaryTagsFrom name base confs act = do
   phonys $ \image -> do
     colTag <- List.stripPrefix (toFilePath name) image
@@ -261,5 +261,5 @@ imageRuleArbitaryTagsFrom name base confs act = do
     pure $ needImage $ Image (name, Tag tag)
 
   addUserRule . ImageRule $ \case
-    image@(Image (n, _)) | n == name -> Just $ (image `from` base) confs act
+    image@(Image (n, _)) | n == name -> Just $ (image `from` base) confs $ let ?image = image in act
     _ -> Nothing
