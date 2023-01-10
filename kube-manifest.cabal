@@ -71,6 +71,8 @@ executable kube-manifest
     , containers
     , directory
     , file-embed
+    , filepath
+    , heredoc
     , large-anon
     , mtl
     , optics
@@ -78,10 +80,13 @@ executable kube-manifest
     , process
     , safe
     , scientific
+    , shake
     , string-conversions
     , template-haskell
     , text
     , time
+    , typed-process
+    , unix
     , unordered-containers
     , vector
     , yaml
