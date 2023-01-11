@@ -243,13 +243,13 @@ s6PortableUtils = do
   phony "s6-portable-utils/lib/musl" $ do
     need ["musl/lib.sfs"]
     mkdir "./s6-portable-utils/lib/musl"
-    runProc "fusermount -u ./s6-portable-utils/lib/musl"
+    runProc "fusermount -u ./s6-portable-utils/lib/musl || true"
     runProc "squashfuse ./musl/lib.sfs ./s6-portable-utils/lib/musl"
 
   phony "s6-portable-utils/lib/skalibs" $ do
     need ["skalibs/lib.sfs"]
     mkdir "./s6-portable-utils/lib/skalibs"
-    runProc "fusermount -u ./s6-portable-utils/lib/skalibs"
+    runProc "fusermount -u ./s6-portable-utils/lib/skalibs || true"
     runProc "squashfuse ./skalibs/lib.sfs ./s6-portable-utils/lib/skalibs"
 
   phony "s6-portable-utils/configure" $ do
