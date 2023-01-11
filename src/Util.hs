@@ -39,6 +39,9 @@ import TH (deriveJSON)
 registry :: Text
 registry = "registry." <> host <> "/library/"
 
+s :: String -> String
+s = id
+
 mirror :: (a -> a -> b) -> a -> b
 mirror f a = f a a
 

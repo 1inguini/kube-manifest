@@ -8,6 +8,12 @@ cni0インターフェースはtrustedにブチ込んでおく
 
 結局`kubectl build`をやめてcri-oと`nerdctl build`に
 
+## Prerequisites
+
+* pacman
+* yay
+* squashfuse
+
 ## コンテナ
 
 ## builder container
