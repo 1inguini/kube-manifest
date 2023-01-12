@@ -30,14 +30,16 @@ import Optics (modifying, over, preview, view, (%), _head)
 import System.Directory (
   createDirectoryIfMissing,
   getCurrentDirectory,
+  listDirectory,
   makeAbsolute,
   removeDirectoryRecursive,
   setCurrentDirectory,
  )
+import qualified System.Directory as Sys (doesDirectoryExist)
 import System.FilePath (takeDirectory, (</>))
 import System.Posix (CMode (CMode), setFileCreationMask)
 import System.Posix.Files (setFileCreationMask)
-import System.Process.Typed (proc, readProcessStdout_, runProcess_)
+import System.Process.Typed (proc, readProcessStdout_, readProcess_, runProcess_)
 import Text.Heredoc (here, str)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
@@ -129,19 +131,32 @@ x <:> y = x <> " " <> y
 mkdir :: MonadIO m => FilePath -> m ()
 mkdir = liftIO . createDirectoryIfMissing True
 
-producesDirectory dir =
-  produces =<< getDirectoryFiles "." [dir <//> "*"]
+mkfile :: MonadIO m => FilePath -> m ()
+mkfile = writeFile' mempty
 
-gitClone :: FilePath -> String -> String -> Rules ()
-gitClone dst repo tag =
-  phony dst $ do
-    mkdir dst
-    liftIO $ removeDirectoryRecursive dst
-    runProc $ "git clone --branch=" <> tag <:> repo <:> dst
-    files <-
-      readProcessStdout_ . proc "git" . words $
-        "-C" <:> dst <:> "ls-tree -r --name-only" <:> tag
-    produces $ fmap (dst </>) $ lines $ cs files
+listDirectoryRecursive :: MonadIO m => FilePath -> m [FilePath]
+listDirectoryRecursive dir = liftIO $ do
+  fmap concat $
+    traverse
+      ( \path -> do
+          let dir = dir </> path
+          isDir <- Sys.doesDirectoryExist dir
+          if isDir
+            then fmap (path </>) <$> listDirectoryRecursive dir
+            else pure [path]
+      )
+      =<< listDirectory dir
+
+producedDirectory :: FilePath -> Action ()
+producedDirectory dir =
+  produces =<< liftIO (listDirectoryRecursive dir)
+
+gitClone :: String -> String -> FilePath -> Action ()
+gitClone repo tag dst = do
+  mkdir dst
+  liftIO $ removeDirectoryRecursive dst
+  runProc $ "git clone --branch=" <> tag <:> repo <:> dst
+  producedDirectory dst
 
 docker = proc "podman"
 aur opts = proc "yay" $ words "--noconfirm --noprovides" <> opts
@@ -192,10 +207,13 @@ pacmanSetup = do
     mkdir "pacman"
     copyFile' (?projectRoot </> "src/pacman.conf") out
 
-  phony "pacman" $ do
+  ("pacman/db/sync" </>) <$> ["community.db", "core.db", "extra.db"] &%> \outs -> do
     mkdir "pacman/db"
     need ["pacman/pacman.conf"]
     runProcess_ . aur . words $ "-Sy --config=pacman/pacman.conf --dbpath=pacman/db"
+    producesDirectory "pacman/db/local"
+
+  phony "pacman" $ need ["pacman/db/sync/core.db"]
 
 musl :: Rules ()
 musl = do
@@ -203,40 +221,36 @@ musl = do
     mkdir "musl"
     need ["pacman"]
     runProcess_ . aurInstall $ words "--root=musl musl"
+    producesDirectory "musl"
 
-  "musl/lib.sfs" %> \out -> do
-    need ["musl"]
-    runProc $ "mksquashfs ./musl/usr/lib/musl" <:> out <:> "-noappend"
+-- "musl/lib.sfs" %> \out -> do
+--   need ["musl/package"]
+--   runProc $ "mksquashfs ./musl/usr/lib/musl" <:> out <:> "-noappend"
 
 skalibs :: Rules ()
 skalibs = do
   let version = "v2.12.0.1"
 
-  gitClone "skalibs/src" "https://github.com/skarnet/skalibs.git" version
+  ("skalibs" </>) <$> ["lib.sfs", "sysdeps.sfs"] &%> \out -> do
+    gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
 
-  phony "skalibs/configure" $ do
-    need ["skalibs/src"]
-    runProc "./skalibs/src/configure --disable-shared --prefix=../"
+  runProc "./skalibs/src/configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
+  produces $ ("skalibs/src" </>) <$> ["config.mak", "src/include/skalibs/config.h"]
 
-  phony "skalibs/make" $ do
-    need ["skalibs/configure"]
-    runProc "make -C ./skalibs/src"
-    runProc "make -C ./skalibs/src strip"
+  runProc "make -C ./skalibs/src all"
+  runProc "make -C ./skalibs/src strip"
 
-  phony "skalibs/lib" $ do
-    need ["skalibs/make"]
-    runProc "make -C ./skalibs/src install-lib"
-    runProc "make -C ./skalibs/src install-sysdeps"
+  runProc "make -C ./skalibs/src install-lib"
+  runProc "make -C ./skalibs/src install-sysdeps"
 
-  "skalibs/lib.sfs" %> \out -> do
-    need ["skalibs/lib"]
-    runProc $ "mksquashfs ./skalibs/lib/skalibs" <:> out <:> "-noappend"
+-- runProc $ "mksquashfs ./skalibs/lib" <:> out <:> "-noappend"
+-- runProc $ "mksquashfs ./skalibs/sysdeps" <:> out <:> "-noappend"
 
 s6PortableUtils :: Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
 
-  gitClone "s6-portable-utils/src" "https://github.com/skarnet/s6-portable-utils.git" version
+  -- gitClone "s6-portable-utils/src" "https://github.com/skarnet/s6-portable-utils.git" version
 
   phony "s6-portable-utils/lib/musl" $ do
     need ["musl/lib.sfs"]
