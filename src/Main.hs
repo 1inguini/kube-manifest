@@ -129,13 +129,16 @@ x <:> y = x <> " " <> y
 mkdir :: MonadIO m => FilePath -> m ()
 mkdir = liftIO . createDirectoryIfMissing True
 
+producesDirectory dir =
+  produces =<< getDirectoryFiles "." [dir <//> "*"]
+
 gitClone :: FilePath -> String -> String -> Rules ()
 gitClone dst repo tag =
   phony dst $ do
     mkdir dst
     liftIO $ removeDirectoryRecursive dst
     runProc $ "git clone --branch=" <> tag <:> repo <:> dst
-    produces =<< getDirectoryFiles "." [dst <//> "*"]
+    producesDirectory dst
 
 docker = proc "podman"
 aur opts = proc "yay" $ words "--noconfirm --noprovides" <> opts
