@@ -139,24 +139,23 @@ listDirectoryRecursive dir = liftIO $ do
   fmap concat $
     traverse
       ( \path -> do
-          let dir = dir </> path
-          isDir <- Sys.doesDirectoryExist dir
+          let child = dir </> path
+          isDir <- Sys.doesDirectoryExist child
           if isDir
-            then fmap (path </>) <$> listDirectoryRecursive dir
+            then fmap (path </>) <$> listDirectoryRecursive child
             else pure [path]
       )
       =<< listDirectory dir
 
 producedDirectory :: FilePath -> Action ()
 producedDirectory dir =
-  produces =<< liftIO (listDirectoryRecursive dir)
+  produces . fmap (dir </>) =<< listDirectoryRecursive dir
 
 gitClone :: String -> String -> FilePath -> Action ()
 gitClone repo tag dst = do
   mkdir dst
   liftIO $ removeDirectoryRecursive dst
   runProc $ "git clone --branch=" <> tag <:> repo <:> dst
-  producedDirectory dst
 
 docker = proc "podman"
 aur opts = proc "yay" $ words "--noconfirm --noprovides" <> opts
@@ -211,7 +210,7 @@ pacmanSetup = do
     mkdir "pacman/db"
     need ["pacman/pacman.conf"]
     runProcess_ . aur . words $ "-Sy --config=pacman/pacman.conf --dbpath=pacman/db"
-    producesDirectory "pacman/db/local"
+    producedDirectory "pacman/db/local"
 
   phony "pacman" $ need ["pacman/db/sync/core.db"]
 
@@ -221,30 +220,37 @@ musl = do
     mkdir "musl"
     need ["pacman"]
     runProcess_ . aurInstall $ words "--root=musl musl"
-    producesDirectory "musl"
+    producedDirectory "musl"
 
 -- "musl/lib.sfs" %> \out -> do
 --   need ["musl/package"]
 --   runProc $ "mksquashfs ./musl/usr/lib/musl" <:> out <:> "-noappend"
 
 skalibs :: Rules ()
-skalibs = do
-  let version = "v2.12.0.1"
-
-  ("skalibs" </>) <$> ["lib.sfs", "sysdeps.sfs"] &%> \out -> do
+skalibs =
+  ("skalibs" </>) <$> ["lib.sfs", "sysdeps.sfs"] &%> \[lib, sysdeps] -> do
+    let version = "v2.12.0.1"
     gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
 
-  runProc "./skalibs/src/configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
-  produces $ ("skalibs/src" </>) <$> ["config.mak", "src/include/skalibs/config.h"]
+    runProc "skalibs/src/configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
+    runProc "make -C skalibs/src all"
+    runProc "make -C skalibs/src strip"
 
-  runProc "make -C ./skalibs/src all"
-  runProc "make -C ./skalibs/src strip"
-
-  runProc "make -C ./skalibs/src install-lib"
-  runProc "make -C ./skalibs/src install-sysdeps"
-
--- runProc $ "mksquashfs ./skalibs/lib" <:> out <:> "-noappend"
--- runProc $ "mksquashfs ./skalibs/sysdeps" <:> out <:> "-noappend"
+    parallel
+      [ do
+          runProc "make -C skalibs/src install-lib"
+          parallel
+            [ producedDirectory "skalibs/lib"
+            , runProc $ "mksquashfs skalibs/lib" <:> lib <:> "-noappend"
+            ]
+      , do
+          runProc "make -C skalibs/src install-sysdeps"
+          parallel
+            [ producedDirectory "skalibs/sysdeps"
+            , runProc $ "mksquashfs skalibs/sysdeps" <:> sysdeps <:> "-noappend"
+            ]
+      ]
+    producedDirectory "skalibs/src"
 
 s6PortableUtils :: Rules ()
 s6PortableUtils = do
