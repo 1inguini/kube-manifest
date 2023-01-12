@@ -138,7 +138,10 @@ gitClone dst repo tag =
     mkdir dst
     liftIO $ removeDirectoryRecursive dst
     runProc $ "git clone --branch=" <> tag <:> repo <:> dst
-    producesDirectory dst
+    files <-
+      readProcessStdout_ . proc "git" . words $
+        "-C" <:> dst <:> "ls-tree -r --name-only" <:> tag
+    produces $ fmap (dst </>) $ lines $ cs files
 
 docker = proc "podman"
 aur opts = proc "yay" $ words "--noconfirm --noprovides" <> opts
