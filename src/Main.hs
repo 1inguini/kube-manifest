@@ -6,6 +6,9 @@ import Manifest (yamls)
 import Util (Yaml, YamlType (..), s)
 import qualified Util
 
+import Development.Shake
+import qualified Development.Shake as Shake
+
 import Control.Applicative ((<|>))
 import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO)
@@ -23,8 +26,6 @@ import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text as Texs
 import qualified Data.Yaml as Yaml (decodeAllThrow, encode)
-import Development.Shake hiding (cmd, cmd_, command, command_)
-import qualified Development.Shake as Shake
 import Optics (modifying, over, preview, view, (%), _head)
 import System.Directory (
   createDirectoryIfMissing,
@@ -128,20 +129,13 @@ x <:> y = x <> " " <> y
 mkdir :: MonadIO m => FilePath -> m ()
 mkdir = liftIO . createDirectoryIfMissing True
 
-gitClone :: String -> String -> FilePath -> Action ()
-gitClone repo tag dst = do
-  mkdir dst
-  isGit <- doesDirectoryExist $ dst </> ".git"
-  if isGit
-    then do
-      traverse_
-        (runProc . ("git -C" <:> dst <:>))
-        [ "fetch -t origin master:" <> tag
-        , "reset --hard" <:> tag
-        ]
-    else do
-      liftIO $ removeDirectoryRecursive dst
-      runProc $ "git clone --branch=" <> tag <:> repo <:> dst
+gitClone :: FilePath -> String -> String -> Rules ()
+gitClone dst repo tag =
+  phony dst $ do
+    mkdir dst
+    liftIO $ removeDirectoryRecursive dst
+    runProc $ "git clone --branch=" <> tag <:> repo <:> dst
+    produces =<< getDirectoryFiles "." [dst <//> "*"]
 
 docker = proc "podman"
 aur opts = proc "yay" $ words "--noconfirm --noprovides" <> opts
@@ -212,8 +206,7 @@ skalibs :: Rules ()
 skalibs = do
   let version = "v2.12.0.1"
 
-  phony "skalibs/src" $
-    gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
+  gitClone "skalibs/src" "https://github.com/skarnet/skalibs.git" version
 
   phony "skalibs/configure" $ do
     need ["skalibs/src"]
@@ -237,8 +230,7 @@ s6PortableUtils :: Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
 
-  phony "s6-portable-utils/src" $
-    gitClone "https://github.com/skarnet/s6-portable-utils.git" version "s6-portable-utils/src"
+  gitClone "s6-portable-utils/src" "https://github.com/skarnet/s6-portable-utils.git" version
 
   phony "s6-portable-utils/lib/musl" $ do
     need ["musl/lib.sfs"]
@@ -281,6 +273,11 @@ s6PortableUtils = do
 main :: IO ()
 main = do
   setFileCreationMask $ CMode 0o022
+  projectRoot <- liftIO $ makeAbsolute =<< getCurrentDirectory
+  let ?projectRoot = projectRoot
+      ?buildDir = projectRoot </> "build"
+  mkdir ?buildDir
+  liftIO $ setCurrentDirectory ?buildDir
   shakeArgs
     shakeOptions
       { shakeThreads = 0
@@ -289,16 +286,8 @@ main = do
       , shakeProgress = progressSimple
       }
     $ do
-      shakeOptions <- getShakeOptionsRules
-      projectRoot <- liftIO $ makeAbsolute =<< getCurrentDirectory
-      let ?projectRoot = projectRoot
-          ?buildDir = projectRoot </> "build"
-       in do
-            mkdir ?buildDir
-            liftIO $ setCurrentDirectory ?buildDir
-
-            pacmanSetup
-            nonrootImage
-            musl
-            skalibs
-            s6PortableUtils
+      pacmanSetup
+      nonrootImage
+      musl
+      skalibs
+      s6PortableUtils
