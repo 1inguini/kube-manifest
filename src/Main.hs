@@ -231,26 +231,23 @@ musl = do
 
 skalibs :: Rules ()
 skalibs =
-  ("skalibs" </>) <$> ["lib.sfs", "sysdeps.sfs"] &%> \[lib, sysdeps] -> do
+  "skalibs/lib.sfs" %> \out -> do
     let version = "v2.12.0.1"
     gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
 
-    runProc "skalibs/src/configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
+    runProc "skalibs/src/configure --disable-shared --libdir=../lib --sysdepdir=../lib/sysdeps"
     runProc "make -C skalibs/src all"
     runProc "make -C skalibs/src strip"
-
-    parallel
-      [ do
-          runProc "make -C skalibs/src install-lib"
-          parallel
-            [ producedDirectory "skalibs/lib"
-            , runProc $ "mksquashfs skalibs/lib" <:> lib <:> "-noappend"
-            ]
+    parallel_
+      [ producedDirectory "skalibs/src"
       , do
-          runProc "make -C skalibs/src install-sysdeps"
-          parallel
-            [ producedDirectory "skalibs/sysdeps"
-            , runProc $ "mksquashfs skalibs/sysdeps" <:> sysdeps <:> "-noappend"
+          parallel_
+            [ runProc "make -C skalibs/src install-lib"
+            , runProc "make -C skalibs/src install-sysdeps"
+            ]
+          parallel_
+            [ producedDirectory "skalibs/lib"
+            , runProc $ "mksquashfs skalibs/lib" <:> out <:> "-noappend"
             ]
       ]
     producedDirectory "skalibs/src"
