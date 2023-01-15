@@ -151,6 +151,9 @@ producedDirectory :: FilePath -> Action ()
 producedDirectory dir =
   produces . fmap (dir </>) =<< listDirectoryRecursive dir
 
+parallel_ :: [Action a] -> Action ()
+parallel_ = void . parallel
+
 gitClone :: String -> String -> FilePath -> Action ()
 gitClone repo tag dst = do
   mkdir dst
