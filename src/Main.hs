@@ -6,9 +6,6 @@ import Manifest (yamls)
 import Util (Yaml, YamlType (..), s)
 import qualified Util
 
-import Development.Shake
-import qualified Development.Shake as Shake
-
 import Control.Applicative ((<|>))
 import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO)
@@ -26,12 +23,15 @@ import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text as Texs
 import qualified Data.Yaml as Yaml (decodeAllThrow, encode)
+import Development.Shake
+import qualified Development.Shake as Shake
 import Optics (modifying, over, preview, view, (%), _head)
 import System.Directory (
   createDirectoryIfMissing,
   getCurrentDirectory,
   listDirectory,
   makeAbsolute,
+  removeDirectory,
   removeDirectoryRecursive,
   setCurrentDirectory,
  )
@@ -209,92 +209,78 @@ pacmanSetup = do
     mkdir "pacman"
     copyFile' (?projectRoot </> "src/pacman.conf") out
 
-  ("pacman/db/sync" </>) <$> ["community.db", "core.db", "extra.db"] &%> \outs -> do
-    mkdir "pacman/db"
+  "pacman/db/local/ALPM_DB_VERSION" %> \out -> do
     need ["pacman/pacman.conf"]
     runProcess_ . aur . words $ "-Sy --config=pacman/pacman.conf --dbpath=pacman/db"
-    producedDirectory "pacman/db/local"
+    producedDirectory "pacman/db/sync"
 
-  phony "pacman" $ need ["pacman/db/sync/core.db"]
+  "pacman/db.done" %> \out -> do
+    need ["pacman/db/local/ALPM_DB_VERSION"]
+    writeFile' out mempty
 
 musl :: Rules ()
 musl = do
-  phony "musl" $ do
-    mkdir "musl"
-    need ["pacman"]
-    runProcess_ . aurInstall $ words "--root=musl musl"
-    producedDirectory "musl"
-
--- "musl/lib.sfs" %> \out -> do
---   need ["musl/package"]
---   runProc $ "mksquashfs ./musl/usr/lib/musl" <:> out <:> "-noappend"
+  "musl/lib.done" %> \out -> do
+    need ["pacman/db.done"]
+    mkdir "musl/rootfs"
+    runProcess_ . aurInstall $ words "--root=musl/rootfs musl"
+    runProc "sudo mv musl/rootfs/usr/lib/musl musl/lib"
+    producedDirectory "musl/lib"
+    -- runProc $ "mksquashfs ./musl/rootfs/usr/lib/musl" <:> out <:> "-noappend"
+    writeFile' out mempty
 
 skalibs :: Rules ()
 skalibs =
-  "skalibs/lib.sfs" %> \out -> do
+  "skalibs/lib.done" %> \out -> do
     let version = "v2.12.0.1"
     gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
 
-    runProc "skalibs/src/configure --disable-shared --libdir=../lib --sysdepdir=../lib/sysdeps"
+    runProc "skalibs/src/configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
     runProc "make -C skalibs/src all"
     runProc "make -C skalibs/src strip"
     parallel_
-      [ producedDirectory "skalibs/src"
-      , do
-          parallel_
-            [ runProc "make -C skalibs/src install-lib"
-            , runProc "make -C skalibs/src install-sysdeps"
-            ]
-          parallel_
-            [ producedDirectory "skalibs/lib"
-            , runProc $ "mksquashfs skalibs/lib" <:> out <:> "-noappend"
-            ]
+      [ runProc "make -C skalibs/src install-lib"
+      , runProc "make -C skalibs/src install-sysdeps"
       ]
-    producedDirectory "skalibs/src"
+    producedDirectory "skalibs"
+    writeFile' out mempty
 
 s6PortableUtils :: Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
 
-  -- gitClone "s6-portable-utils/src" "https://github.com/skarnet/s6-portable-utils.git" version
+  ("s6-portable-utils/bin" </>) <$> ["s6-pause"] &%> \outs -> do
+    gitClone "https://github.com/skarnet/s6-portable-utils.git" version "s6-portable-utils/src"
 
-  phony "s6-portable-utils/lib/musl" $ do
-    need ["musl/lib.sfs"]
-    mkdir "./s6-portable-utils/lib/musl"
-    runProc "fusermount -u ./s6-portable-utils/lib/musl || true"
-    runProc "squashfuse ./musl/lib.sfs ./s6-portable-utils/lib/musl"
+    need ["musl/lib.done", "skalibs/lib.done"]
+    -- need ["musl/lib.sfs"]
+    -- mkdir "./s6-portable-utils/lib/musl"
+    -- runProc "squashfuse ./musl/lib.sfs ./s6-portable-utils/lib/musl"
+    -- runAfter $ runProc "fusermount -u ./s6-portable-utils/lib/musl"
 
-  phony "s6-portable-utils/lib/skalibs" $ do
-    need ["skalibs/lib.sfs"]
-    mkdir "./s6-portable-utils/lib/skalibs"
-    runProc "fusermount -u ./s6-portable-utils/lib/skalibs || true"
-    runProc "squashfuse ./skalibs/lib.sfs ./s6-portable-utils/lib/skalibs"
+    -- need ["skalibs/lib.sfs"]
+    -- mkdir "./s6-portable-utils/lib/skalibs"
+    -- runProc "squashfuse ./skalibs/lib.sfs ./s6-portable-utils/lib/skalibs"
+    -- runAfter $ runProc "fusermount -u ./s6-portable-utils/lib/skalibs || true"
 
-  phony "s6-portable-utils/configure" $ do
-    need
-      [ "s6-portable-utils/src"
-      , "s6-portable-utils/lib/musl"
-      , "s6-portable-utils/lib/skalibs"
-      ]
     runProcess_ $
       proc
         "./s6-portable-utils/src/configure"
         [ "--prefix=../"
         , "--bindir=../bin"
         , "--enable-static-libc"
-        , "--with-sysdeps=../lib/skalibs/sysdeps"
-        , "--with-libs=../lib/skalibs"
-        , "--with-libs=../lib/musl"
+        , "--with-sysdeps=../../skalibs/sysdeps"
+        , "--with-libs=../../skalibs/lib"
+        , "--with-libs=../../musl/lib"
         ]
 
-  phony "s6-portable-utils/make" $ do
-    need ["s6-portable-utils/configure"]
-    runProc "make -C ./s6-portable-utils/src"
-    runProc "make -C ./s6-portable-utils/src  strip"
+    runProc "make -C ./s6-portable-utils/src all"
+    runProc "make -C ./s6-portable-utils/src strip"
 
-  phony "s6-portable-utils/bin" $ do
-    need ["s6-portable-utils/make"]
-    runProc "make -C ./s6-portable-utils/src install-bin"
+    parallel_
+      [ producedDirectory "s6-portable-utils/src"
+      , runProc "make -C ./s6-portable-utils/src install-bin"
+      ]
 
 main :: IO ()
 main = do
