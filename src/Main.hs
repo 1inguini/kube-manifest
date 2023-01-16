@@ -305,6 +305,7 @@ s6PortableUtils = do
 
 rules :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 rules = do
+  action $ runAfter $ liftIO $ setCurrentDirectory ?projectRoot
   pacmanSetup
   nonrootImage
   musl
