@@ -242,10 +242,9 @@ musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl =
   "musl/lib/" `dir` do
     need ["pacman/db" </> dirFile]
-    withTempDirWithin "musl" $ \tmp -> do
-      runProcess_ $ aurInstall ["--root=" <> tmp, "musl"]
-      runProc "sudo rm -r musl/lib"
-      runProc $ "sudo mv" <:> tmp </> "usr/lib/musl/lib" <:> "musl/lib"
+    mkdir "musl/rootfs"
+    runProcess_ $ aurInstall ["--root=musl/rootfs", "musl"]
+    runProc $ "sudo mv musl/rootfs/usr/lib/musl/lib/*" <:> "-t musl/lib"
 
 -- runProc $ "mksquashfs ./musl/rootfs/usr/lib/musl" <:> out <:> "-noappend"
 -- writeFile' out mempty
