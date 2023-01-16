@@ -41,7 +41,7 @@ import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (takeDirectory, (</>))
 import System.Posix (CMode (CMode), setFileCreationMask)
 import System.Posix.Files (setFileCreationMask)
-import System.Process.Typed (proc, readProcessStdout_, readProcess_, runProcess_)
+import System.Process.Typed (proc, readProcessStdout_, readProcess_, runProcess_, setWorkingDir)
 import Text.Heredoc (here, str)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
@@ -246,24 +246,20 @@ musl =
     runProcess_ $ aurInstall ["--root=musl/rootfs", "musl"]
     runProc $ "sudo mv musl/rootfs/usr/lib/musl/lib/*" <:> "-t musl/lib"
 
--- runProc $ "mksquashfs ./musl/rootfs/usr/lib/musl" <:> out <:> "-noappend"
--- writeFile' out mempty
-
 skalibs :: Rules ()
 skalibs =
-  "skalibs/lib.dir" %> \out -> do
+  "skalibs/lib/" `dir` do
     let version = "v2.12.0.1"
     gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
 
-    runProc "skalibs/src/configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
-    runProc "make -C skalibs/src all"
-    runProc "make -C skalibs/src strip"
+    let run exe = runProcess_ . setWorkingDir "skalibs/src" . proc exe
+    run "./configure" $ words "--disable-shared --libdir=../lib --sysdepdir=../sysdeps"
+    run "make" ["all"]
+    run "make" ["strip"]
     parallel_
-      [ runProc "make -C skalibs/src install-lib"
-      , runProc "make -C skalibs/src install-sysdeps"
+      [ run "make" ["install-lib"]
+      , run "make" ["install-sysdeps"]
       ]
-    producedDirectory "skalibs"
-    writeFile' out mempty
 
 s6PortableUtils :: Rules ()
 s6PortableUtils = do
