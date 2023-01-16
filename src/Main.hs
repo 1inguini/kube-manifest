@@ -282,24 +282,50 @@ s6PortableUtils = do
       , runProc "make -C ./s6-portable-utils/src install-bin"
       ]
 
+rules :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+rules = do
+  action $ liftIO $ setCurrentDirectory ?shakeDir
+  pacmanSetup
+  nonrootImage
+  musl
+  skalibs
+  s6PortableUtils
+
 main :: IO ()
 main = do
   setFileCreationMask $ CMode 0o022
   projectRoot <- liftIO $ makeAbsolute =<< getCurrentDirectory
   let ?projectRoot = projectRoot
-      ?buildDir = projectRoot </> "build"
-  mkdir ?buildDir
-  liftIO $ setCurrentDirectory ?buildDir
-  shakeArgs
-    shakeOptions
-      { shakeThreads = 0
-      , shakeLint = Just LintBasic
-      , shakeColor = True
-      , shakeProgress = progressSimple
-      }
-    $ do
-      pacmanSetup
-      nonrootImage
-      musl
-      skalibs
-      s6PortableUtils
+   in shakeArgsOptionsWith
+        shakeOptions
+          { shakeThreads = 0
+          , shakeLint = Just LintBasic
+          , shakeColor = True
+          , shakeProgress = progressSimple
+          }
+        []
+        $ \case
+          shakeOptions@ShakeOptions
+            { shakeFiles
+            , shakeReport
+            , shakeLintInside
+            , shakeLiveFiles
+            , shakeShare
+            } -> \_ _ -> do
+              shakeFiles' <- makeAbsolute shakeFiles
+              shakeReport' <- traverse makeAbsolute shakeReport
+              shakeLintInside' <- traverse makeAbsolute shakeLintInside
+              shakeLiveFiles' <- traverse makeAbsolute shakeLiveFiles
+              shakeShare' <- traverse makeAbsolute shakeShare
+              pure $
+                Just
+                  ( shakeOptions
+                      { shakeFiles = shakeFiles'
+                      , shakeReport = shakeReport'
+                      , shakeLintInside = shakeLintInside'
+                      , shakeLiveFiles = shakeLiveFiles'
+                      , shakeShare = shakeShare'
+                      }
+                  , let ?shakeDir = shakeFiles' in rules
+                  )
+  liftIO $ setCurrentDirectory projectRoot
