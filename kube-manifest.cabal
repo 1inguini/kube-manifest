@@ -28,6 +28,7 @@ common option
     FlexibleContexts
     FlexibleInstances
     ImplicitParams
+    LambdaCase
     MultiParamTypeClasses
     NamedFieldPuns
     OverloadedLabels

@@ -7,7 +7,7 @@ import Util (Yaml, YamlType (..), s)
 import qualified Util
 
 import Control.Applicative ((<|>))
-import Control.Monad (void)
+import Control.Monad (filterM, void)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.State.Strict (execState, get)
 import qualified Data.Aeson as Aeson
@@ -33,9 +33,11 @@ import System.Directory (
   makeAbsolute,
   removeDirectory,
   removeDirectoryRecursive,
+  renameDirectory,
+  renameFile,
   setCurrentDirectory,
  )
-import qualified System.Directory as Sys (doesDirectoryExist)
+import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (takeDirectory, (</>))
 import System.Posix (CMode (CMode), setFileCreationMask)
 import System.Posix.Files (setFileCreationMask)
@@ -131,9 +133,6 @@ x <:> y = x <> " " <> y
 mkdir :: MonadIO m => FilePath -> m ()
 mkdir = liftIO . createDirectoryIfMissing True
 
-mkfile :: MonadIO m => FilePath -> m ()
-mkfile = writeFile' mempty
-
 listDirectoryRecursive :: MonadIO m => FilePath -> m [FilePath]
 listDirectoryRecursive dir = liftIO $ do
   fmap concat $
@@ -151,6 +150,22 @@ producedDirectory :: FilePath -> Action ()
 producedDirectory dir =
   produces . fmap (dir </>) =<< listDirectoryRecursive dir
 
+dirFile :: String
+dirFile = ".ls"
+
+infix 1 `dir`
+dir :: FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
+dir pat act =
+  pat </> dirFile %> \out ->
+    let ?dir = takeDirectory out
+     in do
+          act
+          ls <-
+            filterM (\file -> (file /= dirFile &&) <$> liftIO (Sys.doesFileExist file))
+              =<< listDirectoryRecursive ?dir
+          produces $ (?dir </>) <$> ls
+          writeFile' out $ unlines ls
+
 parallel_ :: [Action a] -> Action ()
 parallel_ = void . parallel
 
@@ -161,10 +176,18 @@ gitClone repo tag dst = do
   runProc $ "git clone --branch=" <> tag <:> repo <:> dst
 
 docker = proc "podman"
-aur opts = proc "yay" $ words "--noconfirm --noprovides" <> opts
-aurInstall opts = aur $ words "-S --config=pacman/pacman.conf --dbpath=pacman/db" <> opts
+aur opts =
+  proc "yay" $
+    opts
+      <> [ "--config=" <> ?shakeDir </> "pacman/pacman.conf"
+         , "--dbpath=" <> ?shakeDir </> "pacman/db"
+         , "--noconfirm"
+         , "--noprovides"
+         ]
 
-nonrootImage :: Rules ()
+aurInstall opts = aur $ ["-S"] <> opts
+
+nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   phony "nonroot" $ do
     let pause = "./s6-portable-utils/bin/s6-pause"
@@ -203,35 +226,33 @@ nonrootImage = do
       , "nonroot:x:" <> show Util.nonroot <> ":"
       ]
 
-pacmanSetup :: (?projectRoot :: FilePath) => Rules ()
+pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
   "pacman/pacman.conf" %> \out -> do
-    mkdir "pacman"
     copyFile' (?projectRoot </> "src/pacman.conf") out
 
-  "pacman/db/local/ALPM_DB_VERSION" %> \out -> do
+  "pacman/db/" `dir` do
     need ["pacman/pacman.conf"]
-    runProcess_ . aur . words $ "-Sy --config=pacman/pacman.conf --dbpath=pacman/db"
-    producedDirectory "pacman/db/sync"
+    runProcess_ . aur . words $ "-Sy"
 
-  "pacman/db.done" %> \out -> do
-    need ["pacman/db/local/ALPM_DB_VERSION"]
-    writeFile' out mempty
+-- producedDirectory "pacman/db/sync"
+-- writeFile' out mempty
 
-musl :: Rules ()
-musl = do
-  "musl/lib.done" %> \out -> do
-    need ["pacman/db.done"]
-    mkdir "musl/rootfs"
-    runProcess_ . aurInstall $ words "--root=musl/rootfs musl"
-    runProc "sudo mv musl/rootfs/usr/lib/musl musl/lib"
-    producedDirectory "musl/lib"
-    -- runProc $ "mksquashfs ./musl/rootfs/usr/lib/musl" <:> out <:> "-noappend"
-    writeFile' out mempty
+musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+musl =
+  "musl/lib/" `dir` do
+    need ["pacman/db" </> dirFile]
+    withTempDirWithin "." $ \tmp -> do
+      runProcess_ $ aurInstall ["--root=" <> tmp, "musl"]
+      runProc "sudo rm -r musl/lib"
+      runProc $ "sudo mv" <:> tmp <:> "musl/lib"
+
+-- runProc $ "mksquashfs ./musl/rootfs/usr/lib/musl" <:> out <:> "-noappend"
+-- writeFile' out mempty
 
 skalibs :: Rules ()
 skalibs =
-  "skalibs/lib.done" %> \out -> do
+  "skalibs/lib.dir" %> \out -> do
     let version = "v2.12.0.1"
     gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
 
@@ -252,7 +273,7 @@ s6PortableUtils = do
   ("s6-portable-utils/bin" </>) <$> ["s6-pause"] &%> \outs -> do
     gitClone "https://github.com/skarnet/s6-portable-utils.git" version "s6-portable-utils/src"
 
-    need ["musl/lib.done", "skalibs/lib.done"]
+    need ["musl/lib.dir", "skalibs/lib.dir"]
     -- need ["musl/lib.sfs"]
     -- mkdir "./s6-portable-utils/lib/musl"
     -- runProc "squashfuse ./musl/lib.sfs ./s6-portable-utils/lib/musl"
@@ -284,7 +305,6 @@ s6PortableUtils = do
 
 rules :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 rules = do
-  action $ liftIO $ setCurrentDirectory ?shakeDir
   pacmanSetup
   nonrootImage
   musl
@@ -306,26 +326,27 @@ main = do
         []
         $ \case
           shakeOptions@ShakeOptions
-            { shakeFiles
-            , shakeReport
-            , shakeLintInside
-            , shakeLiveFiles
-            , shakeShare
-            } -> \_ _ -> do
-              shakeFiles' <- makeAbsolute shakeFiles
-              shakeReport' <- traverse makeAbsolute shakeReport
-              shakeLintInside' <- traverse makeAbsolute shakeLintInside
-              shakeLiveFiles' <- traverse makeAbsolute shakeLiveFiles
-              shakeShare' <- traverse makeAbsolute shakeShare
+            { shakeFiles = shakeFiles'
+            , shakeReport = shakeReport'
+            , shakeLintInside = shakeLintInside'
+            , shakeLiveFiles = shakeLiveFiles'
+            , shakeShare = shakeShare'
+            } -> \_ targets -> do
+              shakeFiles <- makeAbsolute shakeFiles'
+              shakeReport <- traverse makeAbsolute shakeReport'
+              shakeLintInside <- traverse makeAbsolute shakeLintInside'
+              shakeLiveFiles <- traverse makeAbsolute shakeLiveFiles'
+              shakeShare <- traverse makeAbsolute shakeShare'
+              mkdir shakeFiles
+              setCurrentDirectory shakeFiles
               pure $
                 Just
                   ( shakeOptions
-                      { shakeFiles = shakeFiles'
-                      , shakeReport = shakeReport'
-                      , shakeLintInside = shakeLintInside'
-                      , shakeLiveFiles = shakeLiveFiles'
-                      , shakeShare = shakeShare'
+                      { shakeFiles
+                      , shakeReport
+                      , shakeLintInside
+                      , shakeLiveFiles
+                      , shakeShare
                       }
-                  , let ?shakeDir = shakeFiles' in rules
+                  , let ?shakeDir = shakeFiles in want targets *> rules
                   )
-  liftIO $ setCurrentDirectory projectRoot
