@@ -7,6 +7,7 @@ import Util (Yaml, YamlType (..), s)
 import qualified Util
 
 import Control.Applicative ((<|>))
+import Control.Exception.Safe (finally)
 import Control.Monad (filterM, void)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.State.Strict (execState, get)
@@ -261,46 +262,78 @@ skalibs =
       , run "make" ["install-sysdeps"]
       ]
 
-s6PortableUtils :: Rules ()
+s6PortableUtils :: (?shakeDir :: FilePath) => Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
+  let s6 = "s6-portabl-utils"
 
-  ("s6-portable-utils/bin" </>) <$> ["s6-pause"] &%> \outs -> do
-    gitClone "https://github.com/skarnet/s6-portable-utils.git" version "s6-portable-utils/src"
-
-    need ["musl/lib.dir", "skalibs/lib.dir"]
-    -- need ["musl/lib.sfs"]
-    -- mkdir "./s6-portable-utils/lib/musl"
-    -- runProc "squashfuse ./musl/lib.sfs ./s6-portable-utils/lib/musl"
-    -- runAfter $ runProc "fusermount -u ./s6-portable-utils/lib/musl"
-
-    -- need ["skalibs/lib.sfs"]
-    -- mkdir "./s6-portable-utils/lib/skalibs"
-    -- runProc "squashfuse ./skalibs/lib.sfs ./s6-portable-utils/lib/skalibs"
-    -- runAfter $ runProc "fusermount -u ./s6-portable-utils/lib/skalibs || true"
-
-    runProcess_ $
-      proc
-        "./s6-portable-utils/src/configure"
-        [ "--prefix=../"
-        , "--bindir=../bin"
-        , "--enable-static-libc"
-        , "--with-sysdeps=../../skalibs/sysdeps"
-        , "--with-libs=../../skalibs/lib"
-        , "--with-libs=../../musl/lib"
+  ((s6 </> "bin") </>)
+    <$> [ "s6-basename"
+        , "s6-cat"
+        , "s6-chmod"
+        , "s6-chown"
+        , "s6-clock"
+        , "s6-cut"
+        , "s6-dirname"
+        , "s6-dumpenv"
+        , "s6-echo"
+        , "s6-env"
+        , "s6-expr"
+        , "s6-false"
+        , "s6-format-filter"
+        , "s6-grep"
+        , "s6-head"
+        , "s6-hiercopy"
+        , "s6-linkname"
+        , "s6-ln"
+        , "s6-ls"
+        , "s6-maximumtime"
+        , "s6-mkdir"
+        , "s6-mkfifo"
+        , "s6-nice"
+        , "s6-nuke"
+        , "s6-pause"
+        , "s6-printenv"
+        , "s6-quote"
+        , "s6-quote-filter"
+        , "s6-rename"
+        , "s6-rmrf"
+        , "s6-seq"
+        , "s6-sleep"
+        , "s6-sort"
+        , "s6-sync"
+        , "s6-tai64ndiff"
+        , "s6-tail"
+        , "s6-test"
+        , "s6-touch"
+        , "s6-true"
+        , "s6-uniquename"
+        , "s6-unquote"
+        , "s6-unquote-filter"
+        , "s6-update-symlinks"
+        , "seekablepipe"
         ]
+    &%> \outs@(out : _) -> do
+      gitClone "https://github.com/skarnet/s6-portable-utils.git" version $ s6 </> "src"
+      need ["musl/lib" </> dirFile, "skalibs/lib" </> dirFile]
+      runProcess_ $
+        setWorkingDir (s6 </> "src") $
+          proc
+            "./configure"
+            [ "--bindir=" <> ?shakeDir </> takeDirectory out
+            , "--enable-static-libc"
+            , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
+            , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
+            , "--with-libs=" <> ?shakeDir </> "musl/lib"
+            ]
 
-    runProc "make -C ./s6-portable-utils/src all"
-    runProc "make -C ./s6-portable-utils/src strip"
-
-    parallel_
-      [ producedDirectory "s6-portable-utils/src"
-      , runProc "make -C ./s6-portable-utils/src install-bin"
-      ]
+      let make = runProcess_ . setWorkingDir (s6 </> "src") . proc "make" . (: [])
+      make "all"
+      make "strip"
+      make "install-bin"
 
 rules :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 rules = do
-  action $ runAfter $ liftIO $ setCurrentDirectory ?projectRoot
   pacmanSetup
   nonrootImage
   musl
@@ -320,29 +353,31 @@ main = do
           , shakeProgress = progressSimple
           }
         []
-        $ \case
-          shakeOptions@ShakeOptions
-            { shakeFiles = shakeFiles'
-            , shakeReport = shakeReport'
-            , shakeLintInside = shakeLintInside'
-            , shakeLiveFiles = shakeLiveFiles'
-            , shakeShare = shakeShare'
-            } -> \_ targets -> do
-              shakeFiles <- makeAbsolute shakeFiles'
-              shakeReport <- traverse makeAbsolute shakeReport'
-              shakeLintInside <- traverse makeAbsolute shakeLintInside'
-              shakeLiveFiles <- traverse makeAbsolute shakeLiveFiles'
-              shakeShare <- traverse makeAbsolute shakeShare'
-              mkdir shakeFiles
-              setCurrentDirectory shakeFiles
-              pure $
-                Just
-                  ( shakeOptions
-                      { shakeFiles
-                      , shakeReport
-                      , shakeLintInside
-                      , shakeLiveFiles
-                      , shakeShare
-                      }
-                  , let ?shakeDir = shakeFiles in want targets *> rules
-                  )
+        ( \case
+            shakeOptions@ShakeOptions
+              { shakeFiles = shakeFiles'
+              , shakeReport = shakeReport'
+              , shakeLintInside = shakeLintInside'
+              , shakeLiveFiles = shakeLiveFiles'
+              , shakeShare = shakeShare'
+              } -> \_ targets -> do
+                shakeFiles <- makeAbsolute shakeFiles'
+                shakeReport <- traverse makeAbsolute shakeReport'
+                shakeLintInside <- traverse makeAbsolute shakeLintInside'
+                shakeLiveFiles <- traverse makeAbsolute shakeLiveFiles'
+                shakeShare <- traverse makeAbsolute shakeShare'
+                mkdir shakeFiles
+                setCurrentDirectory shakeFiles
+                pure $
+                  Just
+                    ( shakeOptions
+                        { shakeFiles
+                        , shakeReport
+                        , shakeLintInside
+                        , shakeLiveFiles
+                        , shakeShare
+                        }
+                    , let ?shakeDir = shakeFiles in want targets *> rules
+                    )
+        )
+        `finally` setCurrentDirectory ?projectRoot
