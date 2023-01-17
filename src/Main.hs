@@ -499,6 +499,7 @@ main = do
           , shakeLint = Just LintBasic
           , shakeColor = True
           , shakeProgress = progressSimple
+          , shakeChange = ChangeModtimeAndDigest
           }
         []
         ( \case
