@@ -5,6 +5,18 @@ module Main (
 import Manifest (yamls)
 import Util (Yaml, YamlType (..), s)
 import qualified Util
+import Util.Shake (
+  aur,
+  aurInstall,
+  dir,
+  dirFile,
+  docker,
+  gitClone,
+  mkdir,
+  parallel_,
+  runProc,
+  (<:>),
+ )
 
 import Control.Applicative ((<|>))
 import Control.Exception.Safe (Exception (displayException), finally, throw, throwString)
@@ -187,78 +199,6 @@ import Text.Heredoc (here, str)
 
 -- main :: IO ()
 -- main = generate
-instance Exceptions.MonadThrow Action where
-  throwM err = do
-    putError $ displayException err
-    liftIO $ Exceptions.throwM err
-instance Exceptions.MonadCatch Action where
-  catch = actionCatch
-instance Exceptions.MonadThrow Rules where
-  throwM = liftIO . Exceptions.throwM
-
-runProc :: MonadIO m => String -> m ()
-runProc = runProcess_ . fromString
-
-(<:>) :: String -> String -> String
-x <:> y = x <> " " <> y
-
-mkdir :: MonadIO m => FilePath -> m ()
-mkdir = liftIO . createDirectoryIfMissing True
-
-listDirectoryRecursive :: MonadIO m => FilePath -> m [FilePath]
-listDirectoryRecursive dir = liftIO $ do
-  fmap concat $
-    traverse
-      ( \path -> do
-          let child = dir </> path
-          isDir <- Sys.doesDirectoryExist child
-          if isDir
-            then fmap (path </>) <$> listDirectoryRecursive child
-            else pure [path]
-      )
-      =<< listDirectory dir
-
-producedDirectory :: FilePath -> Action ()
-producedDirectory dir =
-  produces . fmap (dir </>) =<< listDirectoryRecursive dir
-
-dirFile :: String
-dirFile = ".ls"
-
-infix 1 `dir`
-dir :: (?shakeDir :: FilePath) => FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
-dir pat act = do
-  phony (addTrailingPathSeparator pat) $ need [pat </> dirFile]
-  withoutTargets $
-    pat </> dirFile %> \out ->
-      let ?dir = ?shakeDir </> takeDirectory out
-       in do
-            act
-            ls <-
-              filterM (\file -> (file /= dirFile &&) <$> liftIO (Sys.doesFileExist $ ?dir </> file))
-                =<< listDirectoryRecursive ?dir
-            produces $ (?dir </>) <$> ls
-            writeFile' out $ unlines ls
-
-parallel_ :: [Action a] -> Action ()
-parallel_ = void . parallel
-
-gitClone :: String -> String -> FilePath -> Action ()
-gitClone repo tag dst = do
-  mkdir dst
-  liftIO $ removeDirectoryRecursive dst
-  runProc $ "git clone --branch=" <> tag <:> repo <:> dst
-
-docker = proc "podman"
-aur opts =
-  proc "yay" $
-    opts
-      <> [ "--config=" <> ?shakeDir </> "pacman/pacman.conf"
-         , "--dbpath=" <> ?shakeDir </> "pacman/db"
-         , "--noconfirm"
-         , "--noprovides"
-         ]
-aurInstall opts = aur $ ["-S"] <> opts
 
 newtype ImageRepo = ImageRepo {repo :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
