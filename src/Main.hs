@@ -1,12 +1,12 @@
 module Main where
 
 import Manifest (yamls)
-import Util (Yaml, YamlType (..), nonrootGid, nonrootOwn, nonrootUid, registry, rootGid, rootOwn, rootUid, s)
+import Util (Yaml, YamlType (..), nonrootGid, nonrootUid, registry, rootGid, rootUid, s)
 import qualified Util
 import Util.Shake (
-  askStore,
   aur,
   aurInstall,
+  cache,
   dir,
   dirFile,
   gitClone,
@@ -15,7 +15,6 @@ import Util.Shake (
   pacman,
   parallel_,
   runProc,
-  store,
   tar,
   (<:>),
  )
@@ -24,7 +23,6 @@ import Util.Shake.Container (
   ImageRepo (ImageRepo),
   addContainerImageRule,
   docker,
-  dockerCommit,
   dockerCopy,
   dockerFrom,
   dockerPushEnd,
@@ -225,15 +223,17 @@ nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   let ?proc = proc
   Image.registry "nonroot" `image` do
-    ImageName (Image.registry "scratch", latest) `dockerFrom` [] $ do
-      askStore @"nonroot/rootfs" >>= dockerCopy "/"
-      dockerCommit ["ENTRYPOINT /bin/sh"]
+    ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `dockerFrom` [] $ do
+      let runDocker = runProcess_ . docker
+      -- runDocker . words $ "cp nonroot/rootfs.tar" <:> ?container <> ":/"
+      dockerCopy "nonroot/rootfs.tar" "/"
+      runDocker ["commit", "--change", "ENTRYPOINT /bin/sh", ?container, show ?imageName]
       dockerPushEnd
 
-  store @"nonroot/rootfs" $ do
+  "nonroot/rootfs.tar" %> \out -> do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
     parallel_ $ mkdir . ("nonroot/rootfs" </>) <$> ["tmp", "home/nonroot"]
-    tar nonrootOwn ?key
+    tar nonrootUid nonrootGid out
 
   writeFile' "nonroot/rootfs/etc/passwd" $
     unlines
@@ -261,13 +261,13 @@ archlinuxImage = do
         rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
         nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
       parallel_
-        [ askStore @"archlinux/etc" >>= dockerCopy "/etc/"
-        , askStore @"pacman/db" >>= dockerCopy "/var/lib/pacman/"
+        [ dockerCopy "archlinux/etc.tar" "/etc/"
+        , dockerCopy "pacman/db.tar" "/var/lib/pacman/"
         ]
       rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
       parallel_
         [ do
-            askStore @"archlinux/aur-helper" >>= dockerCopy "/home/nonroot/aur-helper/"
+            dockerCopy "archlinux/aur-helper.tar" "/home/nonroot/aur-helper/"
             nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
         , rootExec [] ["locale-gen"]
         ]
@@ -279,9 +279,9 @@ archlinuxImage = do
   "archlinux/aur-helper/" `dir` do
     gitClone "https://aur.archlinux.org/yay-bin.git" "master" ?dir
 
-  store @"archlinux/aur-helper" $ do
-    need [?key </> dirFile]
-    tar (nonrootUid, nonrootGid) ?key
+  "archlinux/aur-helper.tar" %> \out -> do
+    need ["archlinux/aur-helper" </> dirFile]
+    tar nonrootUid nonrootGid out
 
   writeFile'
     "archlinux/etc/locale.gen"
@@ -301,13 +301,13 @@ archlinuxImage = do
         |Server = https://mirrors.cat.net/archlinux/$repo/os/$arch
         |]
 
-  store @"archlinux/etc" $ do
+  "archlinux/etc.tar" %> \out -> do
     need . fmap ("archlinux/etc" </>) $
       [ "locale.gen"
       , "sudoers"
       , "pacman.d/mirrorlist"
       ]
-    tar (rootUid, rootGid) ?key
+    tar rootUid rootGid out
 
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
@@ -319,9 +319,9 @@ pacmanSetup = do
     need ["pacman/pacman.conf"]
     runProcess_ . aur . words $ "-Sy"
 
-  store @"pacman/db" $ do
-    need [?key </> dirFile]
-    tar rootOwn ?key
+  "pacman/db.tar" %> \out -> do
+    need ["pacman/db" </> dirFile]
+    tar rootUid rootGid out
 
 dockerSetup :: Rules ()
 dockerSetup = do

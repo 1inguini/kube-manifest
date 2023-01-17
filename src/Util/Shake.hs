@@ -1,6 +1,5 @@
 module Util.Shake (
   (<:>),
-  askStore,
   aur,
   aurInstall,
   dir,
@@ -11,8 +10,8 @@ module Util.Shake (
   pacman,
   parallel_,
   producedDirectory,
+  cache,
   runProc,
-  store,
   tar,
 ) where
 
@@ -21,19 +20,15 @@ import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThr
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (filterM, void)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString.Lazy as ByteString.Lazy
-import Data.Proxy (Proxy (Proxy))
 import Data.String (IsString (fromString))
 import Development.Shake (
   Action,
   FilePattern,
   RuleResult,
   Rules,
-  ShakeValue,
   actionCatch,
-  addOracleCache,
-  askOracle,
   need,
+  newCache,
   parallel,
   phony,
   produces,
@@ -44,12 +39,11 @@ import Development.Shake (
  )
 import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
 import GHC.Generics (Generic)
-import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (addTrailingPathSeparator, dropExtension, takeDirectory, (</>))
 import System.Posix (GroupID, UserID)
-import System.Process.Typed (ProcessConfig, proc, readProcessStdout_, runProcess_)
+import System.Process.Typed (ProcessConfig, proc, runProcess_)
 
 instance Exceptions.MonadThrow Action where
   throwM err = do
@@ -122,37 +116,20 @@ dir pat act = do
             produces $ (?dir </>) <$> ls
             writeFile' out $ unlines ls
 
-tar :: MonadIO m => (UserID, GroupID) -> FilePath -> m ByteString.Lazy.ByteString
-tar (user, group) dir =
-  readProcessStdout_ . proc "tar" $
+tar :: MonadIO m => UserID -> GroupID -> FilePath -> m ()
+tar user group out =
+  runProcess_ . proc "tar" $
     [ "-c"
     , "--numeric-owner"
     , "--owner=" <> show user
     , "--group=" <> show group
-    , "--exclude=" <> dirFile
-    , "--to-stdout"
-    , -- , "--file=" <> out
-      "--directory=" <> dir -- dropExtension out
+    , "--file=" <> out
+    , "--directory=" <> dropExtension out
     , "."
     ]
 
 parallel_ :: [Action a] -> Action ()
 parallel_ = void . parallel
 
-newtype Store (key :: Symbol) value = Store ()
-  deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
-type instance RuleResult (Store key value) = value
-
-store ::
-  forall (key :: Symbol) value.
-  (KnownSymbol key, ShakeValue value) =>
-  ((?key :: String) => Action value) ->
-  Rules ()
-store act = void $ addOracleCache $ \(Store () :: Store key value) ->
-  let ?key = symbolVal (Proxy :: Proxy key) in act
-
-askStore ::
-  forall (key :: Symbol) value.
-  (KnownSymbol key, ShakeValue value) =>
-  Action value
-askStore = askOracle $ Store @key @value ()
+cache :: v -> Rules (Action v)
+cache v = ($ ()) <$> newCache (\() -> pure v)

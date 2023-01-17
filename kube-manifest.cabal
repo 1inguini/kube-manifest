@@ -22,7 +22,6 @@ extra-source-files: CHANGELOG.md
 common option
   default-extensions:
     NoFieldSelectors
-    AllowAmbiguousTypes
     BinaryLiterals
     DataKinds
     DeriveGeneric
