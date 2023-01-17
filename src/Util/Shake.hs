@@ -10,20 +10,25 @@ module Util.Shake (
   pacman,
   parallel_,
   producedDirectory,
+  cache,
   runProc,
+  tar,
 ) where
 
 import Control.Exception.Safe (displayException)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (filterM, void)
+import Data.ByteString (ByteString)
 import Data.String (IsString (fromString))
 import Development.Shake (
   Action,
   FilePattern,
+  RuleResult,
   Rules,
   actionCatch,
   need,
+  newCache,
   parallel,
   phony,
   produces,
@@ -32,9 +37,12 @@ import Development.Shake (
   writeFile',
   (%>),
  )
+import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
+import GHC.Generics (Generic)
 import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
-import System.FilePath (addTrailingPathSeparator, takeDirectory, (</>))
+import System.FilePath (addTrailingPathSeparator, dropExtension, takeDirectory, (</>))
+import System.Posix (GroupID, UserID)
 import System.Process.Typed (ProcessConfig, proc, runProcess_)
 
 instance Exceptions.MonadThrow Action where
@@ -108,5 +116,20 @@ dir pat act = do
             produces $ (?dir </>) <$> ls
             writeFile' out $ unlines ls
 
+tar :: MonadIO m => UserID -> GroupID -> FilePath -> m ()
+tar user group out =
+  runProcess_ . proc "tar" $
+    [ "-c"
+    , "--numeric-owner"
+    , "--owner=" <> show user
+    , "--group=" <> show group
+    , "--file=" <> out
+    , "--directory=" <> dropExtension out
+    , "."
+    ]
+
 parallel_ :: [Action a] -> Action ()
 parallel_ = void . parallel
+
+cache :: v -> Rules (Action v)
+cache v = ($ ()) <$> newCache (\() -> pure v)

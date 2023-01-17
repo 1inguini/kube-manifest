@@ -29,14 +29,16 @@ module Util (
   named,
   namespace,
   noNamespace,
-  nonrootUid,
   nonrootGid,
+  nonrootUid,
   object,
   openebsLvmClaim,
   persistentVolumeClaim,
   persistentVolumeClaimVolume,
   readWriteOnce,
   registry,
+  rootGid,
+  rootUid,
   s,
   service,
   servicePort,
@@ -62,6 +64,7 @@ import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import Optics (A_Setter, Is, Optic', over, set, view, (%))
 import Secret (host)
+import System.Posix (GroupID, UserID)
 import TH (deriveJSON)
 
 -- import Data.
@@ -196,7 +199,7 @@ namespace ::
   Record _
 namespace =
   let ?name = ?namespace
-  in  object "Namespace"
+   in object "Namespace"
         `merge` ANON
           { metadata = project meta :: Record ["name" := _, "labels" := _]
           }
@@ -263,11 +266,17 @@ persistentVolumeClaimVolume =
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 
-nonrootUid :: Int
+nonrootUid :: UserID
 nonrootUid = 65532
 
-nonrootGid :: Int
+nonrootGid :: GroupID
 nonrootGid = 65532
+
+rootUid :: UserID
+rootUid = 0
+
+rootGid :: GroupID
+rootGid = 0
 
 workload ::
   (?namespace :: Text, ?app :: Text, ?name :: Text) =>

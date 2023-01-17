@@ -9,8 +9,10 @@ module Util.Shake.Container (
   addContainerImageRule,
   addTaggedImageTarget,
   docker,
+  dockerCopy,
+  dockerFrom,
   dockerIo,
-  dockerRunPause,
+  dockerPushEnd,
   image,
   latest,
   needImage,
@@ -19,13 +21,14 @@ module Util.Shake.Container (
   runDocker,
 ) where
 
-import Util.Shake ((<:>))
+import Util.Shake (parallel_, (<:>))
 
 import Control.Exception.Safe (throwString)
 import Control.Monad (void)
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Lazy as ByteString.Lazy
 import qualified Data.List as List
 import Data.String.Conversions (cs)
 import Development.Shake (
@@ -35,6 +38,8 @@ import Development.Shake (
   addTarget,
   need,
   phonys,
+  putInfo,
+  runAfter,
  )
 import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
 import Development.Shake.Rule (
@@ -53,7 +58,7 @@ import Development.Shake.Rule (
 import GHC.Generics (Generic)
 import Optics (view)
 import System.FilePath ((</>))
-import System.Process.Typed (ExitCode (ExitSuccess), ProcessConfig, proc, readProcessStdout, readProcessStdout_, runProcess_)
+import System.Process.Typed (ExitCode (ExitSuccess), ProcessConfig, byteStringInput, proc, readProcessStdout, readProcessStdout_, runProcess, runProcess_, setStdin)
 import qualified Util
 
 newtype ImageRepo = ImageRepo {repo :: String}
@@ -146,19 +151,51 @@ addTaggedImageTarget = addTarget . show
 
 docker :: (?proc :: String -> [String] -> a) => [String] -> a
 docker = ?proc "podman"
-runDocker :: (MonadIO m, ?proc :: String -> [String] -> ProcessConfig () () ()) => [String] -> m ()
+runDocker ::
+  (MonadIO m, ?proc :: String -> [String] -> ProcessConfig stdin stdout stderr) => [String] -> m ()
 runDocker = runProcess_ . docker
 
-dockerRunPause :: (?shakeDir :: FilePath) => ImageName -> Action ContainerId
-dockerRunPause base =
-  do
-    let ?proc = proc
-    let pause = "s6-poratable-utils/bin/s6-pause"
-    need [pause]
+dockerCopy ::
+  (?proc :: String -> [String] -> ProcessConfig stdin stdout stderr, ?container :: ContainerId) =>
+  ByteString.Lazy.ByteString ->
+  FilePath ->
+  Action ()
+dockerCopy tar dir = do
+  -- putInfo $ "`docker cp` from" <:> tarFile
+  -- need [tarFile]
+  -- tar <- liftIO $ ByteString.Lazy.readFile tarFile
+  let proc = ?proc
+  let ?proc = \command -> setStdin (byteStringInput tar) . proc command
+   in runDocker ["cp", "--archive=false", "-", ?container <> ":" <> dir]
+
+dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
+dockerPushEnd = do
+  let ?proc = proc
+  need ["docker/login"]
+  runAfter $ do
+    runDocker ["push", show ?imageName]
+    runDocker . words $ "stop --time=0" <:> ?container
+    runDocker . words $ "rm" <:> ?container
+
+dockerFrom ::
+  (?shakeDir :: FilePath) =>
+  ImageName ->
+  [String] ->
+  ((?container :: ContainerId) => Action a) ->
+  Action a
+dockerFrom base opt act = do
+  let ?proc = proc
+  let init = "busybox/busybox"
+  need [init]
+  container <-
     fmap (head . lines . cs) . readProcessStdout_ . docker $
       [ "run"
       , "--detach"
-      , "--volume=" <> ?shakeDir </> pause <> ":/pause"
-      , "--entrypoint=/pause"
-      , show base
+      , "-t"
+      , "--volume=" <> ?shakeDir </> init <> ":/sh"
+      , "--entrypoint=/sh"
       ]
+        <> opt
+        <> [show base]
+  let ?container = container
+   in act
