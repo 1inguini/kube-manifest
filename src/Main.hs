@@ -255,17 +255,18 @@ archlinuxImage = do
     let
       dockerExec :: [String] -> Action ()
       dockerExec = runDocker . (words "exec -i" <>)
-      nonrootExec = dockerExec . ("--user=nonroot" :)
-      rootExec = dockerExec . ("--user=root" :)
+      rootExec, nonrootExec :: String -> [String] -> Action ()
+      rootExec command = dockerExec . ("--user=root" :) . (command :)
+      nonrootExec command = dockerExec . ("--user=nonroot" :) . (command :)
     parallel_
       [ do
-          rootExec . words $ "groupadd --gid=" <> show nonrootGid <:> "nonroot"
-          rootExec $
-            ["useradd --uid=" <> show nonrootUid, "--gid=" <> show nonrootGid]
+          rootExec "groupadd" ["--gid=" <> show nonrootGid, "nonroot"]
+          rootExec "useradd" $
+            ["--uid=" <> show nonrootUid, "--gid=" <> show nonrootGid]
               <> words "-m -s /usr/bin/nologin nonroot"
       , runDocker $ "copy" : ["archlinux/etc.tar", container <> ":/etc"]
       ]
-    let ?proc = \command -> rootExec . (command :)
+    let ?proc = rootExec
      in pacman $ words "-Sy git glibc moreutils rsync"
 
   writeFile'
@@ -284,6 +285,7 @@ archlinuxImage = do
 
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
+  let ?proc = proc
   "pacman/pacman.conf" %> \out -> do
     copyFile' (?projectRoot </> "src/pacman.conf") out
 
@@ -293,12 +295,14 @@ pacmanSetup = do
 
 dockerSetup :: Rules ()
 dockerSetup = do
+  let ?proc = proc
   phony "docker/login" . runProcess_ $
     docker ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
 
 musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl =
   "musl/lib/" `dir` do
+    let ?proc = proc
     need ["pacman/db" </> dirFile]
     mkdir "musl/rootfs"
     runProcess_ $ aurInstall ["--root=musl/rootfs", "musl"]
