@@ -354,7 +354,7 @@ nonrootImage = do
 
   "nonroot/rootfs.tar" %> \out -> do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
-    parallel_ $ mkdir . ("nonroot/rootfs" </>) <$> ["/tmp", "/home/nonroot"]
+    parallel_ $ mkdir . ("nonroot/rootfs" </>) <$> ["tmp", "home/nonroot"]
     runProc $ "tar -c --owner=nonroot --group=nonroot -f" <:> out <:> "-C nonroot/rootfs ."
 
   writeFile' "nonroot/rootfs/etc/passwd" $
