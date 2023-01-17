@@ -59,15 +59,7 @@ import Data.Record.Anon
 import Data.Record.Anon.Simple (Record, insert, merge, project)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
-import Optics (
-  A_Setter,
-  Is,
-  Optic',
-  over,
-  set,
-  view,
-  (%),
- )
+import Optics (A_Setter, Is, Optic', over, set, view, (%))
 
 import Secret (host)
 import TH (deriveJSON)

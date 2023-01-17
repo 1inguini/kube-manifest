@@ -32,18 +32,10 @@ import Development.Shake (
   writeFile',
   (%>),
  )
-import System.Directory (
-  createDirectoryIfMissing,
-  listDirectory,
-  removeDirectoryRecursive,
- )
+import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (addTrailingPathSeparator, takeDirectory, (</>))
-import System.Process.Typed (
-  ProcessConfig,
-  proc,
-  runProcess_,
- )
+import System.Process.Typed (ProcessConfig, proc, runProcess_)
 
 instance Exceptions.MonadThrow Action where
   throwM err = do
