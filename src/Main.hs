@@ -397,9 +397,6 @@ dockerSetup = do
   phony "docker/login" . runProcess_ $
     docker ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
 
--- producedDirectory "pacman/db/sync"
--- writeFile' out mempty
-
 musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl =
   "musl/lib/" `dir` do
