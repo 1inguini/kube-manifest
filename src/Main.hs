@@ -344,8 +344,13 @@ nonrootImage = do
     let pause = "s6-portable-utils/bin/s6-pause"
     need ["nonroot/rootfs.tar", pause]
     container <-
-      fmap (init . cs) . readProcessStdout_ . docker . words $
-        "run --detach --volume=" <> pause <> ":/pause --entrypoint=/pause" <:> cs Util.registry </> "scratch"
+      fmap (head . lines . cs) . readProcessStdout_ . docker $
+        [ "run"
+        , "--detach"
+        , "--volume=" <> ?shakeDir </> pause <> ":/pause"
+        , "--entrypoint=/pause"
+        , cs Util.registry </> "scratch"
+        ]
     let runDocker = runProcess_ . docker
     runDocker . words $ "cp nonroot.tar" <:> container <> ":/"
     runDocker ["commit", "--change", "ENTRYPOINT /bin/sh", container, show ?imageName]
