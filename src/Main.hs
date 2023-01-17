@@ -155,14 +155,14 @@ dirFile :: String
 dirFile = ".ls"
 
 infix 1 `dir`
-dir :: FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
+dir :: (?shakeDir :: FilePath) => FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
 dir pat act =
   pat </> dirFile %> \out ->
-    let ?dir = takeDirectory out
+    let ?dir = ?shakeDir </> takeDirectory out
      in do
           act
           ls <-
-            filterM (\file -> (file /= dirFile &&) <$> liftIO (Sys.doesFileExist file))
+            filterM (\file -> (file /= dirFile &&) <$> liftIO (Sys.doesFileExist $ ?dir </> file))
               =<< listDirectoryRecursive ?dir
           produces $ (?dir </>) <$> ls
           writeFile' out $ unlines ls
@@ -191,8 +191,8 @@ aurInstall opts = aur $ ["-S"] <> opts
 nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   phony "nonroot" $ do
-    let pause = "./s6-portable-utils/bin/s6-pause"
-    need ["nonroot.tar", takeDirectory pause]
+    let pause = "s6-portable-utils/bin/s6-pause"
+    need ["nonroot/rootfs.tar", pause]
     container <-
       fmap (init . cs) . readProcessStdout_ . docker . words $
         "run --detach --volume=" <> pause <> ":/pause --entrypoint=/pause" <:> cs Util.registry </> "scratch"
@@ -204,13 +204,9 @@ nonrootImage = do
       , words $ "rm" <:> container
       ]
 
-  "nonroot.tar" %> \out -> do
+  "nonroot/rootfs.tar" %> \out -> do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
-    void $
-      parallel
-        [ mkdir "nonroot/rootfs/tmp"
-        , mkdir "nonroot/rootfs/home/nonroot"
-        ]
+    parallel_ $ mkdir . ("nonroot/rootfs" </>) <$> ["/tmp", "/home/nonroot"]
     runProc $ "tar -c --owner=nonroot --group=nonroot -f" <:> out <:> "-C nonroot/rootfs ."
 
   writeFile' "nonroot/rootfs/etc/passwd" $
@@ -247,7 +243,7 @@ musl =
     runProcess_ $ aurInstall ["--root=musl/rootfs", "musl"]
     runProc $ "sudo mv musl/rootfs/usr/lib/musl/lib/*" <:> "-t musl/lib"
 
-skalibs :: Rules ()
+skalibs :: (?shakeDir :: FilePath) => Rules ()
 skalibs =
   "skalibs/lib/" `dir` do
     let version = "v2.12.0.1"
