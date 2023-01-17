@@ -19,19 +19,15 @@ import Control.Exception.Safe (displayException, throwString)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (filterM, void)
-import Data.ByteString (ByteString)
-import Data.String (IsString (fromString))
 import Development.Shake (
   Action,
   CmdOption,
   CmdResult,
   FilePattern,
-  RuleResult,
   Rules,
   actionCatch,
   command,
   need,
-  newCache,
   parallel,
   phony,
   produces,
@@ -40,8 +36,6 @@ import Development.Shake (
   writeFile',
   (%>),
  )
-import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
-import GHC.Generics (Generic)
 import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (addTrailingPathSeparator, dropExtension, takeDirectory, (</>))

@@ -23,7 +23,7 @@ module Util.Shake.Container (
 ) where
 
 import qualified Util
-import Util.Shake (parallel_, runProg, (<:>))
+import Util.Shake (runProg, (<:>))
 
 import Control.Exception.Safe (throwString)
 import Control.Monad (void)
@@ -35,7 +35,7 @@ import qualified Data.List as List
 import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
-  CmdOption (FileStdin),
+  CmdOption (BinaryPipes, StdinBS),
   CmdResult,
   Exit (Exit),
   RuleResult,
@@ -66,17 +66,8 @@ import Development.Shake.Rule (
 import GHC.Generics (Generic)
 import Optics (view)
 import System.Exit (ExitCode (ExitSuccess))
-import System.FilePath ((</>))
-import System.IO (
-  IOMode (ReadMode),
-  hClose,
-  hFlush,
-  hIsOpen,
-  hIsReadable,
-  hIsSeekable,
-  hIsWritable,
-  withFile,
- )
+import System.FilePath (takeFileName, (</>))
+import System.Process (callProcess)
 
 newtype ImageRepo = ImageRepo {repo :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
@@ -174,11 +165,12 @@ dockerCopy ::
   FilePath ->
   Action ()
 dockerCopy tarFile dir = do
-  putInfo $ "`docker cp` from" <:> tarFile <:> "to" <:> dir
   need [tarFile]
-  let ?opts = FileStdin tarFile : ?opts
-  runDocker @() ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
-  putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
+  tar <- liftIO $ ByteString.Lazy.readFile tarFile
+  putInfo $ "`docker cp` from" <:> tarFile
+  let ?opts = StdinBS tar : BinaryPipes : ?opts
+  runDocker @() ["cp", "--archive=false", "--overwrite=true", "-", ?container <> ":" <> dir]
+  putInfo $ "done: `docker cp` from" <:> tarFile
 
 dockerCommit ::
   ( ?opts :: [CmdOption]
@@ -197,27 +189,31 @@ dockerPushEnd :: (?opts :: [CmdOption], ?imageName :: ImageName, ?container :: C
 dockerPushEnd = do
   need ["docker/login"]
   -- runDocker ["push", show ?imageName]
-  runDocker @() . words $ "stop --time=0" <:> ?container
-  runDocker @() . words $ "rm" <:> ?container
+  runAfter $ do
+    callProcess docker . words $ "stop --time=0" <:> ?container
+    callProcess docker . words $ "rm" <:> ?container
 
 dockerFrom ::
   (?opts :: [CmdOption], ?shakeDir :: FilePath) =>
   ImageName ->
   [String] ->
-  ((?container :: ContainerId) => Action a) ->
+  ((?container :: ContainerId, ?init :: String) => Action a) ->
   Action a
 dockerFrom base opt act = withTempDir $ \tmp -> do
-  let init = "busybox/busybox"
-  copyFile' init $ tmp </> "sh"
+  let
+    init = "busybox/busybox"
+    cmd = takeFileName init
+  copyFile' init $ tmp </> cmd
   Stdout container <-
     runDocker $
       [ "run"
       , "--detach"
       , "-t"
       , "--volume=" <> tmp <> ":/tmp"
-      , "--entrypoint=/tmp/sh"
+      , "--entrypoint=/tmp" </> cmd
       ]
         <> opt
-        <> [show base]
+        <> [show base, "sh"]
   let ?container = head $ lines container
+      ?init = "/tmp" </> cmd
    in act

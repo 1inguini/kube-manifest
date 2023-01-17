@@ -1,8 +1,12 @@
 module Main where
 
-import Manifest (yamls)
-import Util (Yaml, YamlType (..), nonrootGid, nonrootOwn, nonrootUid, registry, rootGid, rootOwn, rootUid, s)
-import qualified Util
+import Util (
+  nonrootGid,
+  nonrootOwn,
+  nonrootUid,
+  registry,
+  rootOwn,
+ )
 import Util.Shake (
   aur,
   aurInstall,
@@ -11,18 +15,15 @@ import Util.Shake (
   gitClone,
   listDirectoryRecursive,
   mkdir,
-  pacman,
   parallel_,
   runProg,
   runProg_,
   tar,
-  (<:>),
  )
 import Util.Shake.Container (
   ImageName (ImageName),
   ImageRepo (ImageRepo),
   addContainerImageRule,
-  docker,
   dockerCommit,
   dockerCopy,
   dockerFrom,
@@ -33,34 +34,16 @@ import Util.Shake.Container (
  )
 import qualified Util.Shake.Container as Image
 
-import Control.Applicative ((<|>))
-import Control.Exception.Safe (Exception (displayException), finally, throw, throwString)
-import Control.Monad (filterM, void, when)
-import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
+import Control.Exception.Safe (finally)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.State.Strict (execState, get)
-import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Optics (AsValue (_Object, _String), key, _Key)
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as ByteString
 import qualified Data.Char as Char
-import Data.Foldable (foldlM, traverse_)
-import Data.List (isPrefixOf)
-import qualified Data.List as List
-import Data.Maybe (catMaybes, fromMaybe)
-import Data.String (IsString (fromString))
+import Data.Foldable (traverse_)
 import Data.String.Conversions (cs)
-import Data.Text (Text)
-import qualified Data.Text as Texs
-import qualified Data.Yaml as Yaml (decodeAllThrow, encode)
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
   CmdOption (Cwd),
-  FilePattern,
   Lint (LintBasic),
-  RuleResult,
   Rules,
   ShakeOptions (
     ShakeOptions,
@@ -75,76 +58,34 @@ import Development.Shake (
     shakeShare,
     shakeThreads
   ),
-  action,
-  actionCatch,
-  addOracleCache,
-  addTarget,
   copyFile',
-  getShakeOptions,
-  getShakeOptionsRules,
   need,
-  parallel,
   phony,
-  phonys,
   produces,
   progressSimple,
-  putError,
-  putInfo,
   readFile',
   shakeArgsOptionsWith,
   shakeOptions,
   want,
-  withoutTargets,
   writeFile',
   (%>),
   (&%>),
  )
-import qualified Development.Shake as Shake
-import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
-import Development.Shake.Rule (
-  BuiltinIdentity,
-  BuiltinRun,
-  RunChanged (ChangedNothing, ChangedRecomputeDiff, ChangedRecomputeSame),
-  RunMode (RunDependenciesChanged, RunDependenciesSame),
-  RunResult (RunResult),
-  addBuiltinRule,
-  addUserRule,
-  apply,
-  apply1,
-  getUserRuleOne,
-  noLint,
- )
-import GHC.Generics (Generic)
-import Optics (modifying, over, preview, view, (%), _head)
 import System.Directory (
-  createDirectoryIfMissing,
   getCurrentDirectory,
-  listDirectory,
   makeAbsolute,
-  removeDirectory,
-  removeDirectoryRecursive,
-  renameDirectory,
-  renameFile,
   setCurrentDirectory,
  )
-import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (
-  addTrailingPathSeparator,
-  dropExtension,
   dropTrailingPathSeparator,
   takeDirectory,
-  takeExtension,
-  takeFileName,
   (</>),
  )
 import System.Posix (
-  getRealGroupID,
-  getRealUserID,
-  ownerExecuteMode,
   setFileCreationMask,
   setFileMode,
  )
-import Text.Heredoc (here, str)
+import Text.Heredoc (str)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 -- processYaml written yaml =
@@ -264,13 +205,15 @@ archlinuxImage = do
         rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
         nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
       parallel_
-        [ dockerCopy "archlinux/etc.tar" "/etc/"
-        , dockerCopy "pacman/db/sync.tar" "/var/lib/pacman/sync"
+        [ dockerCopy "archlinux/etc.tar" "/etc"
+        , do
+            rootExec [] [?init, "mkdir", "-p", "/var/lib/pacman/sync"]
+            dockerCopy "pacman/db/sync.tar" "/var/lib/pacman/sync"
         ]
       rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
       parallel_
         [ do
-            dockerCopy "archlinux/aur-helper.tar" "/home/nonroot/aur-helper/"
+            dockerCopy "archlinux/aur-helper.tar" "/home/nonroot/aur-helper"
             nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
         , rootExec [] ["locale-gen"]
         ]

@@ -1,22 +1,14 @@
 module Manifest where
 
-import Control.Monad.State.Strict (MonadState, execState, modify)
 import Data.Aeson (toJSON)
-import qualified Data.Aeson as Aeson
 import Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Optics (AsJSON (_JSON), key, _Object)
 import Data.FileEmbed (embedStringFile)
-import Data.Record.Anon
-import Data.Record.Anon.Simple (Record, inject, merge, project)
+import Data.Record.Anon.Simple (merge)
 import qualified Data.Record.Anon.Simple as Anon
-import Data.Scientific (Scientific)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import Optics (ix, modifying, over, review, set, (%))
 
-import qualified Data.Aeson.KeyMap as KeyMap
-import Secret (externalIp, host)
-import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile)
+import Secret (externalIp)
+import TH (embedYamlFile)
 import Util (Yaml)
 import qualified Util
 
