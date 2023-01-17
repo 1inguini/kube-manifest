@@ -1,9 +1,8 @@
 module Util.Shake (
   (<:>),
-  askCache,
+  askStore,
   aur,
   aurInstall,
-  cache,
   dir,
   dirFile,
   gitClone,
@@ -13,6 +12,7 @@ module Util.Shake (
   parallel_,
   producedDirectory,
   runProc,
+  store,
   tar,
 ) where
 
@@ -143,16 +143,16 @@ newtype Store (key :: Symbol) value = Store ()
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
 type instance RuleResult (Store key value) = value
 
-cache ::
+store ::
   forall (key :: Symbol) value.
   (KnownSymbol key, ShakeValue value) =>
   ((?key :: String) => Action value) ->
   Rules ()
-cache act = void $ addOracleCache $ \(Store () :: Store key value) ->
+store act = void $ addOracleCache $ \(Store () :: Store key value) ->
   let ?key = symbolVal (Proxy :: Proxy key) in act
 
-askCache ::
+askStore ::
   forall (key :: Symbol) value.
   (KnownSymbol key, ShakeValue value) =>
   Action value
-askCache = askOracle $ Store @key @value ()
+askStore = askOracle $ Store @key @value ()

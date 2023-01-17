@@ -4,10 +4,9 @@ import Manifest (yamls)
 import Util (Yaml, YamlType (..), nonrootGid, nonrootOwn, nonrootUid, registry, rootGid, rootOwn, rootUid, s)
 import qualified Util
 import Util.Shake (
-  askCache,
+  askStore,
   aur,
   aurInstall,
-  cache,
   dir,
   dirFile,
   gitClone,
@@ -16,6 +15,7 @@ import Util.Shake (
   pacman,
   parallel_,
   runProc,
+  store,
   tar,
   (<:>),
  )
@@ -227,11 +227,11 @@ nonrootImage = do
     ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `dockerFrom` [] $ do
       let runDocker = runProcess_ . docker
       -- runDocker . words $ "cp nonroot/rootfs.tar" <:> ?container <> ":/"
-      askCache @"nonroot/rootfs" >>= dockerCopy "/"
+      askStore @"nonroot/rootfs" >>= dockerCopy "/"
       runDocker ["commit", "--change", "ENTRYPOINT /bin/sh", ?container, show ?imageName]
       dockerPushEnd
 
-  cache @"nonroot/rootfs" $ do
+  store @"nonroot/rootfs" $ do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
     parallel_ $ mkdir . ("nonroot/rootfs" </>) <$> ["tmp", "home/nonroot"]
     tar nonrootOwn ?key
@@ -267,13 +267,13 @@ archlinuxImage = do
         rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
         nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
       parallel_
-        [ askCache @"archlinux/etc" >>= dockerCopy "/etc/"
-        , askCache @"pacman/db" >>= dockerCopy "/var/lib/pacman/"
+        [ askStore @"archlinux/etc" >>= dockerCopy "/etc/"
+        , askStore @"pacman/db" >>= dockerCopy "/var/lib/pacman/"
         ]
       rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
       parallel_
         [ do
-            askCache @"archlinux/aur-helper" >>= dockerCopy "/home/nonroot/aur-helper/"
+            askStore @"archlinux/aur-helper" >>= dockerCopy "/home/nonroot/aur-helper/"
             nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
         , rootExec [] ["locale-gen"]
         ]
@@ -288,7 +288,7 @@ archlinuxImage = do
   -- "archlinux/aur-helper.tar" %> \out -> do
   --   need ["archlinux/aur-helper" </> dirFile]
   --   tar nonrootUid nonrootGid out
-  cache @"archlinux/aur-helper" $ do
+  store @"archlinux/aur-helper" $ do
     need [?key </> dirFile]
     tar (nonrootUid, nonrootGid) ?key
 
@@ -310,7 +310,7 @@ archlinuxImage = do
         |Server = https://mirrors.cat.net/archlinux/$repo/os/$arch
         |]
 
-  cache @"archlinux/etc" $ do
+  store @"archlinux/etc" $ do
     need . fmap ("archlinux/etc" </>) $
       [ "locale.gen"
       , "sudoers"
@@ -338,7 +338,7 @@ pacmanSetup = do
 
   -- "pacman/db.tar" %> \out -> do
   --   need ["pacman/db" </> dirFile]
-  cache @"pacman/db" $ do
+  store @"pacman/db" $ do
     need [?key </> dirFile]
     tar rootOwn ?key
 
