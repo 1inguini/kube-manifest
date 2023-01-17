@@ -36,10 +36,12 @@ import Development.Shake (
   RuleResult,
   Rules,
   addTarget,
+  copyFile',
   need,
   phonys,
   putInfo,
   runAfter,
+  withTempDir,
  )
 import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
 import Development.Shake.Rule (
@@ -183,17 +185,17 @@ dockerFrom ::
   [String] ->
   ((?container :: ContainerId) => Action a) ->
   Action a
-dockerFrom base opt act = do
+dockerFrom base opt act = withTempDir $ \tmp -> do
   let ?proc = proc
   let init = "busybox/busybox"
-  need [init]
+  copyFile' init $ tmp </> "sh"
   container <-
     fmap (head . lines . cs) . readProcessStdout_ . docker $
       [ "run"
       , "--detach"
       , "-t"
-      , "--volume=" <> ?shakeDir </> init <> ":/sh"
-      , "--entrypoint=/sh"
+      , "--volume=" <> tmp <> ":/tmp"
+      , "--entrypoint=/tmp/sh"
       ]
         <> opt
         <> [show base]
