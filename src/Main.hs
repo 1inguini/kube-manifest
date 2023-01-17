@@ -46,6 +46,7 @@ import Development.Shake (
   ),
   actionCatch,
   addOracleCache,
+  addTarget,
   copyFile',
   need,
   parallel,
@@ -57,6 +58,7 @@ import Development.Shake (
   shakeArgsOptionsWith,
   shakeOptions,
   want,
+  withoutTargets,
   writeFile',
   (%>),
   (&%>),
@@ -90,7 +92,7 @@ import System.Directory (
   setCurrentDirectory,
  )
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath (addTrailingPathSeparator, takeDirectory, (</>))
 import System.Posix (CMode (CMode), setFileCreationMask)
 import System.Posix.Files (setFileCreationMask)
 import System.Process.Typed (
@@ -223,16 +225,18 @@ dirFile = ".ls"
 
 infix 1 `dir`
 dir :: (?shakeDir :: FilePath) => FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
-dir pat act =
-  pat </> dirFile %> \out ->
-    let ?dir = ?shakeDir </> takeDirectory out
-     in do
-          act
-          ls <-
-            filterM (\file -> (file /= dirFile &&) <$> liftIO (Sys.doesFileExist $ ?dir </> file))
-              =<< listDirectoryRecursive ?dir
-          produces $ (?dir </>) <$> ls
-          writeFile' out $ unlines ls
+dir pat act = do
+  phony (addTrailingPathSeparator pat) $ need [pat </> dirFile]
+  withoutTargets $
+    pat </> dirFile %> \out ->
+      let ?dir = ?shakeDir </> takeDirectory out
+       in do
+            act
+            ls <-
+              filterM (\file -> (file /= dirFile &&) <$> liftIO (Sys.doesFileExist $ ?dir </> file))
+                =<< listDirectoryRecursive ?dir
+            produces $ (?dir </>) <$> ls
+            writeFile' out $ unlines ls
 
 parallel_ :: [Action a] -> Action ()
 parallel_ = void . parallel
@@ -314,28 +318,16 @@ latest :: ImageTag
 latest = ImageTag "latest"
 
 infix 1 `image`
-infix 1 `imageArbitaryTags`
+image :: ImageRepo -> ((?imageName :: ImageName) => Action ()) -> Rules ()
+image repo act = do
+  addTarget $ view #repo repo
+  addTarget . show $ ImageName (repo, latest)
 
-image :: ImageName -> ((?imageName :: ImageName) => Action ()) -> Rules ()
-image name@(ImageName (repo, tag)) act = do
-  let need = needImage name
-  phony (show name) need
-  when (tag == latest) $ phony (view #repo repo) need
-  addUserRule $
-    ImageRule
-      ( \i ->
-          if name == i
-            then Just $ let ?imageName = name in act
-            else Nothing
-      )
-
-imageArbitaryTags :: ImageRepo -> ((?imageName :: ImageName) => Action ()) -> Rules ()
-imageArbitaryTags repo act = do
   phonys $ \name -> do
     colonTag <- List.stripPrefix (view #repo repo) name
     let tag = case colonTag of
-          "" -> pure latest
-          ':' : tag -> pure $ ImageTag tag
+          "" -> Just latest
+          ':' : tag -> Just $ ImageTag tag
           _ -> Nothing
     needImage . ImageName . (,) repo <$> tag
 
@@ -343,21 +335,22 @@ imageArbitaryTags repo act = do
     name@(ImageName (r, _)) | r == repo -> Just $ let ?imageName = name in act
     _ -> Nothing
 
+addTaggedImageTarget :: ImageName -> Rules ()
+addTaggedImageTarget = addTarget . show
+
 nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
-  phony "nonroot" $ do
+  ImageRepo (cs Util.registry </> "nonroot") `image` do
     let pause = "s6-portable-utils/bin/s6-pause"
     need ["nonroot/rootfs.tar", pause]
     container <-
       fmap (init . cs) . readProcessStdout_ . docker . words $
         "run --detach --volume=" <> pause <> ":/pause --entrypoint=/pause" <:> cs Util.registry </> "scratch"
-    traverse_
-      (runProcess_ . docker)
-      [ words $ "cp nonroot.tar" <:> container <> ":/"
-      , ["commit", "--change", "ENTRYPOINT /bin/sh", container, cs Util.registry </> "nonroot"]
-      , words $ "stop --time=0" <:> container
-      , words $ "rm" <:> container
-      ]
+    let runDocker = runProcess_ . docker
+    runDocker . words $ "cp nonroot.tar" <:> container <> ":/"
+    runDocker ["commit", "--change", "ENTRYPOINT /bin/sh", container, show ?imageName]
+    runDocker . words $ "stop --time=0" <:> container
+    runDocker . words $ "rm" <:> container
 
   "nonroot/rootfs.tar" %> \out -> do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
@@ -418,70 +411,72 @@ s6PortableUtils = do
   let version = "v2.2.5.0"
   let s6 = "s6-portabl-utils"
 
-  ((s6 </> "bin") </>)
-    <$> [ "s6-basename"
-        , "s6-cat"
-        , "s6-chmod"
-        , "s6-chown"
-        , "s6-clock"
-        , "s6-cut"
-        , "s6-dirname"
-        , "s6-dumpenv"
-        , "s6-echo"
-        , "s6-env"
-        , "s6-expr"
-        , "s6-false"
-        , "s6-format-filter"
-        , "s6-grep"
-        , "s6-head"
-        , "s6-hiercopy"
-        , "s6-linkname"
-        , "s6-ln"
-        , "s6-ls"
-        , "s6-maximumtime"
-        , "s6-mkdir"
-        , "s6-mkfifo"
-        , "s6-nice"
-        , "s6-nuke"
-        , "s6-pause"
-        , "s6-printenv"
-        , "s6-quote"
-        , "s6-quote-filter"
-        , "s6-rename"
-        , "s6-rmrf"
-        , "s6-seq"
-        , "s6-sleep"
-        , "s6-sort"
-        , "s6-sync"
-        , "s6-tai64ndiff"
-        , "s6-tail"
-        , "s6-test"
-        , "s6-touch"
-        , "s6-true"
-        , "s6-uniquename"
-        , "s6-unquote"
-        , "s6-unquote-filter"
-        , "s6-update-symlinks"
-        , "seekablepipe"
-        ]
-    &%> \outs@(out : _) -> do
-      gitClone "https://github.com/skarnet/s6-portable-utils.git" version $ s6 </> "src"
-      need ["musl/lib" </> dirFile, "skalibs/lib" </> dirFile]
-      runProcess_ $
-        setWorkingDir (s6 </> "src") $
-          proc
-            "./configure"
-            [ "--bindir=" <> ?shakeDir </> takeDirectory out
-            , "--enable-static-libc"
-            , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
-            , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
-            , "--with-libs=" <> ?shakeDir </> "musl/lib"
-            ]
+  addTarget $ s6 </> "bin/*"
+  withoutTargets $
+    ((s6 </> "bin") </>)
+      <$> [ "s6-basename"
+          , "s6-cat"
+          , "s6-chmod"
+          , "s6-chown"
+          , "s6-clock"
+          , "s6-cut"
+          , "s6-dirname"
+          , "s6-dumpenv"
+          , "s6-echo"
+          , "s6-env"
+          , "s6-expr"
+          , "s6-false"
+          , "s6-format-filter"
+          , "s6-grep"
+          , "s6-head"
+          , "s6-hiercopy"
+          , "s6-linkname"
+          , "s6-ln"
+          , "s6-ls"
+          , "s6-maximumtime"
+          , "s6-mkdir"
+          , "s6-mkfifo"
+          , "s6-nice"
+          , "s6-nuke"
+          , "s6-pause"
+          , "s6-printenv"
+          , "s6-quote"
+          , "s6-quote-filter"
+          , "s6-rename"
+          , "s6-rmrf"
+          , "s6-seq"
+          , "s6-sleep"
+          , "s6-sort"
+          , "s6-sync"
+          , "s6-tai64ndiff"
+          , "s6-tail"
+          , "s6-test"
+          , "s6-touch"
+          , "s6-true"
+          , "s6-uniquename"
+          , "s6-unquote"
+          , "s6-unquote-filter"
+          , "s6-update-symlinks"
+          , "seekablepipe"
+          ]
+      &%> \outs@(out : _) -> do
+        gitClone "https://github.com/skarnet/s6-portable-utils.git" version $ s6 </> "src"
+        need ["musl/lib" </> dirFile, "skalibs/lib" </> dirFile]
+        runProcess_ $
+          setWorkingDir (s6 </> "src") $
+            proc
+              "./configure"
+              [ "--bindir=" <> ?shakeDir </> takeDirectory out
+              , "--enable-static-libc"
+              , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
+              , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
+              , "--with-libs=" <> ?shakeDir </> "musl/lib"
+              ]
 
-      let make = runProcess_ . setWorkingDir (s6 </> "src") . proc "make" . (: [])
-      make "all"
-      make "strip"
-      make "install-bin"
+        let make = runProcess_ . setWorkingDir (s6 </> "src") . proc "make" . (: [])
+        make "all"
+        make "strip"
+        make "install-bin"
 
 rules :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 rules = do
