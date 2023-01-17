@@ -157,10 +157,10 @@ runDocker = runProcess_ . docker
 
 dockerCopy ::
   (?proc :: String -> [String] -> ProcessConfig stdin stdout stderr, ?container :: ContainerId) =>
-  ByteString.Lazy.ByteString ->
   FilePath ->
+  ByteString.Lazy.ByteString ->
   Action ()
-dockerCopy tar dir = do
+dockerCopy dir tar = do
   -- putInfo $ "`docker cp` from" <:> tarFile
   -- need [tarFile]
   -- tar <- liftIO $ ByteString.Lazy.readFile tarFile
