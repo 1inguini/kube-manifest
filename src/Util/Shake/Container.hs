@@ -8,16 +8,16 @@ module Util.Shake.Container (
   ImageTag (..),
   addContainerImageRule,
   addTaggedImageTarget,
-  docker,
-  dockerCommit,
-  dockerCopy,
-  dockerFrom,
   dockerIo,
-  dockerPushEnd,
   image,
   latest,
   needImage,
   needImages,
+  podman,
+  podmanCommit,
+  podmanCopy,
+  podmanFrom,
+  podmanPushEnd,
   registry,
   runDocker,
 ) where
@@ -154,52 +154,52 @@ image repo act = do
 addTaggedImageTarget :: ImageName -> Rules ()
 addTaggedImageTarget = addTarget . show
 
-docker :: String
-docker = "podman"
+podman :: String
+podman = "podman"
 runDocker :: (CmdResult r, ?opts :: [CmdOption]) => [String] -> Action r
-runDocker = runProg . (docker :)
+runDocker = runProg . (podman :)
 
-dockerCopy ::
+podmanCopy ::
   (?opts :: [CmdOption], ?container :: ContainerId) =>
   FilePath ->
   FilePath ->
   Action ()
-dockerCopy tarFile dir = do
+podmanCopy tarFile dir = do
   need [tarFile]
   tar <- liftIO $ ByteString.Lazy.readFile tarFile
-  putInfo $ "`docker cp` from" <:> tarFile
+  putInfo $ "`podman cp` from" <:> tarFile
   let ?opts = StdinBS tar : BinaryPipes : ?opts
   runDocker @() ["cp", "--archive=false", "--overwrite=true", "-", ?container <> ":" <> dir]
-  putInfo $ "done: `docker cp` from" <:> tarFile
+  putInfo $ "done: `podman cp` from" <:> tarFile
 
-dockerCommit ::
+podmanCommit ::
   ( ?opts :: [CmdOption]
   , ?imageName :: ImageName
   , ?container :: ContainerId
   ) =>
   [ContainerfileCommand] ->
   Action ()
-dockerCommit commands =
+podmanCommit commands =
   runDocker $
     ["commit", "--include-volumes=false"]
       <> concatMap (("--change" :) . (: [])) commands
       <> [?container, show ?imageName]
 
-dockerPushEnd :: (?opts :: [CmdOption], ?imageName :: ImageName, ?container :: ContainerId) => Action ()
-dockerPushEnd = do
-  need ["docker/login"]
-  -- runDocker ["push", show ?imageName]
+podmanPushEnd :: (?opts :: [CmdOption], ?imageName :: ImageName, ?container :: ContainerId) => Action ()
+podmanPushEnd = do
+  need ["podman/login"]
+  -- runDocker @() ["push", show ?imageName]
   runAfter $ do
-    callProcess docker . words $ "stop --time=0" <:> ?container
-    callProcess docker . words $ "rm" <:> ?container
+    callProcess podman . words $ "stop --time=0" <:> ?container
+    callProcess podman . words $ "rm" <:> ?container
 
-dockerFrom ::
-  (?opts :: [CmdOption], ?shakeDir :: FilePath) =>
+podmanFrom ::
+  (?opts :: [CmdOption]) =>
   ImageName ->
   [String] ->
   ((?container :: ContainerId, ?init :: String) => Action a) ->
   Action a
-dockerFrom base opt act = withTempDir $ \tmp -> do
+podmanFrom base opt act = withTempDir $ \tmp -> do
   let
     init = "busybox/busybox"
     cmd = takeFileName init

@@ -24,17 +24,18 @@ import Util.Shake.Container (
   ImageName (ImageName),
   ImageRepo (ImageRepo),
   addContainerImageRule,
-  dockerCommit,
-  dockerCopy,
-  dockerFrom,
-  dockerPushEnd,
   image,
   latest,
+  podmanCommit,
+  podmanCopy,
+  podmanFrom,
+  podmanPushEnd,
   runDocker,
  )
 import qualified Util.Shake.Container as Image
 
 import Control.Exception.Safe (finally)
+import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
@@ -154,7 +155,7 @@ import Text.Heredoc (str)
 --                     _ -> mempty
 --              )
 --     putStrLn $ "# writing to: " <> path
---     ( if path `elem` written
+--     ( if path `elehere, m` written
 --         then ByteString.appendFile path . ("---\n" <>)
 --         else ByteString.writeFile path
 --       )
@@ -170,10 +171,10 @@ import Text.Heredoc (str)
 nonrootImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   Image.registry "nonroot" `image` do
-    ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `dockerFrom` [] $ do
-      dockerCopy "nonroot/rootfs.tar" "/"
-      dockerCommit ["ENTRYPOINT /bin/sh"]
-      dockerPushEnd
+    ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `podmanFrom` [] $ do
+      podmanCopy "nonroot/rootfs.tar" "/"
+      podmanCommit ["ENTRYPOINT /bin/sh"]
+      podmanPushEnd
 
   "nonroot/rootfs.tar" %> \out -> do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
@@ -197,30 +198,30 @@ nonrootImage = do
 archlinuxImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
   Image.registry "archlinux" `image` do
-    ImageName (Image.dockerIo "library/archlinux", latest) `dockerFrom` [] $ do
+    ImageName (Image.dockerIo "library/archlinux", latest) `podmanFrom` [] $ do
       let
-        dockerExec :: [String] -> Action ()
-        dockerExec = runDocker . (words "exec -i" <>)
+        podmanExec :: [String] -> Action ()
+        podmanExec = runDocker . (words "exec -i" <>)
         rootExec, nonrootExec :: [String] -> [String] -> Action ()
-        rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
-        nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
+        rootExec opt = podmanExec . (opt <>) . (["--user=root", ?container] <>)
+        nonrootExec opt = podmanExec . (opt <>) . (["--user=nonroot", ?container] <>)
       parallel_
-        [ dockerCopy "archlinux/etc.tar" "/etc"
+        [ podmanCopy "archlinux/etc.tar" "/etc"
         , do
             rootExec [] [?init, "mkdir", "-p", "/var/lib/pacman/sync"]
-            dockerCopy "pacman/db/sync.tar" "/var/lib/pacman/sync"
+            podmanCopy "pacman/db/sync.tar" "/var/lib/pacman/sync"
         ]
       rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
       parallel_
         [ do
-            dockerCopy "archlinux/aur-helper.tar" "/home/nonroot/aur-helper"
+            podmanCopy "archlinux/aur-helper.tar" "/home/nonroot/aur-helper"
             nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
         , rootExec [] ["locale-gen"]
         ]
       src <- fmap lines . readFile' $ "archlinux/aur-helper" </> dirFile
       current <- listDirectoryRecursive "archlinux/aur-helper"
       produces $ filter (`elem` (dirFile : src)) current
-      dockerPushEnd
+      podmanPushEnd
 
   "archlinux/aur-helper/" `dir` do
     gitClone "https://aur.archlinux.org/yay-bin.git" "master" ?dir
@@ -268,9 +269,9 @@ pacmanSetup = do
     need ["pacman/db" </> dirFile]
     tar rootOwn out
 
-dockerSetup :: (?opts :: [CmdOption]) => Rules ()
-dockerSetup = do
-  phony "docker/login" $
+podmanSetup :: (?opts :: [CmdOption]) => Rules ()
+podmanSetup = do
+  phony "podman/login" $
     runDocker ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
 
 musl :: (?opts :: [CmdOption], ?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
@@ -389,7 +390,7 @@ rules = do
   addContainerImageRule
 
   pacmanSetup
-  dockerSetup
+  podmanSetup
 
   musl
   skalibs
@@ -401,7 +402,7 @@ rules = do
 
 main :: IO ()
 main = do
-  setFileCreationMask 0o022
+  void $ setFileCreationMask 0o022
   projectRoot <- liftIO $ makeAbsolute =<< getCurrentDirectory
   let ?projectRoot = projectRoot
       ?shakeDir = projectRoot </> shakeFiles shakeOptions
