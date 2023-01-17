@@ -409,7 +409,7 @@ skalibs =
 s6PortableUtils :: (?shakeDir :: FilePath) => Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
-  let s6 = "s6-portabl-utils"
+  let s6 = "s6-portable-utils"
 
   addTarget $ s6 </> "bin/*"
   withoutTargets $
