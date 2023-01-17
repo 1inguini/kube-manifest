@@ -28,12 +28,14 @@ import qualified Data.Text as Texs
 import qualified Data.Yaml as Yaml (decodeAllThrow, encode)
 import Development.Shake (
   Action,
+  Change (ChangeModtimeAndDigest),
   FilePattern,
   Lint (LintBasic),
   RuleResult,
   Rules,
   ShakeOptions (
     ShakeOptions,
+    shakeChange,
     shakeColor,
     shakeFiles,
     shakeLint,
@@ -92,7 +94,7 @@ import System.Directory (
   setCurrentDirectory,
  )
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
-import System.FilePath (addTrailingPathSeparator, takeDirectory, (</>))
+import System.FilePath (addTrailingPathSeparator, dropTrailingPathSeparator, takeDirectory, (</>))
 import System.Posix (CMode (CMode), setFileCreationMask)
 import System.Posix.Files (setFileCreationMask)
 import System.Process.Typed (
@@ -342,7 +344,7 @@ nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   ImageRepo (cs Util.registry </> "nonroot") `image` do
     let pause = "s6-portable-utils/bin/s6-pause"
-    need ["nonroot/rootfs.tar", pause]
+    need ["docker/login", "nonroot/rootfs.tar", pause]
     container <-
       fmap (head . lines . cs) . readProcessStdout_ . docker $
         [ "run"
@@ -352,10 +354,15 @@ nonrootImage = do
         , cs Util.registry </> "scratch"
         ]
     let runDocker = runProcess_ . docker
-    runDocker . words $ "cp nonroot.tar" <:> container <> ":/"
+    runDocker . words $ "cp nonroot/rootfs.tar" <:> container <> ":/"
     runDocker ["commit", "--change", "ENTRYPOINT /bin/sh", container, show ?imageName]
-    runDocker . words $ "stop --time=0" <:> container
-    runDocker . words $ "rm" <:> container
+
+    parallel_
+      [ runDocker ["push", show ?imageName]
+      , do
+          runDocker . words $ "stop --time=0" <:> container
+          runDocker . words $ "rm" <:> container
+      ]
 
   "nonroot/rootfs.tar" %> \out -> do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
@@ -384,6 +391,11 @@ pacmanSetup = do
   "pacman/db/" `dir` do
     need ["pacman/pacman.conf"]
     runProcess_ . aur . words $ "-Sy"
+
+dockerSetup :: Rules ()
+dockerSetup = do
+  phony "docker/login" . runProcess_ $
+    docker ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
 
 -- producedDirectory "pacman/db/sync"
 -- writeFile' out mempty
@@ -488,6 +500,8 @@ rules = do
   addContainerImageRule
 
   pacmanSetup
+  dockerSetup
+
   nonrootImage
   musl
   skalibs
