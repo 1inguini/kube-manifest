@@ -22,7 +22,8 @@ module Util.Shake.Container (
   runDocker,
 ) where
 
-import Util.Shake (parallel_, (<:>))
+import qualified Util
+import Util.Shake (parallel_, runProg, (<:>))
 
 import Control.Exception.Safe (throwString)
 import Control.Monad (void)
@@ -34,8 +35,12 @@ import qualified Data.List as List
 import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
+  CmdOption (FileStdin),
+  CmdResult,
+  Exit (Exit),
   RuleResult,
   Rules,
+  Stdout (Stdout),
   addTarget,
   copyFile',
   need,
@@ -60,6 +65,7 @@ import Development.Shake.Rule (
  )
 import GHC.Generics (Generic)
 import Optics (view)
+import System.Exit (ExitCode (ExitSuccess))
 import System.FilePath ((</>))
 import System.IO (
   IOMode (ReadMode),
@@ -71,27 +77,6 @@ import System.IO (
   hIsWritable,
   withFile,
  )
-import System.Process.Typed (
-  ExitCode (ExitSuccess),
-  ProcessConfig,
-  byteStringInput,
-  checkExitCode,
-  createPipe,
-  getStdin,
-  proc,
-  readProcessStdout,
-  readProcessStdout_,
-  runProcess,
-  runProcess_,
-  setStdin,
-  startProcess,
-  stopProcess,
-  useHandleClose,
-  useHandleOpen,
-  waitExitCode,
-  withProcessWait,
- )
-import qualified Util
 
 newtype ImageRepo = ImageRepo {repo :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
@@ -106,22 +91,19 @@ newtype Image = ImageId {id :: ByteString}
 newtype ImageRule = ImageRule {rule :: ImageName -> Maybe (Action ())}
 type instance RuleResult ImageName = Image
 
-addContainerImageRule :: Rules ()
+addContainerImageRule :: (?opts :: [CmdOption]) => Rules ()
 addContainerImageRule = addBuiltinRule noLint imageIdentity run
  where
   imageIdentity :: BuiltinIdentity ImageName Image
   imageIdentity _ = Just . view #id
 
   newStore :: ImageName -> Action (Maybe ByteString)
-  newStore name =
-    do
-      let ?proc = proc
-      (exitCode, stdout) <-
-        readProcessStdout . docker $
-          words "images --no-trunc --quiet" <> [show name]
-      case (exitCode, ByteString.split (fromIntegral $ fromEnum '\n') $ cs stdout) of
-        (ExitSuccess, newStore : _) -> pure $ Just newStore
-        _ -> pure Nothing
+  newStore name = do
+    (Exit exitCode, Stdout stdout) <-
+      runDocker $ words "images --no-trunc --quiet" <> [show name]
+    case (exitCode, ByteString.split (fromIntegral $ fromEnum '\n') stdout) of
+      (ExitSuccess, newStore : _) -> pure $ Just newStore
+      _ -> pure Nothing
 
   run :: BuiltinRun ImageName Image
   run key oldStore RunDependenciesChanged = do
@@ -181,64 +163,54 @@ image repo act = do
 addTaggedImageTarget :: ImageName -> Rules ()
 addTaggedImageTarget = addTarget . show
 
-docker :: (?proc :: String -> [String] -> a) => [String] -> a
-docker = ?proc "podman"
-runDocker ::
-  (MonadIO m, ?proc :: String -> [String] -> ProcessConfig stdin stdout stderr) => [String] -> m ()
-runDocker = runProcess_ . docker
+docker :: String
+docker = "podman"
+runDocker :: (CmdResult r, ?opts :: [CmdOption]) => [String] -> Action r
+runDocker = runProg . (docker :)
 
 dockerCopy ::
-  (?proc :: String -> [String] -> ProcessConfig stdin stdout stderr, ?container :: ContainerId) =>
+  (?opts :: [CmdOption], ?container :: ContainerId) =>
   FilePath ->
   FilePath ->
   Action ()
 dockerCopy tarFile dir = do
   putInfo $ "`docker cp` from" <:> tarFile <:> "to" <:> dir
   need [tarFile]
-  tar <- liftIO $ ByteString.readFile tarFile
-  let ?proc = \command -> setStdin createPipe . ?proc command
-  p <- startProcess $ docker ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
-  let h = getStdin p
-  liftIO $ ByteString.hPut h tar
-  stopProcess p
-  liftIO $ hClose h
+  let ?opts = FileStdin tarFile : ?opts
+  runDocker @() ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
   putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
 
 dockerCommit ::
-  ( MonadIO m
-  , ?proc :: String -> [String] -> ProcessConfig stdin stdout stderr
+  ( ?opts :: [CmdOption]
   , ?imageName :: ImageName
   , ?container :: ContainerId
   ) =>
   [ContainerfileCommand] ->
-  m ()
+  Action ()
 dockerCommit commands =
   runDocker $
     ["commit", "--include-volumes=false"]
       <> concatMap (("--change" :) . (: [])) commands
       <> [?container, show ?imageName]
 
-dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
+dockerPushEnd :: (?opts :: [CmdOption], ?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = do
-  let ?proc = proc
   need ["docker/login"]
-  runAfter $ do
-    -- runDocker ["push", show ?imageName]
-    runDocker . words $ "stop --time=0" <:> ?container
-    runDocker . words $ "rm" <:> ?container
+  -- runDocker ["push", show ?imageName]
+  runDocker @() . words $ "stop --time=0" <:> ?container
+  runDocker @() . words $ "rm" <:> ?container
 
 dockerFrom ::
-  (?shakeDir :: FilePath) =>
+  (?opts :: [CmdOption], ?shakeDir :: FilePath) =>
   ImageName ->
   [String] ->
   ((?container :: ContainerId) => Action a) ->
   Action a
 dockerFrom base opt act = withTempDir $ \tmp -> do
-  let ?proc = proc
   let init = "busybox/busybox"
   copyFile' init $ tmp </> "sh"
-  container <-
-    fmap (head . lines . cs) . readProcessStdout_ . docker $
+  Stdout container <-
+    runDocker $
       [ "run"
       , "--detach"
       , "-t"
@@ -247,5 +219,5 @@ dockerFrom base opt act = withTempDir $ \tmp -> do
       ]
         <> opt
         <> [show base]
-  let ?container = container
+  let ?container = head $ lines container
    in act

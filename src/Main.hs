@@ -13,7 +13,8 @@ import Util.Shake (
   mkdir,
   pacman,
   parallel_,
-  runProc,
+  runProg,
+  runProg_,
   tar,
   (<:>),
  )
@@ -56,6 +57,7 @@ import qualified Data.Yaml as Yaml (decodeAllThrow, encode)
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
+  CmdOption (Cwd),
   FilePattern,
   Lint (LintBasic),
   RuleResult,
@@ -126,16 +128,21 @@ import System.Directory (
   setCurrentDirectory,
  )
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
-import System.FilePath (addTrailingPathSeparator, dropExtension, dropTrailingPathSeparator, takeDirectory, takeExtension, takeFileName, (</>))
-import System.Posix (getRealGroupID, getRealUserID, ownerExecuteMode, setFileCreationMask, setFileMode)
-import System.Process.Typed (
-  ExitCode (ExitSuccess),
-  proc,
-  readProcessStdout,
-  readProcessStdout_,
-  readProcess_,
-  runProcess_,
-  setWorkingDir,
+import System.FilePath (
+  addTrailingPathSeparator,
+  dropExtension,
+  dropTrailingPathSeparator,
+  takeDirectory,
+  takeExtension,
+  takeFileName,
+  (</>),
+ )
+import System.Posix (
+  getRealGroupID,
+  getRealUserID,
+  ownerExecuteMode,
+  setFileCreationMask,
+  setFileMode,
  )
 import Text.Heredoc (here, str)
 
@@ -219,9 +226,8 @@ import Text.Heredoc (here, str)
 -- main :: IO ()
 -- main = generate
 
-nonrootImage :: (?shakeDir :: FilePath) => Rules ()
+nonrootImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
-  let ?proc = proc
   Image.registry "nonroot" `image` do
     ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `dockerFrom` [] $ do
       dockerCopy "nonroot/rootfs.tar" "/"
@@ -247,9 +253,8 @@ nonrootImage = do
       , "nonroot:x:" <> show nonrootGid <> ":"
       ]
 
-archlinuxImage :: (?shakeDir :: FilePath) => Rules ()
+archlinuxImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
-  let ?proc = proc
   Image.registry "archlinux" `image` do
     ImageName (Image.dockerIo "library/archlinux", latest) `dockerFrom` [] $ do
       let
@@ -307,51 +312,49 @@ archlinuxImage = do
       ]
     tar rootOwn out
 
-pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+pacmanSetup :: (?opts :: [CmdOption], ?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
-  let ?proc = proc
   "pacman/pacman.conf" %> \out -> do
     copyFile' (?projectRoot </> "src/pacman.conf") out
 
   "pacman/db/" `dir` do
     need ["pacman/pacman.conf"]
-    runProcess_ . aur . words $ "-Sy"
+    aur . words $ "-Sy"
 
   "pacman/db/sync.tar" %> \out -> do
     need ["pacman/db" </> dirFile]
     tar rootOwn out
 
-dockerSetup :: Rules ()
+dockerSetup :: (?opts :: [CmdOption]) => Rules ()
 dockerSetup = do
-  let ?proc = proc
-  phony "docker/login" . runProcess_ $
-    docker ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
+  phony "docker/login" $
+    runDocker ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
 
-musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+musl :: (?opts :: [CmdOption], ?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl =
   "musl/lib/" `dir` do
-    let ?proc = proc
     need ["pacman/db" </> dirFile]
     mkdir "musl/rootfs"
-    runProcess_ $ aurInstall ["--root=musl/rootfs", "musl"]
-    runProc $ "sudo mv musl/rootfs/usr/lib/musl/lib/*" <:> "-t musl/lib"
+    aurInstall @() ["--root=musl/rootfs", "musl"]
+    runProg $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
 
-skalibs :: (?shakeDir :: FilePath) => Rules ()
+skalibs :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 skalibs =
   "skalibs/lib/" `dir` do
     let version = "v2.12.0.1"
     gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
 
-    let run exe = runProcess_ . setWorkingDir "skalibs/src" . proc exe
-    run "./configure" $ words "--disable-shared --libdir=../lib --sysdepdir=../sysdeps"
-    run "make" ["all"]
-    run "make" ["strip"]
+    let ?opts = Cwd "skalibs/src" : ?opts
+    runProg_ $ words "./configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
+    let make = runProg_ . ("make" :) . (: [])
+    make "all"
+    make "strip"
     parallel_
-      [ run "make" ["install-lib"]
-      , run "make" ["install-sysdeps"]
+      [ make "install-lib"
+      , make "install-sysdeps"
       ]
 
-s6PortableUtils :: (?shakeDir :: FilePath) => Rules ()
+s6PortableUtils :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
   let s6 = "s6-portable-utils"
@@ -405,40 +408,41 @@ s6PortableUtils = do
     &%> \outs@(out : _) -> do
       gitClone "https://github.com/skarnet/s6-portable-utils.git" version $ s6 </> "src"
       need ["musl/lib" </> dirFile, "skalibs/lib" </> dirFile]
-      runProcess_ $
-        setWorkingDir (s6 </> "src") $
-          proc
-            "./configure"
-            [ "--bindir=" <> ?shakeDir </> takeDirectory out
-            , "--enable-static-libc"
-            , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
-            , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
-            , "--with-libs=" <> ?shakeDir </> "musl/lib"
-            ]
-
-      let make = runProcess_ . setWorkingDir (s6 </> "src") . proc "make" . (: [])
+      let ?opts = Cwd (s6 </> "src") : ?opts
+      runProg_
+        [ "./configure"
+        , "--bindir=" <> ?shakeDir </> takeDirectory out
+        , "--enable-static-libc"
+        , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
+        , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
+        , "--with-libs=" <> ?shakeDir </> "musl/lib"
+        ]
+      let make = runProg . ("make" :) . (: [])
       make "all"
       make "strip"
       make "install-bin"
 
-busybox :: Rules ()
-busybox =
-  let version = "1.35.0"
-      download command src =
-        ("busybox" </> command) %> \out -> do
-          runProcess_ . proc "curl" $
-            [ "-L"
-            , "https://busybox.net/downloads/binaries" </> version <> "-x86_64-linux-musl" </> src
-            , "-o"
-            , out
-            ]
-          liftIO $ setFileMode out 0o755
-      singleCommand command =
-        download command $ "busybox_" <> fmap Char.toUpper command
-   in download "busybox" "busybox" *> traverse_ singleCommand ["cp"]
+busybox :: (?opts :: [CmdOption]) => Rules ()
+busybox = download "busybox" "busybox" *> traverse_ singleApplet applets
+ where
+  version = "1.35.0"
+  applets = ["cp"]
+  download applet src =
+    ("busybox" </> applet) %> \out -> do
+      runProg_
+        [ "curl"
+        , "-L"
+        , "https://busybox.net/downloads/binaries" </> version <> "-x86_64-linux-musl" </> src
+        , "-o"
+        , out
+        ]
+      liftIO $ setFileMode out 0o755
+  singleApplet applet =
+    download applet $ "busybox_" <> fmap Char.toUpper applet
 
 rules :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 rules = do
+  let ?opts = []
   addContainerImageRule
 
   pacmanSetup

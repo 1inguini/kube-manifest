@@ -94,7 +94,6 @@ executable kube-manifest
     , template-haskell
     , text
     , time
-    , typed-process
     , unix
     , unordered-containers
     , vector

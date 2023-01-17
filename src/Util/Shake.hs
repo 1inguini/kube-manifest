@@ -10,11 +10,12 @@ module Util.Shake (
   pacman,
   parallel_,
   producedDirectory,
-  runProc,
+  runProg,
+  runProg_,
   tar,
 ) where
 
-import Control.Exception.Safe (displayException)
+import Control.Exception.Safe (displayException, throwString)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (filterM, void)
@@ -22,10 +23,13 @@ import Data.ByteString (ByteString)
 import Data.String (IsString (fromString))
 import Development.Shake (
   Action,
+  CmdOption,
+  CmdResult,
   FilePattern,
   RuleResult,
   Rules,
   actionCatch,
+  command,
   need,
   newCache,
   parallel,
@@ -42,7 +46,6 @@ import System.Directory (createDirectoryIfMissing, listDirectory, removeDirector
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (addTrailingPathSeparator, dropExtension, takeDirectory, (</>))
 import System.Posix (GroupID, UserID)
-import System.Process.Typed (ProcessConfig, proc, runProcess_)
 
 instance Exceptions.MonadThrow Action where
   throwM err = do
@@ -53,9 +56,6 @@ instance Exceptions.MonadCatch Action where
 instance Exceptions.MonadThrow Rules where
   throwM = liftIO . Exceptions.throwM
 
-runProc :: MonadIO m => String -> m ()
-runProc = runProcess_ . fromString
-
 (<:>) :: String -> String -> String
 x <:> y = x <> " " <> y
 
@@ -63,18 +63,25 @@ gitClone :: String -> String -> FilePath -> Action ()
 gitClone repo tag dst = do
   mkdir dst
   liftIO $ removeDirectoryRecursive dst
-  runProc $ "git clone --branch=" <> tag <:> repo <:> dst
+  let ?opts = []
+  runProg ["git", "clone", "--branch=" <> tag, repo, dst]
 
-pacOpts :: (?shakeDir :: FilePath) => [String]
-pacOpts =
+runProg :: (CmdResult r, ?opts :: [CmdOption]) => [String] -> Action r
+runProg (prog : args) = command ?opts prog args
+runProg [] = throwString "runProg: empty"
+
+runProg_ :: (?opts :: [CmdOption]) => [String] -> Action ()
+runProg_ = runProg
+
+pacConf :: (?shakeDir :: FilePath) => [String]
+pacConf =
   [ "--config=" <> ?shakeDir </> "pacman/pacman.conf"
   , "--dbpath=" <> ?shakeDir </> "pacman/db"
-  , "--noconfirm"
   ]
-pacman, aur :: (?shakeDir :: FilePath, ?proc :: String -> [String] -> a) => [String] -> a
-pacman = ?proc "pacman" . (pacOpts <>)
-aur = ?proc "yay" . ((pacOpts <> ["--noprovides"]) <>)
-aurInstall :: (?shakeDir :: FilePath, ?proc :: String -> [String] -> a) => [String] -> a
+pacman, aur :: (CmdResult r, ?shakeDir :: FilePath, ?opts :: [CmdOption]) => [String] -> Action r
+pacman = runProg . (["pacman", "--noconfirm"] <>)
+aur = runProg . (["yay", "--noprovides", "--noconfirm"] <>)
+aurInstall :: (CmdResult r, ?shakeDir :: FilePath, ?opts :: [CmdOption]) => [String] -> Action r
 aurInstall = aur . (["-S"] <>)
 
 mkdir :: MonadIO m => FilePath -> m ()
@@ -115,10 +122,11 @@ dir pat act = do
             produces $ (?dir </>) <$> ls
             writeFile' out $ unlines ls
 
-tar :: MonadIO m => (UserID, GroupID) -> FilePath -> m ()
+tar :: (?opts :: [CmdOption]) => (UserID, GroupID) -> FilePath -> Action ()
 tar (user, group) out =
-  runProcess_ . proc "tar" $
-    [ "-c"
+  runProg
+    [ "tar"
+    , "-c"
     , "--numeric-owner"
     , "--owner=" <> show user
     , "--group=" <> show group
