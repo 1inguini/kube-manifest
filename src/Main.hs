@@ -24,6 +24,7 @@ import Util.Shake.Container (
   ImageRepo (ImageRepo),
   addContainerImageRule,
   docker,
+  dockerCommit,
   dockerCopy,
   dockerFrom,
   dockerPushEnd,
@@ -224,22 +225,15 @@ nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   let ?proc = proc
   Image.registry "nonroot" `image` do
-    ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `dockerFrom` [] $ do
-      let runDocker = runProcess_ . docker
-      -- runDocker . words $ "cp nonroot/rootfs.tar" <:> ?container <> ":/"
+    ImageName (Image.registry "scratch", latest) `dockerFrom` [] $ do
       askStore @"nonroot/rootfs" >>= dockerCopy "/"
-      runDocker ["commit", "--change", "ENTRYPOINT /bin/sh", ?container, show ?imageName]
+      dockerCommit ["ENTRYPOINT /bin/sh"]
       dockerPushEnd
 
   store @"nonroot/rootfs" $ do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
     parallel_ $ mkdir . ("nonroot/rootfs" </>) <$> ["tmp", "home/nonroot"]
     tar nonrootOwn ?key
-
-  -- "nonroot/rootfs.tar" %> \out -> do
-  --   need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
-  --   parallel_ $ mkdir . ("nonroot/rootfs" </>) <$> ["tmp", "home/nonroot"]
-  --   tar nonrootUid nonrootGid out
 
   writeFile' "nonroot/rootfs/etc/passwd" $
     unlines
@@ -285,9 +279,6 @@ archlinuxImage = do
   "archlinux/aur-helper/" `dir` do
     gitClone "https://aur.archlinux.org/yay-bin.git" "master" ?dir
 
-  -- "archlinux/aur-helper.tar" %> \out -> do
-  --   need ["archlinux/aur-helper" </> dirFile]
-  --   tar nonrootUid nonrootGid out
   store @"archlinux/aur-helper" $ do
     need [?key </> dirFile]
     tar (nonrootUid, nonrootGid) ?key
@@ -318,14 +309,6 @@ archlinuxImage = do
       ]
     tar (rootUid, rootGid) ?key
 
--- "archlinux/etc.tar" %> \out -> do
---   need . fmap ("archlinux/etc" </>) $
---     [ "locale.gen"
---     , "sudoers"
---     , "pacman.d/mirrorlist"
---     ]
---   tar rootUid rootGid out
-
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
   let ?proc = proc
@@ -336,8 +319,6 @@ pacmanSetup = do
     need ["pacman/pacman.conf"]
     runProcess_ . aur . words $ "-Sy"
 
-  -- "pacman/db.tar" %> \out -> do
-  --   need ["pacman/db" </> dirFile]
   store @"pacman/db" $ do
     need [?key </> dirFile]
     tar rootOwn ?key

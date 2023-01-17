@@ -9,6 +9,7 @@ module Util.Shake.Container (
   addContainerImageRule,
   addTaggedImageTarget,
   docker,
+  dockerCommit,
   dockerCopy,
   dockerFrom,
   dockerIo,
@@ -36,10 +37,12 @@ import Development.Shake (
   RuleResult,
   Rules,
   addTarget,
+  copyFile',
   need,
   phonys,
   putInfo,
   runAfter,
+  withTempDir,
  )
 import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
 import Development.Shake.Rule (
@@ -156,10 +159,13 @@ runDocker ::
 runDocker = runProcess_ . docker
 
 dockerCopy ::
-  (?proc :: String -> [String] -> ProcessConfig stdin stdout stderr, ?container :: ContainerId) =>
+  ( MonadIO m
+  , ?proc :: String -> [String] -> ProcessConfig stdin stdout stderr
+  , ?container :: ContainerId
+  ) =>
   FilePath ->
   ByteString.Lazy.ByteString ->
-  Action ()
+  m ()
 dockerCopy dir tar = do
   -- putInfo $ "`docker cp` from" <:> tarFile
   -- need [tarFile]
@@ -168,14 +174,25 @@ dockerCopy dir tar = do
   let ?proc = \command -> setStdin (byteStringInput tar) . proc command
    in runDocker ["cp", "--archive=false", "-", ?container <> ":" <> dir]
 
+dockerCommit ::
+  (MonadIO m, ?imageName :: ImageName, ?container :: ContainerId) => [ContainerfileCommand] -> m ()
+dockerCommit commands =
+  let ?proc = proc
+   in runDocker $
+        ["commit", "--include-volumes=false"]
+          <> concatMap (("--change" :) . (: [])) commands
+          <> [?container, show ?imageName]
+
 dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = do
   let ?proc = proc
   need ["docker/login"]
-  runAfter $ do
-    runDocker ["push", show ?imageName]
-    runDocker . words $ "stop --time=0" <:> ?container
-    runDocker . words $ "rm" <:> ?container
+
+-- TODO: 最後にはpushするように
+-- runAfter $ do
+--   runDocker ["push", show ?imageName]
+--   runDocker . words $ "stop --time=0" <:> ?container
+--   runDocker . words $ "rm" <:> ?container
 
 dockerFrom ::
   (?shakeDir :: FilePath) =>
@@ -183,18 +200,13 @@ dockerFrom ::
   [String] ->
   ((?container :: ContainerId) => Action a) ->
   Action a
-dockerFrom base opt act = do
+dockerFrom base opt act = withTempDir $ \tmp -> do
   let ?proc = proc
   let init = "busybox/busybox"
-  need [init]
+  copyFile' init $ tmp </> "sh"
   container <-
     fmap (head . lines . cs) . readProcessStdout_ . docker $
-      [ "run"
-      , "--detach"
-      , "-t"
-      , "--volume=" <> ?shakeDir </> init <> ":/sh"
-      , "--entrypoint=/sh"
-      ]
+      ["run", "--detach", "-t", "--volume=" <> tmp <> ":/tmp", "--entrypoint=/tmp/sh"]
         <> opt
         <> [show base]
   let ?container = container
