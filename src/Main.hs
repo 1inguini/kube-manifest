@@ -518,7 +518,7 @@ main = do
                 shakeReport <- traverse makeAbsolute shakeReport'
                 shakeLintInside <- traverse makeAbsolute shakeLintInside'
                 shakeLiveFiles <- traverse makeAbsolute shakeLiveFiles'
-                shakeShare <- traverse makeAbsolute shakeShare'
+                shakeShare <- fmap Just . makeAbsolute $ fromMaybe shakeFiles shakeShare'
                 mkdir shakeFiles
                 setCurrentDirectory shakeFiles
                 pure $
