@@ -24,9 +24,11 @@ common option
     NoFieldSelectors
     BinaryLiterals
     DataKinds
+    DeriveGeneric
     DuplicateRecordFields
     FlexibleContexts
     FlexibleInstances
+    GeneralizedNewtypeDeriving
     ImplicitParams
     LambdaCase
     MultiParamTypeClasses
@@ -34,6 +36,7 @@ common option
     OverloadedLabels
     OverloadedStrings
     PartialTypeSignatures
+    QuasiQuotes
     RankNTypes
     ScopedTypeVariables
     StandaloneDeriving
@@ -71,6 +74,7 @@ executable kube-manifest
     , casing
     , containers
     , directory
+    , exceptions
     , file-embed
     , filepath
     , heredoc
