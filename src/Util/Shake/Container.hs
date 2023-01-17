@@ -9,6 +9,7 @@ module Util.Shake.Container (
   addContainerImageRule,
   addTaggedImageTarget,
   docker,
+  dockerCommit,
   dockerCopy,
   dockerFrom,
   dockerIo,
@@ -60,7 +61,36 @@ import Development.Shake.Rule (
 import GHC.Generics (Generic)
 import Optics (view)
 import System.FilePath ((</>))
-import System.Process.Typed (ExitCode (ExitSuccess), ProcessConfig, byteStringInput, proc, readProcessStdout, readProcessStdout_, runProcess, runProcess_, setStdin)
+import System.IO (
+  IOMode (ReadMode),
+  hClose,
+  hFlush,
+  hIsOpen,
+  hIsReadable,
+  hIsSeekable,
+  hIsWritable,
+  withFile,
+ )
+import System.Process.Typed (
+  ExitCode (ExitSuccess),
+  ProcessConfig,
+  byteStringInput,
+  checkExitCode,
+  createPipe,
+  getStdin,
+  proc,
+  readProcessStdout,
+  readProcessStdout_,
+  runProcess,
+  runProcess_,
+  setStdin,
+  startProcess,
+  stopProcess,
+  useHandleClose,
+  useHandleOpen,
+  waitExitCode,
+  withProcessWait,
+ )
 import qualified Util
 
 newtype ImageRepo = ImageRepo {repo :: String}
@@ -159,23 +189,41 @@ runDocker = runProcess_ . docker
 
 dockerCopy ::
   (?proc :: String -> [String] -> ProcessConfig stdin stdout stderr, ?container :: ContainerId) =>
-  ByteString.Lazy.ByteString ->
+  FilePath ->
   FilePath ->
   Action ()
-dockerCopy tar dir = do
-  -- putInfo $ "`docker cp` from" <:> tarFile
-  -- need [tarFile]
-  -- tar <- liftIO $ ByteString.Lazy.readFile tarFile
-  let proc = ?proc
-  let ?proc = \command -> setStdin (byteStringInput tar) . proc command
-   in runDocker ["cp", "--archive=false", "-", ?container <> ":" <> dir]
+dockerCopy tarFile dir = do
+  putInfo $ "`docker cp` from" <:> tarFile <:> "to" <:> dir
+  need [tarFile]
+  tar <- liftIO $ ByteString.readFile tarFile
+  let ?proc = \command -> setStdin createPipe . ?proc command
+  p <- startProcess $ docker ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
+  let h = getStdin p
+  liftIO $ ByteString.hPut h tar
+  stopProcess p
+  liftIO $ hClose h
+  putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
+
+dockerCommit ::
+  ( MonadIO m
+  , ?proc :: String -> [String] -> ProcessConfig stdin stdout stderr
+  , ?imageName :: ImageName
+  , ?container :: ContainerId
+  ) =>
+  [ContainerfileCommand] ->
+  m ()
+dockerCommit commands =
+  runDocker $
+    ["commit", "--include-volumes=false"]
+      <> concatMap (("--change" :) . (: [])) commands
+      <> [?container, show ?imageName]
 
 dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = do
   let ?proc = proc
   need ["docker/login"]
   runAfter $ do
-    runDocker ["push", show ?imageName]
+    -- runDocker ["push", show ?imageName]
     runDocker . words $ "stop --time=0" <:> ?container
     runDocker . words $ "rm" <:> ?container
 

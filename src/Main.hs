@@ -1,12 +1,11 @@
 module Main where
 
 import Manifest (yamls)
-import Util (Yaml, YamlType (..), nonrootGid, nonrootUid, registry, rootGid, rootUid, s)
+import Util (Yaml, YamlType (..), nonrootGid, nonrootOwn, nonrootUid, registry, rootGid, rootOwn, rootUid, s)
 import qualified Util
 import Util.Shake (
   aur,
   aurInstall,
-  cache,
   dir,
   dirFile,
   gitClone,
@@ -23,6 +22,7 @@ import Util.Shake.Container (
   ImageRepo (ImageRepo),
   addContainerImageRule,
   docker,
+  dockerCommit,
   dockerCopy,
   dockerFrom,
   dockerPushEnd,
@@ -224,16 +224,14 @@ nonrootImage = do
   let ?proc = proc
   Image.registry "nonroot" `image` do
     ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `dockerFrom` [] $ do
-      let runDocker = runProcess_ . docker
-      -- runDocker . words $ "cp nonroot/rootfs.tar" <:> ?container <> ":/"
       dockerCopy "nonroot/rootfs.tar" "/"
-      runDocker ["commit", "--change", "ENTRYPOINT /bin/sh", ?container, show ?imageName]
+      dockerCommit ["ENTRYPOINT /bin/sh"]
       dockerPushEnd
 
   "nonroot/rootfs.tar" %> \out -> do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
     parallel_ $ mkdir . ("nonroot/rootfs" </>) <$> ["tmp", "home/nonroot"]
-    tar nonrootUid nonrootGid out
+    tar nonrootOwn out
 
   writeFile' "nonroot/rootfs/etc/passwd" $
     unlines
@@ -262,7 +260,7 @@ archlinuxImage = do
         nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
       parallel_
         [ dockerCopy "archlinux/etc.tar" "/etc/"
-        , dockerCopy "pacman/db.tar" "/var/lib/pacman/"
+        , dockerCopy "pacman/db/sync.tar" "/var/lib/pacman/sync"
         ]
       rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
       parallel_
@@ -281,7 +279,7 @@ archlinuxImage = do
 
   "archlinux/aur-helper.tar" %> \out -> do
     need ["archlinux/aur-helper" </> dirFile]
-    tar nonrootUid nonrootGid out
+    tar nonrootOwn out
 
   writeFile'
     "archlinux/etc/locale.gen"
@@ -307,7 +305,7 @@ archlinuxImage = do
       , "sudoers"
       , "pacman.d/mirrorlist"
       ]
-    tar rootUid rootGid out
+    tar rootOwn out
 
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
@@ -319,9 +317,9 @@ pacmanSetup = do
     need ["pacman/pacman.conf"]
     runProcess_ . aur . words $ "-Sy"
 
-  "pacman/db.tar" %> \out -> do
+  "pacman/db/sync.tar" %> \out -> do
     need ["pacman/db" </> dirFile]
-    tar rootUid rootGid out
+    tar rootOwn out
 
 dockerSetup :: Rules ()
 dockerSetup = do

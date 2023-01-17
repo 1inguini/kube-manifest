@@ -10,7 +10,6 @@ module Util.Shake (
   pacman,
   parallel_,
   producedDirectory,
-  cache,
   runProc,
   tar,
 ) where
@@ -116,13 +115,14 @@ dir pat act = do
             produces $ (?dir </>) <$> ls
             writeFile' out $ unlines ls
 
-tar :: MonadIO m => UserID -> GroupID -> FilePath -> m ()
-tar user group out =
+tar :: MonadIO m => (UserID, GroupID) -> FilePath -> m ()
+tar (user, group) out =
   runProcess_ . proc "tar" $
     [ "-c"
     , "--numeric-owner"
     , "--owner=" <> show user
     , "--group=" <> show group
+    , "--exclude=" <> dirFile
     , "--file=" <> out
     , "--directory=" <> dropExtension out
     , "."
@@ -130,6 +130,3 @@ tar user group out =
 
 parallel_ :: [Action a] -> Action ()
 parallel_ = void . parallel
-
-cache :: v -> Rules (Action v)
-cache v = ($ ()) <$> newCache (\() -> pure v)

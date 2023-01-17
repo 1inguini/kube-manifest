@@ -3,6 +3,8 @@ module Util (
   Yaml,
   YamlType (..),
   annotate,
+  rootOwn,
+  nonrootOwn,
   assignJSON,
   clusterIssuer,
   configMap,
@@ -266,11 +268,17 @@ persistentVolumeClaimVolume =
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 
+nonrootOwn :: (UserID, GroupID)
+nonrootOwn = (nonrootUid, nonrootGid)
+
 nonrootUid :: UserID
 nonrootUid = 65532
 
 nonrootGid :: GroupID
 nonrootGid = 65532
+
+rootOwn :: (UserID, GroupID)
+rootOwn = (rootUid, rootGid)
 
 rootUid :: UserID
 rootUid = 0
