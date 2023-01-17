@@ -4,13 +4,13 @@ module Util.Shake (
   aurInstall,
   dir,
   dirFile,
-  docker,
   gitClone,
   listDirectoryRecursive,
   mkdir,
+  pacman,
   parallel_,
-  runProc,
   producedDirectory,
+  runProc,
 ) where
 
 import Control.Exception.Safe (displayException)
@@ -58,19 +58,17 @@ gitClone repo tag dst = do
   liftIO $ removeDirectoryRecursive dst
   runProc $ "git clone --branch=" <> tag <:> repo <:> dst
 
-docker :: [String] -> ProcessConfig () () ()
-docker = proc "podman"
-aur :: (?shakeDir :: FilePath) => [String] -> ProcessConfig () () ()
-aur opts =
-  proc "yay" $
-    opts
-      <> [ "--config=" <> ?shakeDir </> "pacman/pacman.conf"
-         , "--dbpath=" <> ?shakeDir </> "pacman/db"
-         , "--noconfirm"
-         , "--noprovides"
-         ]
-aurInstall :: (?shakeDir :: FilePath) => [String] -> ProcessConfig () () ()
-aurInstall opts = aur $ ["-S"] <> opts
+pacOpts :: (?shakeDir :: FilePath) => [String]
+pacOpts =
+  [ "--config=" <> ?shakeDir </> "pacman/pacman.conf"
+  , "--dbpath=" <> ?shakeDir </> "pacman/db"
+  , "--noconfirm"
+  ]
+pacman, aur :: (?shakeDir :: FilePath, ?proc :: String -> [String] -> a) => [String] -> a
+pacman = ?proc "pacman" . (pacOpts <>)
+aur = ?proc "yay" . ((pacOpts <> ["--noprovides"]) <>)
+aurInstall :: (?shakeDir :: FilePath, ?proc :: String -> [String] -> a) => [String] -> a
+aurInstall = aur . (["-S"] <>)
 
 mkdir :: MonadIO m => FilePath -> m ()
 mkdir = liftIO . createDirectoryIfMissing True

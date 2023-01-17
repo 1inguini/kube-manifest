@@ -1,21 +1,31 @@
 module Main where
 
 import Manifest (yamls)
-import Util (Yaml, YamlType (..), s)
+import Util (Yaml, YamlType (..), nonrootGid, nonrootUid, registry, s)
 import qualified Util
 import Util.Shake (
   aur,
   aurInstall,
   dir,
   dirFile,
-  docker,
   gitClone,
   mkdir,
+  pacman,
   parallel_,
   runProc,
   (<:>),
  )
-import Util.Shake.Container (ImageRepo (ImageRepo), addContainerImageRule, image)
+import Util.Shake.Container (
+  ImageName (ImageName),
+  ImageRepo (ImageRepo),
+  addContainerImageRule,
+  docker,
+  dockerRunPause,
+  image,
+  latest,
+  runDocker,
+ )
+import qualified Util.Shake.Container as Image
 
 import Control.Applicative ((<|>))
 import Control.Exception.Safe (Exception (displayException), finally, throw, throwString)
@@ -201,17 +211,11 @@ import Text.Heredoc (here, str)
 
 nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
+  let ?proc = proc
   ImageRepo (cs Util.registry </> "nonroot") `image` do
     let pause = "s6-portable-utils/bin/s6-pause"
     need ["docker/login", "nonroot/rootfs.tar", pause]
-    container <-
-      fmap (head . lines . cs) . readProcessStdout_ . docker $
-        [ "run"
-        , "--detach"
-        , "--volume=" <> ?shakeDir </> pause <> ":/pause"
-        , "--entrypoint=/pause"
-        , cs Util.registry </> "scratch"
-        ]
+    container <- dockerRunPause $ ImageName (ImageRepo $ cs Util.registry </> "scratch", latest)
     let runDocker = runProcess_ . docker
     runDocker . words $ "cp nonroot/rootfs.tar" <:> container <> ":/"
     runDocker ["commit", "--change", "ENTRYPOINT /bin/sh", container, show ?imageName]
@@ -232,15 +236,51 @@ nonrootImage = do
     unlines
       [ "root:x:0:0:root:/root:/sbin/nologin"
       , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
-      , "nonroot:x:" <> show Util.nonroot <> ":" <> show Util.nonroot <> ":nonroot:/home/nonroot:/sbin/nologin"
+      , "nonroot:x:" <> show nonrootUid <> ":" <> show nonrootGid <> ":nonroot:/home/nonroot:/sbin/nologin"
       ]
 
   writeFile' "nonroot/rootfs/etc/group" $
     unlines
       [ "root:x:0:"
       , "nobody:x:65534:"
-      , "nonroot:x:" <> show Util.nonroot <> ":"
+      , "nonroot:x:" <> show nonrootGid <> ":"
       ]
+
+archlinuxImage :: (?shakeDir :: FilePath) => Rules ()
+archlinuxImage = do
+  let ?proc = proc
+  ImageRepo (cs Util.registry </> "archlinux") `image` do
+    need ["docker/login", "archlinux/rootfs.tar"]
+    container <- dockerRunPause $ ImageName (Image.registry "library/archlinux", latest)
+    let
+      dockerExec :: [String] -> Action ()
+      dockerExec = runDocker . (words "exec -i" <>)
+      nonrootExec = dockerExec . ("--user=nonroot" :)
+      rootExec = dockerExec . ("--user=root" :)
+    parallel_
+      [ do
+          rootExec . words $ "groupadd --gid=" <> show nonrootGid <:> "nonroot"
+          rootExec $
+            ["useradd --uid=" <> show nonrootUid, "--gid=" <> show nonrootGid]
+              <> words "-m -s /usr/bin/nologin nonroot"
+      , runDocker $ "copy" : ["archlinux/etc.tar", container <> ":/etc"]
+      ]
+    let ?proc = \command -> rootExec . (command :)
+     in pacman $ words "-Sy git glibc moreutils rsync"
+
+  writeFile'
+    "archlinux/etc/locale.gen"
+    [str|en_US.UTF-8 UTF-8
+        |ja_JP.UTF-8 UTF-8
+        |]
+
+  "archlinux/etc.tar" %> \out -> do
+    need . fmap ("archlinux/etc" </>) $
+      [ "locale.gen"
+      , "sudoers"
+      , "pacman.d/mirrorlist"
+      ]
+    runProc $ "tar -c --owner=root --group=nonroot -f" <:> out <:> "-C archlinux/etc ."
 
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do

@@ -24,13 +24,13 @@ openebs :: [Yaml]
 openebs =
   let ?namespace = Util.noNamespace
       ?app = "openebs"
-   in [Util.manifest $(embedYamlFile "src/openebs/storage-class.yaml")]
+  in  [Util.manifest $(embedYamlFile "src/openebs/storage-class.yaml")]
 
 certManager :: [Yaml]
 certManager =
   let ?namespace = "cert-manager"
       ?app = "cert-manager"
-   in [ Util.manifest $(embedYamlFile "src/cert-manager/selfsigned-issuer.yaml")
+  in  [ Util.manifest $(embedYamlFile "src/cert-manager/selfsigned-issuer.yaml")
       , Util.manifest $(embedYamlFile "src/cert-manager/1inguini-ca.yaml")
       , Util.manifest $(embedYamlFile "src/cert-manager/1inguini-ca-cluster-issuer.yaml")
       ]
@@ -40,11 +40,11 @@ dns :: [Yaml]
 dns =
   let ?namespace = "dns"
       ?app = "coredns"
-   in let mountPath = "/etc/coredns/"
+  in  let mountPath = "/etc/coredns/"
           health = Util.name "health"
           ready = Util.name "ready"
           metrics = Util.name "metrics"
-       in [ Util.manifest Util.namespace
+      in  [ Util.manifest Util.namespace
           , Util.manifest $
               Util.deployment
                 ANON
@@ -99,8 +99,8 @@ projectcontour :: [Yaml]
 projectcontour =
   let ?namespace = "projectcontour"
       ?app = "contour"
-   in [ let ?app = "envoy"
-         in Util.manifest $
+  in  [ let ?app = "envoy"
+        in  Util.manifest $
               Util.service
                 ANON
                   { externalIPs = [externalIp]
@@ -121,7 +121,7 @@ kubernetesDashboard :: [Yaml]
 kubernetesDashboard =
   let ?namespace = "kubernetes-dashboard"
       ?app = "kubernetes-dashboard"
-   in [ Util.manifest $(embedYamlFile "src/kubernetes-dashboard/service-account.yaml")
+  in  [ Util.manifest $(embedYamlFile "src/kubernetes-dashboard/service-account.yaml")
       , Util.manifest $(embedYamlFile "src/kubernetes-dashboard/cluster-role-binding.yaml")
       ]
 
@@ -129,7 +129,7 @@ registry :: [Yaml]
 registry =
   let ?namespace = "registry"
       ?app = "harbor"
-   in [ Util.helmValues
+  in  [ Util.helmValues
           ANON{chart = "harbor/harbor", appLabel = "app"}
           ANON
             { expose =
@@ -163,14 +163,14 @@ gitbucket :: [Yaml]
 gitbucket =
   let ?namespace = "git"
       ?app = "gitbucket"
-   in let home = "home"
+  in  let home = "home"
           homeInit = "home-init"
           homePath = "/home/nonroot/.gitbucket/"
           database = "mariadb"
           databaseDataPath = "/var/lib/mysql/"
           mariadbVersion = "latest" -- "10.9.4-2"
           gitbucketVersion = "latest" -- 4.38.4
-       in [ Util.manifest Util.namespace
+      in  [ Util.manifest Util.namespace
           , Util.manifest $
               Util.statefulSet
                 ANON
@@ -230,7 +230,7 @@ gitbucket =
                       , toJSON $ Util.name home Util.emptyDirVolume
                       , toJSON $ Util.name database Util.persistentVolumeClaimVolume
                       ]
-                  , securityContext = ANON{fsGroup = Util.nonroot}
+                  , securityContext = ANON{fsGroup = Util.nonrootGid}
                   }
                 [ Util.openebsLvmClaim "5Gi"
                 , Util.name database $ Util.openebsLvmClaim "1Gi"

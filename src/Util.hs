@@ -29,7 +29,8 @@ module Util (
   named,
   namespace,
   noNamespace,
-  nonroot,
+  nonrootUid,
+  nonrootGid,
   object,
   openebsLvmClaim,
   persistentVolumeClaim,
@@ -55,12 +56,11 @@ import qualified Data.Aeson as Aeson
 import Data.Aeson.KeyMap (KeyMap)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (AsValue (_Object), key)
-import Data.Record.Anon
+import Data.Record.Anon (AllFields, Merge, RowHasField, pattern (:=))
 import Data.Record.Anon.Simple (Record, insert, merge, project)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import Optics (A_Setter, Is, Optic', over, set, view, (%))
-
 import Secret (host)
 import TH (deriveJSON)
 
@@ -196,7 +196,7 @@ namespace ::
   Record _
 namespace =
   let ?name = ?namespace
-   in object "Namespace"
+  in  object "Namespace"
         `merge` ANON
           { metadata = project meta :: Record ["name" := _, "labels" := _]
           }
@@ -263,8 +263,11 @@ persistentVolumeClaimVolume =
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 
-nonroot :: Int
-nonroot = 65532
+nonrootUid :: Int
+nonrootUid = 65532
+
+nonrootGid :: Int
+nonrootGid = 65532
 
 workload ::
   (?namespace :: Text, ?app :: Text, ?name :: Text) =>

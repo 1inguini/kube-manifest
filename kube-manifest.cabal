@@ -36,6 +36,7 @@ common option
     OverloadedLabels
     OverloadedStrings
     PartialTypeSignatures
+    PatternSynonyms
     QuasiQuotes
     RankNTypes
     ScopedTypeVariables

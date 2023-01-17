@@ -8,16 +8,22 @@ module Util.Shake.Container (
   ImageTag (..),
   addContainerImageRule,
   addTaggedImageTarget,
+  docker,
+  dockerIo,
+  dockerRunPause,
   image,
   latest,
   needImage,
   needImages,
+  registry,
+  runDocker,
 ) where
 
-import Util.Shake (docker, (<:>))
+import Util.Shake ((<:>))
 
 import Control.Exception.Safe (throwString)
 import Control.Monad (void)
+import Control.Monad.IO.Class (MonadIO)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.List as List
@@ -27,6 +33,7 @@ import Development.Shake (
   RuleResult,
   Rules,
   addTarget,
+  need,
   phonys,
  )
 import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
@@ -45,7 +52,9 @@ import Development.Shake.Rule (
  )
 import GHC.Generics (Generic)
 import Optics (view)
-import System.Process.Typed (ExitCode (ExitSuccess), readProcessStdout)
+import System.FilePath ((</>))
+import System.Process.Typed (ExitCode (ExitSuccess), ProcessConfig, proc, readProcessStdout, readProcessStdout_, runProcess_)
+import qualified Util
 
 newtype ImageRepo = ImageRepo {repo :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
@@ -67,13 +76,15 @@ addContainerImageRule = addBuiltinRule noLint imageIdentity run
   imageIdentity _ = Just . view #id
 
   newStore :: ImageName -> Action (Maybe ByteString)
-  newStore name = do
-    (exitCode, stdout) <-
-      readProcessStdout . docker $
-        words "images --no-trunc --quiet" <> [show name]
-    case (exitCode, ByteString.split (fromIntegral $ fromEnum '\n') $ cs stdout) of
-      (ExitSuccess, newStore : _) -> pure $ Just newStore
-      _ -> pure Nothing
+  newStore name =
+    do
+      let ?proc = proc
+      (exitCode, stdout) <-
+        readProcessStdout . docker $
+          words "images --no-trunc --quiet" <> [show name]
+      case (exitCode, ByteString.split (fromIntegral $ fromEnum '\n') $ cs stdout) of
+        (ExitSuccess, newStore : _) -> pure $ Just newStore
+        _ -> pure Nothing
 
   run :: BuiltinRun ImageName Image
   run key oldStore RunDependenciesChanged = do
@@ -106,6 +117,12 @@ type ContainerfileCommand = String
 latest :: ImageTag
 latest = ImageTag "latest"
 
+dockerIo :: String -> ImageRepo
+dockerIo = ImageRepo . ("docker.io" </>)
+
+registry :: String -> ImageRepo
+registry = ImageRepo . (cs Util.registry </>)
+
 infix 1 `image`
 image :: ImageRepo -> ((?imageName :: ImageName) => Action ()) -> Rules ()
 image repo act = do
@@ -126,3 +143,22 @@ image repo act = do
 
 addTaggedImageTarget :: ImageName -> Rules ()
 addTaggedImageTarget = addTarget . show
+
+docker :: (?proc :: String -> [String] -> a) => [String] -> a
+docker = ?proc "podman"
+runDocker :: (MonadIO m, ?proc :: String -> [String] -> ProcessConfig () () ()) => [String] -> m ()
+runDocker = runProcess_ . docker
+
+dockerRunPause :: (?shakeDir :: FilePath) => ImageName -> Action ContainerId
+dockerRunPause base =
+  do
+    let ?proc = proc
+    let pause = "s6-poratable-utils/bin/s6-pause"
+    need [pause]
+    fmap (head . lines . cs) . readProcessStdout_ . docker $
+      [ "run"
+      , "--detach"
+      , "--volume=" <> ?shakeDir </> pause <> ":/pause"
+      , "--entrypoint=/pause"
+      , show base
+      ]
