@@ -1,17 +1,13 @@
 module Util.Shake (
   (<:>),
-  aur,
-  aurInstall,
   dir,
   dirFile,
   gitClone,
   listDirectoryRecursive,
   mkdir,
-  pacman,
   parallel_,
   producedDirectory,
   runProg,
-  runProg_,
   tar,
 ) where
 
@@ -23,11 +19,12 @@ import Data.ByteString (ByteString)
 import Data.String (IsString (fromString))
 import Development.Shake (
   Action,
-  CmdOption,
+  CmdOption (Cwd),
   CmdResult,
   FilePattern,
   RuleResult,
   Rules,
+  StdoutTrim (StdoutTrim),
   actionCatch,
   command,
   need,
@@ -44,7 +41,7 @@ import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
 import GHC.Generics (Generic)
 import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
-import System.FilePath (addTrailingPathSeparator, dropExtension, takeDirectory, (</>))
+import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, takeDirectory, takeFileName, (</>))
 import System.Posix (GroupID, UserID)
 
 instance Exceptions.MonadThrow Action where
@@ -64,25 +61,17 @@ gitClone repo tag dst = do
   mkdir dst
   liftIO $ removeDirectoryRecursive dst
   let ?opts = []
-  runProg ["git", "clone", "--branch=" <> tag, repo, dst]
+  runProg [] ["git", "clone", "--branch=" <> tag, repo, dst]
 
-runProg :: (CmdResult r, ?opts :: [CmdOption]) => [String] -> Action r
-runProg (prog : args) = command ?opts prog args
-runProg [] = throwString "runProg: empty"
+listGitFiles :: FilePath -> Action [FilePath]
+listGitFiles repoDir = do
+  StdoutTrim repoFiles <- runProg [Cwd repoDir] $ words "git ls-tree -r --name-only HEAD"
+  gitFiles <- fmap (".git" </>) <$> listDirectoryRecursive (repoDir </> ".git")
+  pure $ gitFiles <> lines repoFiles
 
-runProg_ :: (?opts :: [CmdOption]) => [String] -> Action ()
-runProg_ = runProg
-
-pacConf :: (?shakeDir :: FilePath) => [String]
-pacConf =
-  [ "--config=" <> ?shakeDir </> "pacman/pacman.conf"
-  , "--dbpath=" <> ?shakeDir </> "pacman/db"
-  ]
-pacman, aur :: (CmdResult r, ?shakeDir :: FilePath, ?opts :: [CmdOption]) => [String] -> Action r
-pacman = runProg . (["pacman", "--noconfirm"] <>)
-aur = runProg . (["yay", "--noprovides", "--noconfirm"] <>)
-aurInstall :: (CmdResult r, ?shakeDir :: FilePath, ?opts :: [CmdOption]) => [String] -> Action r
-aurInstall = aur . (["-S"] <>)
+runProg :: (CmdResult r) => [CmdOption] -> [String] -> Action r
+runProg opts (prog : args) = command opts prog args
+runProg opts [] = throwString "runProg: empty"
 
 mkdir :: MonadIO m => FilePath -> m ()
 mkdir = liftIO . createDirectoryIfMissing True
@@ -122,17 +111,18 @@ dir pat act = do
             produces $ (?dir </>) <$> ls
             writeFile' out $ unlines ls
 
-tar :: (?opts :: [CmdOption]) => (UserID, GroupID) -> FilePath -> Action ()
+tar :: (UserID, GroupID) -> FilePath -> Action ()
 tar (user, group) out =
   runProg
+    []
     [ "tar"
     , "-c"
     , "--numeric-owner"
     , "--owner=" <> show user
     , "--group=" <> show group
-    , "--exclude=" <> dirFile
+    , "--exclude=" <> takeFileName out
     , "--file=" <> out
-    , "--directory=" <> dropExtension out
+    , "--directory=" <> dropFileName out
     , "."
     ]
 

@@ -4,17 +4,13 @@ import Manifest (yamls)
 import Util (Yaml, YamlType (..), nonrootGid, nonrootOwn, nonrootUid, registry, rootGid, rootOwn, rootUid, s)
 import qualified Util
 import Util.Shake (
-  aur,
-  aurInstall,
   dir,
   dirFile,
   gitClone,
   listDirectoryRecursive,
   mkdir,
-  pacman,
   parallel_,
   runProg,
-  runProg_,
   tar,
   (<:>),
  )
@@ -25,11 +21,11 @@ import Util.Shake.Container (
   docker,
   dockerCommit,
   dockerCopy,
-  dockerFrom,
   dockerPushEnd,
   image,
   latest,
   runDocker,
+  withContainer,
  )
 import qualified Util.Shake.Container as Image
 
@@ -57,7 +53,8 @@ import qualified Data.Yaml as Yaml (decodeAllThrow, encode)
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
-  CmdOption (Cwd),
+  CmdOption (Cwd, InheritStdin),
+  CmdResult,
   FilePattern,
   Lint (LintBasic),
   RuleResult,
@@ -132,6 +129,7 @@ import System.FilePath (
   addTrailingPathSeparator,
   dropExtension,
   dropTrailingPathSeparator,
+  splitDirectories,
   takeDirectory,
   takeExtension,
   takeFileName,
@@ -229,7 +227,7 @@ import Text.Heredoc (here, str)
 nonrootImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   Image.registry "nonroot" `image` do
-    ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `dockerFrom` [] $ do
+    ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `withContainer` [] $ do
       dockerCopy "nonroot/rootfs.tar" "/"
       dockerCommit ["ENTRYPOINT /bin/sh"]
       dockerPushEnd
@@ -256,10 +254,10 @@ nonrootImage = do
 archlinuxImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
   Image.registry "archlinux" `image` do
-    ImageName (Image.dockerIo "library/archlinux", latest) `dockerFrom` [] $ do
+    ImageName (Image.dockerIo "library/archlinux", latest) `withContainer` [] $ do
       let
         dockerExec :: [String] -> Action ()
-        dockerExec = runDocker . (words "exec -i" <>)
+        dockerExec = runDocker [] . (words "exec -i" <>)
         rootExec, nonrootExec :: [String] -> [String] -> Action ()
         rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
         nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
@@ -279,8 +277,8 @@ archlinuxImage = do
       produces $ filter (`elem` (dirFile : src)) current
       dockerPushEnd
 
-  "archlinux/aur-helper/" `dir` do
-    gitClone "https://aur.archlinux.org/yay-bin.git" "master" ?dir
+  -- "archlinux/aur-helper/" `dir` do
+  --   gitClone "https://aur.archlinux.org/yay-bin.git" "master" ?dir
 
   "archlinux/aur-helper.tar" %> \out -> do
     need ["archlinux/aur-helper" </> dirFile]
@@ -310,33 +308,47 @@ archlinuxImage = do
       , "sudoers"
       , "pacman.d/mirrorlist"
       ]
-    tar rootOwn out
 
-pacmanSetup :: (?opts :: [CmdOption], ?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+pacRun ::
+  (CmdResult r, ?projectRoot :: FilePath, ?shakeDir :: FilePath) =>
+  [String] ->
+  [CmdOption] ->
+  [String] ->
+  Action r
+pacRun prog opts =
+  runProg opts
+    . (prog <>)
+    . ( [ "--noconfirm"
+        , "--config=" <> ?projectRoot </> "src/pacman.conf"
+        , "--dbpath=" <> ?shakeDir </> "pacman"
+        ]
+          <>
+      )
+
+pacman, aur :: [String]
+pacman = ["pacman"]
+aur = ["yay", "--noprovides"]
+
+pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
-  "pacman/pacman.conf" %> \out -> do
-    copyFile' (?projectRoot </> "src/pacman.conf") out
-
-  "pacman/db/" `dir` do
-    need ["pacman/pacman.conf"]
-    aur . words $ "-Sy"
-
-  "pacman/db/sync.tar" %> \out -> do
-    need ["pacman/db" </> dirFile]
+  "pacman/sync/.tar" %> \out -> do
+    need [?projectRoot </> "src/pacman.conf"]
+    pacRun @() aur [] ["-Sy"]
+    produces ["pacman/local/ALPM_DB_VERSION"]
     tar rootOwn out
 
-dockerSetup :: (?opts :: [CmdOption]) => Rules ()
+dockerSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 dockerSetup = do
   phony "docker/login" $
-    runDocker ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
+    runDocker [InheritStdin] ["login", head . splitDirectories . cs $ Util.registry]
 
 musl :: (?opts :: [CmdOption], ?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl =
   "musl/lib/" `dir` do
     need ["pacman/db" </> dirFile]
     mkdir "musl/rootfs"
-    aurInstall @() ["--root=musl/rootfs", "musl"]
-    runProg $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
+    pacRun @() aur [] ["--root=musl/rootfs", "musl"]
+    runProg [] $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
 
 skalibs :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 skalibs =
@@ -344,9 +356,9 @@ skalibs =
     let version = "v2.12.0.1"
     gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
 
-    let ?opts = Cwd "skalibs/src" : ?opts
-    runProg_ $ words "./configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
-    let make = runProg_ . ("make" :) . (: [])
+    let cd = Cwd "skalibs/src"
+    runProg @() [cd] $ words "./configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
+    let make = runProg @() [cd] . ("make" :) . (: [])
     make "all"
     make "strip"
     parallel_
@@ -408,8 +420,9 @@ s6PortableUtils = do
     &%> \outs@(out : _) -> do
       gitClone "https://github.com/skarnet/s6-portable-utils.git" version $ s6 </> "src"
       need ["musl/lib" </> dirFile, "skalibs/lib" </> dirFile]
-      let ?opts = Cwd (s6 </> "src") : ?opts
-      runProg_
+      let cd = Cwd (s6 </> "src")
+      runProg @()
+        [cd]
         [ "./configure"
         , "--bindir=" <> ?shakeDir </> takeDirectory out
         , "--enable-static-libc"
@@ -417,7 +430,7 @@ s6PortableUtils = do
         , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
         , "--with-libs=" <> ?shakeDir </> "musl/lib"
         ]
-      let make = runProg . ("make" :) . (: [])
+      let make = runProg [cd] . ("make" :) . (: [])
       make "all"
       make "strip"
       make "install-bin"
@@ -429,7 +442,8 @@ busybox = download "busybox" "busybox" *> traverse_ singleApplet applets
   applets = ["cp"]
   download applet src =
     ("busybox" </> applet) %> \out -> do
-      runProg_
+      runProg @()
+        []
         [ "curl"
         , "-L"
         , "https://busybox.net/downloads/binaries" </> version <> "-x86_64-linux-musl" </> src

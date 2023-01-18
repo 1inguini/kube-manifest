@@ -1,6 +1,6 @@
 module Util.Shake.Container (
   ContainerId,
-  ContainerfileCommand,
+  ContainerfileInstruction,
   Image (..),
   ImageName (..),
   ImageRepo (..),
@@ -11,7 +11,7 @@ module Util.Shake.Container (
   docker,
   dockerCommit,
   dockerCopy,
-  dockerFrom,
+  withContainer,
   dockerIo,
   dockerPushEnd,
   image,
@@ -100,7 +100,7 @@ addContainerImageRule = addBuiltinRule noLint imageIdentity run
   newStore :: ImageName -> Action (Maybe ByteString)
   newStore name = do
     (Exit exitCode, Stdout stdout) <-
-      runDocker $ words "images --no-trunc --quiet" <> [show name]
+      runDocker [] $ words "images --no-trunc --quiet" <> [show name]
     case (exitCode, ByteString.split (fromIntegral $ fromEnum '\n') stdout) of
       (ExitSuccess, newStore : _) -> pure $ Just newStore
       _ -> pure Nothing
@@ -131,7 +131,7 @@ needImage :: ImageName -> Action ()
 needImage = void . apply1
 
 type ContainerId = String
-type ContainerfileCommand = String
+type ContainerfileInstruction = String
 
 latest :: ImageTag
 latest = ImageTag "latest"
@@ -165,8 +165,8 @@ addTaggedImageTarget = addTarget . show
 
 docker :: String
 docker = "podman"
-runDocker :: (CmdResult r, ?opts :: [CmdOption]) => [String] -> Action r
-runDocker = runProg . (docker :)
+runDocker :: (CmdResult r) => [CmdOption] -> [String] -> Action r
+runDocker opts = runProg opts . (docker :)
 
 dockerCopy ::
   (?opts :: [CmdOption], ?container :: ContainerId) =>
@@ -177,7 +177,7 @@ dockerCopy tarFile dir = do
   putInfo $ "`docker cp` from" <:> tarFile <:> "to" <:> dir
   need [tarFile]
   let ?opts = FileStdin tarFile : ?opts
-  runDocker @() ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
+  runDocker @() [] ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
   putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
 
 dockerCommit ::
@@ -185,10 +185,10 @@ dockerCommit ::
   , ?imageName :: ImageName
   , ?container :: ContainerId
   ) =>
-  [ContainerfileCommand] ->
+  [ContainerfileInstruction] ->
   Action ()
 dockerCommit commands =
-  runDocker $
+  runDocker [] $
     ["commit", "--include-volumes=false"]
       <> concatMap (("--change" :) . (: [])) commands
       <> [?container, show ?imageName]
@@ -196,21 +196,21 @@ dockerCommit commands =
 dockerPushEnd :: (?opts :: [CmdOption], ?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = do
   need ["docker/login"]
-  -- runDocker ["push", show ?imageName]
-  runDocker @() . words $ "stop --time=0" <:> ?container
-  runDocker @() . words $ "rm" <:> ?container
+  -- runDocker @() [] ["push", show ?imageName]
+  runDocker @() [] . words $ "stop --time=0" <:> ?container
+  runDocker @() [] . words $ "rm" <:> ?container
 
-dockerFrom ::
-  (?opts :: [CmdOption], ?shakeDir :: FilePath) =>
+withContainer ::
+  (?shakeDir :: FilePath) =>
   ImageName ->
   [String] ->
   ((?container :: ContainerId) => Action a) ->
   Action a
-dockerFrom base opt act = withTempDir $ \tmp -> do
+withContainer image opt act = withTempDir $ \tmp -> do
   let init = "busybox/busybox"
   copyFile' init $ tmp </> "sh"
   Stdout container <-
-    runDocker $
+    runDocker [] $
       [ "run"
       , "--detach"
       , "-t"
@@ -218,6 +218,6 @@ dockerFrom base opt act = withTempDir $ \tmp -> do
       , "--entrypoint=/tmp/sh"
       ]
         <> opt
-        <> [show base]
+        <> [show image]
   let ?container = head $ lines container
    in act
