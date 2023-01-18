@@ -1,15 +1,19 @@
 module Main where
 
 import Util (
+  nobodyGid,
+  nobodyUid,
   nonrootGid,
   nonrootOwn,
   nonrootUid,
   registry,
   rootOwn,
+  rootUid,
  )
 import Util.Shake (
   aur,
   aurInstall,
+  copyDir,
   dir,
   dirFile,
   gitClone,
@@ -19,26 +23,31 @@ import Util.Shake (
   runProg,
   runProg_,
   tar,
+  (<:>),
  )
 import Util.Shake.Container (
   ImageName (ImageName),
   ImageRepo (ImageRepo),
+  ImageTag (ImageTag),
   addContainerImageRule,
+  copyDirPrefixed,
   image,
   latest,
   podmanCommit,
-  podmanCopy,
   podmanFrom,
+  podmanMount,
   podmanPushEnd,
-  runDocker,
+  runPodman,
  )
 import qualified Util.Shake.Container as Image
 
+import Control.Concurrent.Async (wait, withAsync)
 import Control.Exception.Safe (finally)
 import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
+import qualified Data.List as List
 import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
@@ -59,6 +68,7 @@ import Development.Shake (
     shakeShare,
     shakeThreads
   ),
+  actionBracket,
   copyFile',
   need,
   phony,
@@ -69,6 +79,7 @@ import Development.Shake (
   shakeOptions,
   want,
   writeFile',
+  writeFileLines,
   (%>),
   (&%>),
  )
@@ -83,10 +94,16 @@ import System.FilePath (
   (</>),
  )
 import System.Posix (
+  getEffectiveUserID,
+  getRealUserID,
+  getSymbolicLinkStatus,
+  setEffectiveUserID,
   setFileCreationMask,
   setFileMode,
+  setSymbolicLinkOwnerAndGroup,
+  setUserID,
  )
-import Text.Heredoc (str)
+import Text.Heredoc (here, str)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 -- processYaml written yaml =
@@ -170,65 +187,92 @@ import Text.Heredoc (str)
 
 nonrootImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
+  let ?owner = nonrootOwn
   Image.registry "nonroot" `image` do
-    ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `podmanFrom` [] $ do
-      podmanCopy "nonroot/rootfs.tar" "/"
-      podmanCommit ["ENTRYPOINT /bin/sh"]
+    ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `podmanFrom` [] $ podmanMount $ do
+      copyDirPrefixed "nonroot/rootfs" "/"
+      podmanCommit
+        [ [here|ENTRYPOINT [ "/bin/sh" ]|]
+        , "WORKDIR /home/nonroot"
+        , "USER nonroot"
+        , [here|LABEL org.opencontainers.image.description="scratch with nonroot user"|]
+        ]
       podmanPushEnd
 
-  "nonroot/rootfs.tar" %> \out -> do
-    need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]
-    parallel_ $ mkdir . ("nonroot/rootfs" </>) <$> ["tmp", "home/nonroot"]
-    tar nonrootOwn out
+  ("nonroot/rootfs" </> dirFile) %> \out -> do
+    let
+      rootfs = takeDirectory out
+      files = ["etc/passwd", "etc/group"]
+      dirs = ["tmp", "home/nonroot"]
+    need $ (rootfs </>) <$> files
+    parallel_ $ mkdir . (rootfs <>) <$> dirs
+    writeFileLines out . List.sort $ files <> dirs
 
   writeFile' "nonroot/rootfs/etc/passwd" $
     unlines
       [ "root:x:0:0:root:/root:/sbin/nologin"
-      , "nobody:x:65534:65534:Nobody:/nonexistent:/sbin/nologin"
+      , "nobody:x:" <> show nobodyUid <> ":" <> show nobodyGid <> ":Nobody:/nonexistent:/sbin/nologin"
       , "nonroot:x:" <> show nonrootUid <> ":" <> show nonrootGid <> ":nonroot:/home/nonroot:/sbin/nologin"
       ]
 
   writeFile' "nonroot/rootfs/etc/group" $
     unlines
       [ "root:x:0:"
-      , "nobody:x:65534:"
+      , "nobody:x:" <> show nobodyGid <> ":"
       , "nonroot:x:" <> show nonrootGid <> ":"
       ]
 
 archlinuxImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
+  let ?owner = nonrootOwn
   Image.registry "archlinux" `image` do
-    ImageName (Image.dockerIo "library/archlinux", latest) `podmanFrom` [] $ do
+    ImageName (Image.dockerIo "library/archlinux", ImageTag "base-devel") `podmanFrom` [] $ podmanMount $ do
       let
         podmanExec :: [String] -> Action ()
-        podmanExec = runDocker . (words "exec -i" <>)
+        podmanExec = runPodman . (words "exec -i" <>)
         rootExec, nonrootExec :: [String] -> [String] -> Action ()
         rootExec opt = podmanExec . (opt <>) . (["--user=root", ?container] <>)
         nonrootExec opt = podmanExec . (opt <>) . (["--user=nonroot", ?container] <>)
-      parallel_
-        [ podmanCopy "archlinux/etc.tar" "/etc"
-        , do
-            rootExec [] [?init, "mkdir", "-p", "/var/lib/pacman/sync"]
-            podmanCopy "pacman/db/sync.tar" "/var/lib/pacman/sync"
-        ]
+      let ?owner = rootOwn
+       in parallel_
+            [ copyDirPrefixed "archlinux/etc" "/etc"
+            , copyDirPrefixed "pacman/db/sync" "/var/lib/pacman/sync"
+            , do
+                rootExec [] . words $ "groupadd nonroot" <:> "--gid" <:> show nonrootGid
+                rootExec [] . words $
+                  "useradd nonroot"
+                    <:> "--gid"
+                    <:> show nonrootGid
+                    <:> "--uid"
+                    <:> show nonrootUid
+                    <:> "-m -s /usr/bin/nologin"
+            ]
       rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
       parallel_
         [ do
-            podmanCopy "archlinux/aur-helper.tar" "/home/nonroot/aur-helper"
+            copyDirPrefixed "archlinux/aur-helper" "/home/nonroot/aur-helper"
             nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
         , rootExec [] ["locale-gen"]
         ]
       src <- fmap lines . readFile' $ "archlinux/aur-helper" </> dirFile
       current <- listDirectoryRecursive "archlinux/aur-helper"
-      produces $ filter (`elem` (dirFile : src)) current
+      produces $ filter (`notElem` (dirFile : src)) current
+      podmanCommit
+        [ [here|ENTRYPOINT [ "/bin/bash" ]|]
+        , [here|CMD [ ]|]
+        , "WORKDIR /home/nonroot"
+        , "USER nonroot"
+        , [here|LABEL org.opencontainers.image.description="archlinux"|]
+        ]
       podmanPushEnd
 
   "archlinux/aur-helper/" `dir` do
     gitClone "https://aur.archlinux.org/yay-bin.git" "master" ?dir
 
-  "archlinux/aur-helper.tar" %> \out -> do
-    need ["archlinux/aur-helper" </> dirFile]
-    tar nonrootOwn out
+  ("archlinux/etc" </> dirFile) %> \out -> do
+    let ls = ["locale.gen", "sudoers", "pacman.conf", "pacman.d/mirrorlist"]
+    need $ (takeDirectory out </>) <$> ls
+    writeFileLines out ls
 
   writeFile'
     "archlinux/etc/locale.gen"
@@ -248,31 +292,33 @@ archlinuxImage = do
         |Server = https://mirrors.cat.net/archlinux/$repo/os/$arch
         |]
 
-  "archlinux/etc.tar" %> \out -> do
-    need . fmap ("archlinux/etc" </>) $
-      [ "locale.gen"
-      , "sudoers"
-      , "pacman.d/mirrorlist"
-      ]
-    tar rootOwn out
+  "archlinux/etc/pacman.conf" %> \out ->
+    copyFile' "pacman/pacman.conf" out
 
 pacmanSetup :: (?opts :: [CmdOption], ?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
   "pacman/pacman.conf" %> \out -> do
     copyFile' (?projectRoot </> "src/pacman.conf") out
+    liftIO $ setFileMode out 0o644
 
   "pacman/db/" `dir` do
     need ["pacman/pacman.conf"]
     aur . words $ "-Sy"
 
-  "pacman/db/sync.tar" %> \out -> do
+  "pacman/db/sync" </> dirFile %> \out -> do
+    -- liftIO $ setUserID rootUid
     need ["pacman/db" </> dirFile]
-    tar rootOwn out
+    ls <- listDirectoryRecursive $ takeDirectory out
+    -- liftIO $ flip withAsync wait $ do
+    --   setEffectiveUserID rootUid
+    --   putStrLn . ("getRealUserID" <:>) . show =<< getRealUserID
+    --   putStrLn . ("getEffectiveUserID" <:>) . show =<< getEffectiveUserID
+    writeFileLines out ls
 
 podmanSetup :: (?opts :: [CmdOption]) => Rules ()
 podmanSetup = do
   phony "podman/login" $
-    runDocker ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
+    runPodman ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
 
 musl :: (?opts :: [CmdOption], ?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl =

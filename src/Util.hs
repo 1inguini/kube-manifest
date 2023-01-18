@@ -1,10 +1,9 @@
 module Util (
   Manifest,
+  Owner,
   Yaml,
   YamlType (..),
   annotate,
-  rootOwn,
-  nonrootOwn,
   assignJSON,
   clusterIssuer,
   configMap,
@@ -15,6 +14,7 @@ module Util (
   domain,
   emptyDirVolume,
   execCommandProbe,
+  getCurrentOwn,
   helmValues,
   hostPathVolume,
   httpGetProbe,
@@ -31,7 +31,11 @@ module Util (
   named,
   namespace,
   noNamespace,
+  nobodyGid,
+  nobodyOwn,
+  nobodyUid,
   nonrootGid,
+  nonrootOwn,
   nonrootUid,
   object,
   openebsLvmClaim,
@@ -40,6 +44,7 @@ module Util (
   readWriteOnce,
   registry,
   rootGid,
+  rootOwn,
   rootUid,
   s,
   service,
@@ -66,7 +71,7 @@ import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import Optics (A_Setter, Is, Optic', over, set, view, (%))
 import Secret (host)
-import System.Posix (GroupID, UserID)
+import System.Posix (GroupID, UserID, getRealGroupID, getRealUserID)
 import TH (deriveJSON)
 
 -- import Data.
@@ -268,23 +273,31 @@ persistentVolumeClaimVolume =
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 
-nonrootOwn :: (UserID, GroupID)
-nonrootOwn = (nonrootUid, nonrootGid)
+type Owner = (UserID, GroupID)
 
+rootOwn :: Owner
+rootOwn = (rootUid, rootGid)
+rootUid :: UserID
+rootUid = 0
+rootGid :: GroupID
+rootGid = 0
+
+nonrootOwn :: Owner
+nonrootOwn = (nonrootUid, nonrootGid)
 nonrootUid :: UserID
 nonrootUid = 65532
-
 nonrootGid :: GroupID
 nonrootGid = 65532
 
-rootOwn :: (UserID, GroupID)
-rootOwn = (rootUid, rootGid)
+nobodyOwn :: Owner
+nobodyOwn = (nobodyUid, nobodyGid)
+nobodyUid :: UserID
+nobodyUid = 65534
+nobodyGid :: GroupID
+nobodyGid = 65534
 
-rootUid :: UserID
-rootUid = 0
-
-rootGid :: GroupID
-rootGid = 0
+getCurrentOwn :: IO Owner
+getCurrentOwn = (,) <$> getRealUserID <*> getRealGroupID
 
 workload ::
   (?namespace :: Text, ?app :: Text, ?name :: Text) =>

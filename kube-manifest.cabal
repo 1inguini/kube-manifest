@@ -72,6 +72,7 @@ executable kube-manifest
   build-depends:
     , aeson
     , aeson-optics
+    , async
     , base                  ^>=4.16.3.0
     , bytestring
     , casing

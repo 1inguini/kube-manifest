@@ -13,12 +13,18 @@ module Util.Shake (
   runProg,
   runProg_,
   tar,
+  copyDir,
 ) where
 
-import Control.Exception.Safe (displayException, throwString)
+import Control.Exception.Safe (
+  displayException,
+  throwString,
+  try,
+ )
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (filterM, void)
+import Data.Foldable (traverse_)
 import Development.Shake (
   Action,
   CmdOption,
@@ -32,14 +38,16 @@ import Development.Shake (
   phony,
   produces,
   putError,
-  withoutTargets,
+  readFile',
   writeFile',
   (%>),
  )
-import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
+import System.Directory (copyFile, createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (addTrailingPathSeparator, dropExtension, takeDirectory, (</>))
-import System.Posix (GroupID, UserID)
+import System.Posix (GroupID, UserID, setSymbolicLinkOwnerAndGroup)
+
+import Util (Owner)
 
 instance Exceptions.MonadThrow Action where
   throwM err = do
@@ -73,13 +81,14 @@ pacConf =
   , "--dbpath=" <> ?shakeDir </> "pacman/db"
   ]
 pacman, aur :: (CmdResult r, ?shakeDir :: FilePath, ?opts :: [CmdOption]) => [String] -> Action r
-pacman = runProg . (["pacman", "--noconfirm"] <>)
-aur = runProg . (["yay", "--noprovides", "--noconfirm"] <>)
+pacman = runProg . (["pacman", "--noconfirm"] <>) . (pacConf <>)
+aur = runProg . (["yay", "--noprovides", "--noconfirm"] <>) . (pacConf <>)
 aurInstall :: (CmdResult r, ?shakeDir :: FilePath, ?opts :: [CmdOption]) => [String] -> Action r
 aurInstall = aur . (["-S"] <>)
 
-mkdir :: MonadIO m => FilePath -> m ()
-mkdir = liftIO . createDirectoryIfMissing True
+mkdir :: (MonadIO m) => FilePath -> m ()
+mkdir path = liftIO $ do
+  createDirectoryIfMissing True path
 
 listDirectoryRecursive :: MonadIO m => FilePath -> m [FilePath]
 listDirectoryRecursive dir = liftIO $ do
@@ -105,16 +114,32 @@ infix 1 `dir`
 dir :: (?shakeDir :: FilePath) => FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
 dir pat act = do
   phony (addTrailingPathSeparator pat) $ need [pat </> dirFile]
-  withoutTargets $
-    pat </> dirFile %> \out ->
-      let ?dir = ?shakeDir </> takeDirectory out
-       in do
-            act
-            ls <-
-              filterM (\file -> (file /= dirFile &&) <$> liftIO (Sys.doesFileExist $ ?dir </> file))
-                =<< listDirectoryRecursive ?dir
-            produces $ (?dir </>) <$> ls
-            writeFile' out $ unlines ls
+  pat </> dirFile %> \out ->
+    let ?dir = ?shakeDir </> takeDirectory out
+     in do
+          act
+          ls <-
+            filterM (\file -> (file /= dirFile &&) <$> liftIO (Sys.doesFileExist $ ?dir </> file))
+              =<< listDirectoryRecursive ?dir
+          produces $ (?dir </>) <$> ls
+          writeFile' out $ unlines ls
+
+copyDir :: (?owner :: Owner) => FilePath -> FilePath -> Action ()
+copyDir srcdir dstdir = do
+  paths <- readFile' $ srcdir </> dirFile
+  traverse_
+    ( \path -> liftIO $ do
+        let
+          srcfile = srcdir </> path
+          dstfile = dstdir </> path
+          dstdir' = takeDirectory dstfile
+        mkdir dstdir'
+        uncurry (setSymbolicLinkOwnerAndGroup dstdir') ?owner
+        void . try @IO @IOError $ removeFile dstfile -- symlink safety
+        copyFile srcfile dstfile
+        uncurry (setSymbolicLinkOwnerAndGroup dstfile) ?owner
+    )
+    $ lines paths
 
 tar :: (?opts :: [CmdOption]) => (UserID, GroupID) -> FilePath -> Action ()
 tar (user, group) out =

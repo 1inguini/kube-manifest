@@ -2,17 +2,13 @@
 
 cni0インターフェースはtrustedにブチ込んでおく
 
-`sudo ln -s /run/crio/crio.sock /run/containerd/containerd.sock`で無理やり[BuildKit CLI for kubectl](https://github.com/vmware-tanzu/buildkit-cli-for-kubectl#buildkit-cli-for-kubectl)を動かす → だめでした
-
-諦めてcri-oからcontainerdに
-
-結局`kubectl build`をやめてcri-oと`nerdctl build`に
+`podman unshare cabal run kube-manifest -- -V registry.1inguini.com/library/archlinux`
 
 ## Prerequisites
 
 * pacman
+* podman
 * yay
-* squashfuse
 
 ## コンテナ
 
