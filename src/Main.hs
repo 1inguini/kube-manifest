@@ -1,8 +1,6 @@
-module Main where
+module Main (main) where
 
-import Manifest (yamls)
-import Util (Yaml, YamlType (..), nonrootGid, nonrootOwn, nonrootUid, registry, rootGid, rootOwn, rootUid, s)
-import qualified Util
+import Util (nonrootGid, nonrootOwn, nonrootUid, registry, rootOwn)
 import Util.Shake (
   dir,
   dirFile,
@@ -10,15 +8,14 @@ import Util.Shake (
   listDirectoryRecursive,
   mkdir,
   parallel_,
+  producesDirectory,
   runProg,
   tar,
-  (<:>),
  )
 import Util.Shake.Container (
   ImageName (ImageName),
   ImageRepo (ImageRepo),
   addContainerImageRule,
-  docker,
   dockerCommit,
   dockerCopy,
   dockerPushEnd,
@@ -29,35 +26,20 @@ import Util.Shake.Container (
  )
 import qualified Util.Shake.Container as Image
 
-import Control.Applicative ((<|>))
-import Control.Exception.Safe (Exception (displayException), finally, throw, throwString)
-import Control.Monad (filterM, void, when)
-import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
+import Control.Exception.Safe (catch, finally)
+import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.State.Strict (execState, get)
-import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Optics (AsValue (_Object, _String), key, _Key)
-import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.Char as Char
-import Data.Foldable (foldlM, traverse_)
-import Data.List (isPrefixOf)
-import qualified Data.List as List
-import Data.Maybe (catMaybes, fromMaybe)
-import Data.String (IsString (fromString))
+import Data.Foldable (traverse_)
 import Data.String.Conversions (cs)
-import Data.Text (Text)
-import qualified Data.Text as Texs
-import qualified Data.Yaml as Yaml (decodeAllThrow, encode)
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
-  CmdOption (Cwd, InheritStdin),
+  CmdOption (Cwd, StdinBS),
   CmdResult,
-  FilePattern,
+  Exit (Exit),
   Lint (LintBasic),
-  RuleResult,
   Rules,
   ShakeOptions (
     ShakeOptions,
@@ -72,77 +54,36 @@ import Development.Shake (
     shakeShare,
     shakeThreads
   ),
-  action,
-  actionCatch,
-  addOracleCache,
-  addTarget,
-  copyFile',
-  getShakeOptions,
-  getShakeOptionsRules,
   need,
-  parallel,
   phony,
-  phonys,
   produces,
   progressSimple,
-  putError,
-  putInfo,
+  putWarn,
   readFile',
   shakeArgsOptionsWith,
   shakeOptions,
   want,
-  withoutTargets,
   writeFile',
+  writeFileLines,
   (%>),
   (&%>),
  )
-import qualified Development.Shake as Shake
-import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
-import Development.Shake.Rule (
-  BuiltinIdentity,
-  BuiltinRun,
-  RunChanged (ChangedNothing, ChangedRecomputeDiff, ChangedRecomputeSame),
-  RunMode (RunDependenciesChanged, RunDependenciesSame),
-  RunResult (RunResult),
-  addBuiltinRule,
-  addUserRule,
-  apply,
-  apply1,
-  getUserRuleOne,
-  noLint,
- )
-import GHC.Generics (Generic)
-import Optics (modifying, over, preview, view, (%), _head)
+import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
 import System.Directory (
-  createDirectoryIfMissing,
   getCurrentDirectory,
-  listDirectory,
   makeAbsolute,
-  removeDirectory,
-  removeDirectoryRecursive,
-  renameDirectory,
-  renameFile,
   setCurrentDirectory,
  )
-import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (
-  addTrailingPathSeparator,
-  dropExtension,
-  dropTrailingPathSeparator,
   splitDirectories,
   takeDirectory,
-  takeExtension,
-  takeFileName,
   (</>),
  )
 import System.Posix (
-  getRealGroupID,
-  getRealUserID,
-  ownerExecuteMode,
   setFileCreationMask,
   setFileMode,
  )
-import Text.Heredoc (here, str)
+import Text.Heredoc (str)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 -- processYaml written yaml =
@@ -309,48 +250,61 @@ archlinuxImage = do
       , "pacman.d/mirrorlist"
       ]
 
-pacRun ::
+sudo, pacman, aur :: [String]
+sudo = ["sudo"]
+pacman = sudo <> ["pacman"]
+aur = ["yay", "--noprovides"]
+pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
+pacArgs =
+  [ "--noconfirm"
+  , "--config=" <> ?projectRoot </> "src/pacman.conf"
+  , "--dbpath=" <> ?shakeDir </> "pacman"
+  ]
+runPac ::
   (CmdResult r, ?projectRoot :: FilePath, ?shakeDir :: FilePath) =>
   [String] ->
   [CmdOption] ->
   [String] ->
   Action r
-pacRun prog opts =
-  runProg opts
-    . (prog <>)
-    . ( [ "--noconfirm"
-        , "--config=" <> ?projectRoot </> "src/pacman.conf"
-        , "--dbpath=" <> ?shakeDir </> "pacman"
-        ]
-          <>
-      )
+runPac pacman opts args = do
+  need ["pacman/sync/.tar"]
+  runProg opts (pacman <> pacArgs <> args)
 
-pacman, aur :: [String]
-pacman = ["pacman"]
-aur = ["yay", "--noprovides"]
+sudoSetup :: Rules ()
+sudoSetup = do
+  phony "sudo" $ do
+    Exit noNeedPassword <- runProg [] $ words "sudo --non-interactive --validate"
+    case noNeedPassword of
+      ExitFailure _ -> do
+        putWarn "input password for sudo"
+        input <- cs <$> liftIO ByteString.getLine
+        runProg [StdinBS (input <> "\n")] $ words "sudo --validate --stdin"
+      ExitSuccess -> pure ()
 
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
   "pacman/sync/.tar" %> \out -> do
     need [?projectRoot </> "src/pacman.conf"]
-    pacRun @() aur [] ["-Sy"]
+    runProg @() [] (sudo <> pacman <> pacArgs <> ["-Sy"])
     produces ["pacman/local/ALPM_DB_VERSION"]
     tar rootOwn out
 
 dockerSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 dockerSetup = do
   phony "docker/login" $
-    runDocker [InheritStdin] ["login", head . splitDirectories . cs $ Util.registry]
+    runDocker [] ["login", head . splitDirectories . cs $ Util.registry]
 
-musl :: (?opts :: [CmdOption], ?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
-musl =
-  "musl/lib/" `dir` do
-    need ["pacman/db" </> dirFile]
-    mkdir "musl/rootfs"
-    pacRun @() aur [] ["--root=musl/rootfs", "musl"]
+musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+musl = do
+  "musl/rootfs" </> dirFile %> \out -> do
+    need ["pacman/sync/.tar"]
+    runPac @() pacman [] ["-S", "--root=musl/rootfs", "musl"]
+    writeFileLines out =<< producesDirectory out
+
+  "musl/lib/.tar" %> \out -> do
     runProg [] $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
 
-skalibs :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
+skalibs :: (?shakeDir :: FilePath) => Rules ()
 skalibs =
   "skalibs/lib/" `dir` do
     let version = "v2.12.0.1"
@@ -366,7 +320,7 @@ skalibs =
       , make "install-sysdeps"
       ]
 
-s6PortableUtils :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
+s6PortableUtils :: (?shakeDir :: FilePath) => Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
   let s6 = "s6-portable-utils"
@@ -435,7 +389,7 @@ s6PortableUtils = do
       make "strip"
       make "install-bin"
 
-busybox :: (?opts :: [CmdOption]) => Rules ()
+busybox :: Rules ()
 busybox = download "busybox" "busybox" *> traverse_ singleApplet applets
  where
   version = "1.35.0"
@@ -459,6 +413,7 @@ rules = do
   let ?opts = []
   addContainerImageRule
 
+  sudoSetup
   pacmanSetup
   dockerSetup
 
@@ -472,7 +427,7 @@ rules = do
 
 main :: IO ()
 main = do
-  setFileCreationMask 0o022
+  void $ setFileCreationMask 0o022
   projectRoot <- liftIO $ makeAbsolute =<< getCurrentDirectory
   let ?projectRoot = projectRoot
       ?shakeDir = projectRoot </> shakeFiles shakeOptions

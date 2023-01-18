@@ -23,14 +23,12 @@ module Util.Shake.Container (
 ) where
 
 import qualified Util
-import Util.Shake (parallel_, runProg, (<:>))
+import Util.Shake (runProg, (<:>))
 
 import Control.Exception.Safe (throwString)
 import Control.Monad (void)
-import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Lazy as ByteString.Lazy
 import qualified Data.List as List
 import Data.String.Conversions (cs)
 import Development.Shake (
@@ -46,7 +44,6 @@ import Development.Shake (
   need,
   phonys,
   putInfo,
-  runAfter,
   withTempDir,
  )
 import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
@@ -67,16 +64,6 @@ import GHC.Generics (Generic)
 import Optics (view)
 import System.Exit (ExitCode (ExitSuccess))
 import System.FilePath ((</>))
-import System.IO (
-  IOMode (ReadMode),
-  hClose,
-  hFlush,
-  hIsOpen,
-  hIsReadable,
-  hIsSeekable,
-  hIsWritable,
-  withFile,
- )
 
 newtype ImageRepo = ImageRepo {repo :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)

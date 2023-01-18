@@ -52,6 +52,7 @@ module Util (
   v1,
   volumeMount,
   workload,
+  Owner,
 ) where
 
 import Control.Monad.State.Strict (MonadState, modify)
@@ -268,21 +269,19 @@ persistentVolumeClaimVolume =
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
 
-nonrootOwn :: (UserID, GroupID)
-nonrootOwn = (nonrootUid, nonrootGid)
+type Owner = (UserID, GroupID)
 
+nonrootOwn :: Owner
+nonrootOwn = (nonrootUid, nonrootGid)
 nonrootUid :: UserID
 nonrootUid = 65532
-
 nonrootGid :: GroupID
 nonrootGid = 65532
 
-rootOwn :: (UserID, GroupID)
+rootOwn :: Owner
 rootOwn = (rootUid, rootGid)
-
 rootUid :: UserID
 rootUid = 0
-
 rootGid :: GroupID
 rootGid = 0
 

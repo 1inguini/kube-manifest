@@ -2,47 +2,49 @@ module Util.Shake (
   (<:>),
   dir,
   dirFile,
+  getDirectoryContentsRecursive,
   gitClone,
   listDirectoryRecursive,
   mkdir,
   parallel_,
-  producedDirectory,
   runProg,
   tar,
+  producesDirectory,
+  copyDir,
 ) where
 
-import Control.Exception.Safe (displayException, throwString)
+import Util (Owner)
+
+import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (filterM, void)
-import Data.ByteString (ByteString)
-import Data.String (IsString (fromString))
 import Development.Shake (
   Action,
   CmdOption (Cwd),
   CmdResult,
   FilePattern,
-  RuleResult,
   Rules,
   StdoutTrim (StdoutTrim),
   actionCatch,
   command,
+  copyFile',
+  doesDirectoryExist,
+  getDirectoryContents,
   need,
-  newCache,
   parallel,
   phony,
   produces,
   putError,
+  readFile',
   withoutTargets,
   writeFile',
   (%>),
  )
-import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
-import GHC.Generics (Generic)
-import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
+import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
-import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, takeDirectory, takeFileName, (</>))
-import System.Posix (GroupID, UserID)
+import System.FilePath (addTrailingPathSeparator, dropFileName, takeDirectory, takeFileName, (</>))
+import System.Posix (GroupID, UserID, setSymbolicLinkOwnerAndGroup)
 
 instance Exceptions.MonadThrow Action where
   throwM err = do
@@ -69,9 +71,11 @@ listGitFiles repoDir = do
   gitFiles <- fmap (".git" </>) <$> listDirectoryRecursive (repoDir </> ".git")
   pure $ gitFiles <> lines repoFiles
 
+defaultOpts :: [CmdOption]
+defaultOpts = []
 runProg :: (CmdResult r) => [CmdOption] -> [String] -> Action r
-runProg opts (prog : args) = command opts prog args
-runProg opts [] = throwString "runProg: empty"
+runProg opts (prog : args) = command (defaultOpts <> opts) prog args
+runProg _ [] = throwString "runProg: empty"
 
 mkdir :: MonadIO m => FilePath -> m ()
 mkdir = liftIO . createDirectoryIfMissing True
@@ -89,9 +93,41 @@ listDirectoryRecursive dir = liftIO $ do
       )
       =<< listDirectory dir
 
-producedDirectory :: FilePath -> Action ()
-producedDirectory dir =
-  produces . fmap (dir </>) =<< listDirectoryRecursive dir
+getDirectoryContentsRecursive :: FilePath -> Action [FilePath]
+getDirectoryContentsRecursive dir = do
+  let par :: [FilePath] -> [Action [FilePath]]
+      par = fmap $ \path -> do
+        let deepPath = dir </> path
+        isDir <- doesDirectoryExist deepPath
+        if isDir
+          then do
+            ls <- getDirectoryContentsRecursive deepPath
+            pure $ (path </>) <$> ls
+          else pure []
+  ls <- filter (/= dirFile) <$> getDirectoryContents dir
+  concat <$> parallel (par ls)
+
+producesDirectory :: FilePath -> Action [FilePath]
+producesDirectory dir = do
+  ls <- getDirectoryContentsRecursive dir
+  produces $ (dir </>) <$> ls
+  pure ls
+
+copyDir :: (?owner :: Owner) => FilePath -> FilePath -> Action ()
+copyDir srcdir dstdir = do
+  let par = fmap $ \path -> do
+        let
+          srcfile = srcdir </> path
+          dstfile = dstdir </> path
+        let
+          dstdir = dropFileName dstfile
+        mkdir dstdir
+        liftIO $ uncurry (setSymbolicLinkOwnerAndGroup dstdir) ?owner
+        void . try @Action @IOError $ liftIO $ removeFile dstfile -- symlink safety
+        copyFile' srcfile dstfile
+        liftIO $ uncurry (setSymbolicLinkOwnerAndGroup dstfile) ?owner
+  paths <- readFile' $ srcdir </> dirFile
+  parallel_ . par $ lines paths
 
 dirFile :: String
 dirFile = ".ls"
