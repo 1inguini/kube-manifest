@@ -42,7 +42,13 @@ import Development.Shake (
   writeFile',
   (%>),
  )
-import System.Directory (copyFile, createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
+import System.Directory (
+  copyFile,
+  createDirectoryIfMissing,
+  listDirectory,
+  removeDirectoryRecursive,
+  removeFile,
+ )
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (addTrailingPathSeparator, dropExtension, takeDirectory, (</>))
 import System.Posix (GroupID, UserID, setSymbolicLinkOwnerAndGroup)

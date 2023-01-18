@@ -8,19 +8,19 @@ module Util.Shake.Container (
   ImageTag (..),
   addContainerImageRule,
   addTaggedImageTarget,
+  commit,
   copyDirPrefixed,
   dockerIo,
+  from,
   image,
   latest,
+  mount,
   needImage,
   needImages,
   podman,
-  podmanCommit,
-  podmanFrom,
-  podmanMount,
-  podmanPushEnd,
+  pushEnd,
   registry,
-  runPodman,
+  runtime,
 ) where
 
 import Util (Owner)
@@ -91,7 +91,7 @@ addContainerImageRule = addBuiltinRule noLint imageIdentity run
   newStore :: ImageName -> Action (Maybe ByteString)
   newStore name = do
     (Exit exitCode, Stdout stdout) <-
-      runPodman $ words "images --no-trunc --quiet" <> [show name]
+      runtime $ words "images --no-trunc --quiet" <> [show name]
     case (exitCode, ByteString.split (fromIntegral $ fromEnum '\n') stdout) of
       (ExitSuccess, newStore : _) -> pure $ Just newStore
       _ -> pure Nothing
@@ -156,8 +156,8 @@ addTaggedImageTarget = addTarget . show
 
 podman :: String
 podman = "podman"
-runPodman :: (CmdResult r, ?opts :: [CmdOption]) => [String] -> Action r
-runPodman = runProg . (podman :)
+runtime :: (CmdResult r, ?opts :: [CmdOption]) => [String] -> Action r
+runtime = runProg . (podman :)
 
 -- podmanCopy ::
 --   (?opts :: [CmdOption], ?container :: ContainerId) =>
@@ -169,29 +169,29 @@ runPodman = runProg . (podman :)
 --   tar <- liftIO $ ByteString.Lazy.readFile tarFile
 --   putInfo $ "`podman cp` from" <:> tarFile
 --   let ?opts = StdinBS tar : BinaryPipes : ?opts
---   runPodman @() ["cp", "--archive=false", "--overwrite=true", "-", ?container <> ":" <> dir]
+--   runtime @() ["cp", "--archive=false", "--overwrite=true", "-", ?container <> ":" <> dir]
 --   putInfo $ "done: `podman cp` from" <:> tarFile
 
-podmanMount ::
+mount ::
   (?opts :: [CmdOption], ?container :: ContainerId) => ((?rootfs :: FilePath) => Action a) -> Action a
-podmanMount act = do
-  StdoutTrim rootfs <- runPodman ["mount", ?container]
+mount act = do
+  StdoutTrim rootfs <- runtime ["mount", ?container]
   let ?rootfs = rootfs
   result <- act
-  runPodman @() ["unmount", ?container]
+  runtime @() ["unmount", ?container]
   pure result
 
 copyDirPrefixed :: (?rootfs :: FilePath, ?owner :: Owner) => FilePath -> FilePath -> Action ()
 copyDirPrefixed src dst = copyDir src $ ?rootfs </> dropDrive dst
 
-podmanCommit ::
+commit ::
   ( ?opts :: [CmdOption]
   , ?imageName :: ImageName
   , ?container :: ContainerId
   ) =>
   [ContainerfileInstrution] ->
   Action ()
-podmanCommit insts = do
+commit insts = do
   -- time <- iso8601Show <$> liftIO getZonedTime
   -- let labels =
   --       [ "LABEL org.opencontainers.image.created=$seconds"
@@ -203,32 +203,32 @@ podmanCommit insts = do
   --       , "LABEL org.opencontainers.image.source=https://git.1inguini.com/1inguini/kube-manifest/$name"
   --       , "LABEL org.opencontainers.image.source=https://github.com/1inguini/kube-manifest/$name"
   --       ]
-  runPodman $
+  runtime $
     ["commit", "--include-volumes=false"]
       <> concatMap (("--change" :) . (: [])) insts
       <> [?container, show ?imageName]
 
-podmanPushEnd :: (?opts :: [CmdOption], ?imageName :: ImageName, ?container :: ContainerId) => Action ()
-podmanPushEnd = do
+pushEnd :: (?opts :: [CmdOption], ?imageName :: ImageName, ?container :: ContainerId) => Action ()
+pushEnd = do
   need ["podman/login"]
-  -- runPodman @() ["push", show ?imageName]
+  -- runtime @() ["push", show ?imageName]
   runAfter $ do
     callProcess podman . words $ "stop --time=0" <:> ?container
     callProcess podman . words $ "rm" <:> ?container
 
-podmanGetInsts :: (?opts :: [CmdOption], ?imageName :: ImageName) => Action [ContainerfileInstrution]
-podmanGetInsts = do
+getInsts :: (?opts :: [CmdOption], ?imageName :: ImageName) => Action [ContainerfileInstrution]
+getInsts = do
   let
     inspect field =
       fromStdoutTrim
-        <$> runPodman
+        <$> runtime
           [ "inspect"
           , "--format={{.Config." <> field <> "}}"
           , show ?imageName
           ]
     inspectArray field =
       fromStdoutTrim
-        <$> runPodman
+        <$> runtime
           [ "inspect"
           , "--format=[{{range $index, $elem := .Config." <> field <> "}}{{if $index}}, {{end}}\"{{$elem}}\"{{end}}]"
           , show ?imageName
@@ -244,21 +244,21 @@ podmanGetInsts = do
     , "CMD" <:> cmd
     ]
 
-podmanFrom ::
-  (?opts :: [CmdOption], ?imageName :: ImageName) =>
+from ::
+  (?opts :: [CmdOption]) =>
   ImageName ->
   [String] ->
   ((?container :: ContainerId, ?init :: String) => Action a) ->
   Action a
-podmanFrom base opt act = withTempDir $ \tmp -> do
+from base args act = withTempDir $ \tmp -> do
   let
     init = "busybox/busybox"
     cmd = takeFileName init
   copyFile' init $ tmp </> cmd
   StdoutTrim container <-
-    runPodman $
+    runtime $
       ["run", "--detach", "-t", "--volume=" <> tmp <> ":/tmp", "--entrypoint=/tmp" </> cmd]
-        <> opt
+        <> args
         <> [show base, "sh"]
   let
     ?container = container
