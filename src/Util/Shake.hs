@@ -14,6 +14,7 @@ module Util.Shake (
   runProg_,
   tar,
   copyDir,
+  gitCloneRule,
 ) where
 
 import Control.Exception.Safe (
@@ -31,6 +32,7 @@ import Development.Shake (
   CmdResult,
   FilePattern,
   Rules,
+  StdoutTrim (StdoutTrim),
   actionCatch,
   command,
   need,
@@ -40,6 +42,7 @@ import Development.Shake (
   putError,
   readFile',
   writeFile',
+  writeFileLines,
   (%>),
  )
 import System.Directory (
@@ -50,9 +53,10 @@ import System.Directory (
   removeFile,
  )
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
-import System.FilePath (addTrailingPathSeparator, dropExtension, takeDirectory, (</>))
+import System.FilePath (addTrailingPathSeparator, dropExtension, takeDirectory, (<.>), (</>))
 import System.Posix (GroupID, UserID, setSymbolicLinkOwnerAndGroup)
 
+import qualified Data.List as List
 import Util (Owner)
 
 instance Exceptions.MonadThrow Action where
@@ -73,6 +77,14 @@ gitClone repo tag dst = do
   liftIO $ removeDirectoryRecursive dst
   let ?opts = []
   runProg ["git", "clone", "--branch=" <> tag, repo, dst]
+
+gitCloneRule :: (?opts :: [CmdOption]) => FilePath -> (String, String) -> Rules ()
+gitCloneRule dst (repo, tag) = do
+  (dst </> dirFile <.> "git") %> \out -> do
+    gitClone repo tag dst
+    StdoutTrim ls <- runProg $ words "git ls-tree -r --name-only" <> [tag]
+    git <- fmap (".git" </>) <$> listDirectoryRecursive (dst </> ".git")
+    writeFileLines out $ git <> lines ls
 
 runProg :: (CmdResult r, ?opts :: [CmdOption]) => [String] -> Action r
 runProg (prog : args) = command ?opts prog args
@@ -108,7 +120,6 @@ listDirectoryRecursive dir = liftIO $ do
             else pure [path]
       )
       =<< listDirectory dir
-
 producedDirectory :: FilePath -> Action ()
 producedDirectory dir =
   produces . fmap (dir </>) =<< listDirectoryRecursive dir

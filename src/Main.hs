@@ -1,6 +1,7 @@
 module Main where
 
 import Util (
+  getCurrentOwn,
   nobodyGid,
   nobodyUid,
   nonrootGid,
@@ -12,9 +13,11 @@ import Util (
 import Util.Shake (
   aur,
   aurInstall,
+  copyDir,
   dir,
   dirFile,
   gitClone,
+  gitCloneRule,
   listDirectoryRecursive,
   mkdir,
   parallel_,
@@ -34,7 +37,7 @@ import qualified Util.Shake.Container as Container (
   latest,
   mount,
   pushEnd,
-  runPodman,
+  runtime,
  )
 import qualified Util.Shake.Container as Image
 
@@ -87,6 +90,7 @@ import System.Directory (
 import System.FilePath (
   dropTrailingPathSeparator,
   takeDirectory,
+  (<.>),
   (</>),
  )
 import System.Posix (
@@ -218,13 +222,14 @@ archlinuxImage = do
     Container.ImageName (Image.dockerIo "library/archlinux", Container.ImageTag "base-devel") `Container.from` [] $ Container.mount $ do
       let
         podmanExec :: CmdResult r => [String] -> Action r
-        podmanExec = Container.runPodman . (words "exec -i" <>)
+        podmanExec = Container.runtime . (words "exec -i" <>)
         rootExec, nonrootExec :: (CmdResult r, ?args :: [String]) => [String] -> Action r
         rootExec = podmanExec . (?args <>) . (["--user=root", ?container] <>)
         nonrootExec = podmanExec . (?args <>) . (["--user=nonroot", ?container] <>)
         rootCopy, copy :: FilePath -> FilePath -> Action ()
         rootCopy = let ?owner = rootOwn in Container.copyDirPrefixed
         copy = let ?owner = nonrootOwn in Container.copyDirPrefixed
+      let ?args = []
       parallel_
         [ rootCopy "archlinux/etc" "/etc"
         , rootCopy "pacman/db/sync" "/var/lib/pacman/sync"
@@ -232,19 +237,19 @@ archlinuxImage = do
         ]
       parallel_
         [ do
-            rootExec [] . words $ "groupadd nonroot" <:> "--gid" <:> show nonrootGid
-            rootExec [] . words $
+            rootExec @() . words $ "groupadd nonroot" <:> "--gid" <:> show nonrootGid
+            rootExec @() . words $
               "useradd nonroot"
                 <:> "--gid"
                 <:> show nonrootGid
                 <:> "--uid"
                 <:> show nonrootUid
                 <:> "-m -s /usr/bin/nologin"
-        , rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
+        , rootExec $ words "pacman --noconfirm -S git glibc moreutils rsync"
         ]
       parallel_
-        [ nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
-        , rootExec [] ["locale-gen"]
+        [ let ?args = ["--workdir=/home/nonroot/aur-helper"] in nonrootExec @() ["makepkg", "--noconfirm", "-sir"]
+        , rootExec ["locale-gen"]
         ]
       src <- fmap lines . readFile' $ "archlinux/aur-helper" </> dirFile
       current <- listDirectoryRecursive "archlinux/aur-helper"
@@ -258,8 +263,7 @@ archlinuxImage = do
         ]
       Container.pushEnd
 
-  "archlinux/aur-helper/" `dir` do
-    gitClone "https://aur.archlinux.org/yay-bin.git" "master" ?dir
+  "archlinux/aur-helper/" `gitCloneRule` ("https://aur.archlinux.org/yay-bin.git", "master")
 
   ("archlinux/etc" </> dirFile) %> \out -> do
     let ls = ["locale.gen", "sudoers", "pacman.conf", "pacman.d/mirrorlist"]
@@ -310,38 +314,89 @@ pacmanSetup = do
 podmanSetup :: (?opts :: [CmdOption]) => Rules ()
 podmanSetup = do
   phony "podman/login" $
-    Container.runPodman ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
+    Container.runtime ["login", takeDirectory . dropTrailingPathSeparator $ cs Util.registry]
 
-musl :: (?opts :: [CmdOption], ?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
-musl =
-  "musl/lib/" `dir` do
+musl :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
+musl = do
+  "musl/rootfs" `dir` do
     need ["pacman/db" </> dirFile]
-    mkdir "musl/rootfs"
     aurInstall @() ["--root=musl/rootfs", "musl"]
-    runProg $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
+
+  "musl/rootfs/usr/lib/musl/lib" </> dirFile %> \out -> do
+    need ["musl/rootfs" </> dirFile]
+    writeFileLines out =<< listDirectoryRecursive (takeDirectory out)
+
+  "musl/lib/" `dir` do
+    owner <- liftIO getCurrentOwn
+    let ?owner = owner
+    copyDir "musl/rootfs/usr/lib/musl/lib" "musl/lib"
 
 skalibs :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
-skalibs =
-  "skalibs/lib/" `dir` do
-    let version = "v2.12.0.1"
-    gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
+skalibs = do
+  let version = "v2.12.0.1"
+  let make = runProg_ . ("make" :) . (: [])
+  let ?opts = Cwd "skalibs/src" : ?opts
 
-    let ?opts = Cwd "skalibs/src" : ?opts
-    runProg_ $ words "./configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
-    let make = runProg_ . ("make" :) . (: [])
-    make "all"
+  "skalibs/src/" `gitCloneRule` ("https://github.com/skarnet/skalibs.git", version)
+
+  "skalibs/src/config.mak" %> \out -> do
+    need ["skalibs/src" </> dirFile <.> "git"]
+    runProg_
+      [ "./configure"
+      , "--disable-shared"
+      , "--libdir=" <> ?shakeDir </> "skalibs/lib"
+      , "--sysdepdir=" <> ?shakeDir </> "skalibs/sysdeps"
+      ]
+    produces
+      [ "skalibs/src/src/include/skalibs/config.h"
+      , "skalibs/src/sysdeps.cfg/socket.lib"
+      , "skalibs/src/sysdeps.cfg/spawn.lib"
+      , "skalibs/src/sysdeps.cfg/sysclock.lib"
+      , "skalibs/src/sysdeps.cfg/sysdeps"
+      , "skalibs/src/sysdeps.cfg/target"
+      , "skalibs/src/sysdeps.cfg/timer.lib"
+      , "skalibs/src/sysdeps.cfg/util.lib"
+      ]
+
+  "skalibs/lib/libskarnet.a" %> \out -> do
+    need ["skalibs/src/config.mak"]
     make "strip"
-    parallel_
-      [ make "install-lib"
-      , make "install-sysdeps"
+    make "install-libs"
+
+  "skalibs/sysdeps/sysdeps" %> \out -> do
+    need ["skalibs/src/config.mak"]
+    make "install-sysdeps"
+    produces
+      [ "skalibs/sysdeps/socket.lib"
+      , "skalibs/sysdeps/spawn.lib"
+      , "skalibs/sysdeps/sysclock.lib"
+      , "skalibs/sysdeps/target"
+      , "skalibs/sysdeps/timer.lib"
+      , "skalibs/sysdeps/util.lib"
       ]
 
 s6PortableUtils :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
   let s6 = "s6-portable-utils"
+  let make = runProg . ("make" :) . (: [])
+  let ?opts = Cwd (s6 </> "src") : ?opts
 
-  ((s6 </> "bin") </>)
+  (s6 </> "src/") `gitCloneRule` ("https://github.com/skarnet/s6-portable-utils.git", version)
+
+  s6 </> "src/config.mak" %> \out -> do
+    need [s6 </> "src" </> dirFile <.> "git"]
+    runProg_
+      [ "./configure"
+      , "--bindir=" <> ?shakeDir </> s6 </> "bin"
+      , "--enable-static-libc"
+      , "--with-libs=" <> ?shakeDir </> "musl/lib"
+      , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
+      , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
+      ]
+    produces [s6 </> "src/src/include/s6-portable-utils/config.h"]
+
+  (s6 </>) . ("bin" </>)
     <$> [ "s6-basename"
         , "s6-cat"
         , "s6-chmod"
@@ -387,20 +442,13 @@ s6PortableUtils = do
         , "s6-update-symlinks"
         , "seekablepipe"
         ]
-    &%> \outs@(out : _) -> do
-      gitClone "https://github.com/skarnet/s6-portable-utils.git" version $ s6 </> "src"
-      need ["musl/lib" </> dirFile, "skalibs/lib" </> dirFile]
-      let ?opts = Cwd (s6 </> "src") : ?opts
-      runProg_
-        [ "./configure"
-        , "--bindir=" <> ?shakeDir </> takeDirectory out
-        , "--enable-static-libc"
-        , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
-        , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
-        , "--with-libs=" <> ?shakeDir </> "musl/lib"
+    &%> \outs -> do
+      need
+        [ s6 </> "src/config.mak"
+        , "musl/lib" </> dirFile
+        , "skalibs/lib/libskarnet.a"
+        , "skalibs/sysdeps/sysdeps"
         ]
-      let make = runProg . ("make" :) . (: [])
-      make "all"
       make "strip"
       make "install-bin"
 
@@ -410,7 +458,7 @@ busybox = download "busybox" "busybox" *> traverse_ singleApplet applets
   version = "1.35.0"
   applets = ["cp"]
   download applet src =
-    ("busybox" </> applet) %> \out -> do
+    ("busybox/bin" </> applet) %> \out -> do
       runProg_
         [ "curl"
         , "-L"
