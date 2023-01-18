@@ -49,10 +49,10 @@ common option
   ghc-options:
     -threaded -rtsopts "-with-rtsopts=-N -I0 -qg"
     -fplugin=Data.Record.Anon.Plugin -fconstraint-solver-iterations=10
+    -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wmissing-export-lists
+    -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
 
--- -Wall -Wcompat -Widentities -Wincomplete-record-updates
--- -Wincomplete-uni-patterns -Wmissing-export-lists
--- -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
 executable kube-manifest
   import:           option
   main-is:          Main.hs
