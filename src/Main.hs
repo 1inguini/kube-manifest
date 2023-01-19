@@ -11,33 +11,35 @@ import Util.Shake (
   producesDirectory,
   runProg,
   tar,
+  (<:>),
  )
 import Util.Shake.Container (
   ImageName (ImageName),
   ImageRepo (ImageRepo),
   addContainerImageRule,
+  docker,
   dockerCommit,
   dockerCopy,
   dockerPushEnd,
+  dockerSetup,
   image,
   latest,
-  runDocker,
   withContainer,
  )
 import qualified Util.Shake.Container as Image
 
-import Control.Exception.Safe (catch, finally)
+import Control.Exception.Safe (finally)
 import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.ByteString as ByteString
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
+import Data.Functor (($>))
 import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
   CmdOption (Cwd, StdinBS),
-  CmdResult,
   Exit (Exit),
   Lint (LintBasic),
   Rules,
@@ -75,7 +77,6 @@ import System.Directory (
   setCurrentDirectory,
  )
 import System.FilePath (
-  splitDirectories,
   takeDirectory,
   (</>),
  )
@@ -165,6 +166,46 @@ import Text.Heredoc (str)
 -- main :: IO ()
 -- main = generate
 
+sudoProgram, pacmanProgram, aurProgram :: String
+sudoProgram = "sudo"
+pacmanProgram = "pacman"
+aurProgram = "yay"
+
+needSudo :: Action ([String] -> [String])
+pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
+needSudo = need ["sudo"] $> (sudoProgram :) . (words "--non-interactive" <>)
+sudoSetup :: Rules ()
+sudoSetup = do
+  phony "sudo" $ do
+    Exit noNeedPassword <- runProg [] $ sudoProgram : words "--non-interactive --validate"
+    case noNeedPassword of
+      ExitFailure _ -> do
+        putWarn $ "input password for" <:> sudoProgram
+        input <- cs <$> liftIO ByteString.getLine
+        runProg [StdinBS input] $ sudoProgram : words "--validate --stdin"
+      ExitSuccess -> pure ()
+
+pacArgs =
+  [ "--noconfirm"
+  , "--config=" <> ?projectRoot </> "src/pacman.conf"
+  , "--dbpath=" <> ?shakeDir </> "pacman"
+  ]
+needPacman :: Action ([String] -> [String])
+needPacman = do
+  need ["pacman/sync/.tar"]
+  sudo <- needSudo
+  pure $ sudo . (pacmanProgram :)
+needAur :: Action ([String] -> [String])
+needAur = needPacman $> (aurProgram :) . (["--noprovides"] <>)
+pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+pacmanSetup = do
+  "pacman/sync/.tar" %> \out -> do
+    need [?projectRoot </> "src/pacman.conf"]
+    sudo <- needSudo
+    runProg @() [] (sudo $ pacmanProgram : pacArgs <> ["-Sy"])
+    produces ["pacman/local/ALPM_DB_VERSION"]
+    tar rootOwn out
+
 nonrootImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   Image.registry "nonroot" `image` do
@@ -192,13 +233,13 @@ nonrootImage = do
       , "nonroot:x:" <> show nonrootGid <> ":"
       ]
 
-archlinuxImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
+archlinuxImage :: (?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
   Image.registry "archlinux" `image` do
     ImageName (Image.dockerIo "library/archlinux", latest) `withContainer` [] $ do
       let
         dockerExec :: [String] -> Action ()
-        dockerExec = runDocker [] . (words "exec -i" <>)
+        dockerExec = runProg [] . docker . (words "exec -i" <>)
         rootExec, nonrootExec :: [String] -> [String] -> Action ()
         rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
         nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
@@ -250,55 +291,11 @@ archlinuxImage = do
       , "pacman.d/mirrorlist"
       ]
 
-sudo, pacman, aur :: [String]
-sudo = ["sudo"]
-pacman = sudo <> ["pacman"]
-aur = ["yay", "--noprovides"]
-pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
-pacArgs =
-  [ "--noconfirm"
-  , "--config=" <> ?projectRoot </> "src/pacman.conf"
-  , "--dbpath=" <> ?shakeDir </> "pacman"
-  ]
-runPac ::
-  (CmdResult r, ?projectRoot :: FilePath, ?shakeDir :: FilePath) =>
-  [String] ->
-  [CmdOption] ->
-  [String] ->
-  Action r
-runPac pacman opts args = do
-  need ["pacman/sync/.tar"]
-  runProg opts (pacman <> pacArgs <> args)
-
-sudoSetup :: Rules ()
-sudoSetup = do
-  phony "sudo" $ do
-    Exit noNeedPassword <- runProg [] $ words "sudo --non-interactive --validate"
-    case noNeedPassword of
-      ExitFailure _ -> do
-        putWarn "input password for sudo"
-        input <- cs <$> liftIO ByteString.getLine
-        runProg [StdinBS (input <> "\n")] $ words "sudo --validate --stdin"
-      ExitSuccess -> pure ()
-
-pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
-pacmanSetup = do
-  "pacman/sync/.tar" %> \out -> do
-    need [?projectRoot </> "src/pacman.conf"]
-    runProg @() [] (sudo <> pacman <> pacArgs <> ["-Sy"])
-    produces ["pacman/local/ALPM_DB_VERSION"]
-    tar rootOwn out
-
-dockerSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
-dockerSetup = do
-  phony "docker/login" $
-    runDocker [] ["login", head . splitDirectories . cs $ Util.registry]
-
 musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl = do
   "musl/rootfs" </> dirFile %> \out -> do
-    need ["pacman/sync/.tar"]
-    runPac @() pacman [] ["-S", "--root=musl/rootfs", "musl"]
+    pacman <- needPacman
+    runProg @() [] $ pacman ["-S", "--root=musl/rootfs", "musl"]
     writeFileLines out =<< producesDirectory out
 
   "musl/lib/.tar" %> \out -> do

@@ -19,7 +19,7 @@ module Util.Shake.Container (
   needImage,
   needImages,
   registry,
-  runDocker,
+  dockerSetup,
 ) where
 
 import qualified Util
@@ -34,7 +34,6 @@ import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
   CmdOption (FileStdin),
-  CmdResult,
   Exit (Exit),
   RuleResult,
   Rules,
@@ -42,6 +41,7 @@ import Development.Shake (
   addTarget,
   copyFile',
   need,
+  phony,
   phonys,
   putInfo,
   withTempDir,
@@ -63,7 +63,7 @@ import Development.Shake.Rule (
 import GHC.Generics (Generic)
 import Optics (view)
 import System.Exit (ExitCode (ExitSuccess))
-import System.FilePath ((</>))
+import System.FilePath (splitDirectories, (</>))
 
 newtype ImageRepo = ImageRepo {repo :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
@@ -78,7 +78,7 @@ newtype Image = ImageId {id :: ByteString}
 newtype ImageRule = ImageRule {rule :: ImageName -> Maybe (Action ())}
 type instance RuleResult ImageName = Image
 
-addContainerImageRule :: (?opts :: [CmdOption]) => Rules ()
+addContainerImageRule :: Rules ()
 addContainerImageRule = addBuiltinRule noLint imageIdentity run
  where
   imageIdentity :: BuiltinIdentity ImageName Image
@@ -87,7 +87,7 @@ addContainerImageRule = addBuiltinRule noLint imageIdentity run
   newStore :: ImageName -> Action (Maybe ByteString)
   newStore name = do
     (Exit exitCode, Stdout stdout) <-
-      runDocker [] $ words "images --no-trunc --quiet" <> [show name]
+      runProg [] . docker $ words "images --no-trunc --quiet" <> [show name]
     case (exitCode, ByteString.split (fromIntegral $ fromEnum '\n') stdout) of
       (ExitSuccess, newStore : _) -> pure $ Just newStore
       _ -> pure Nothing
@@ -150,54 +150,49 @@ image repo act = do
 addTaggedImageTarget :: ImageName -> Rules ()
 addTaggedImageTarget = addTarget . show
 
-docker :: String
-docker = "podman"
-runDocker :: (CmdResult r) => [CmdOption] -> [String] -> Action r
-runDocker opts = runProg opts . (docker :)
+dockerProgram :: String
+dockerProgram = "podman"
+dockerSetup :: Rules ()
+dockerSetup = do
+  phony "docker/login" $
+    runProg [] $
+      dockerProgram : ["login", head . splitDirectories . cs $ Util.registry]
+docker :: [String] -> [String]
+docker = (dockerProgram :)
 
-dockerCopy ::
-  (?opts :: [CmdOption], ?container :: ContainerId) =>
-  FilePath ->
-  FilePath ->
-  Action ()
+dockerCopy :: (?container :: ContainerId) => FilePath -> FilePath -> Action ()
 dockerCopy tarFile dir = do
   putInfo $ "`docker cp` from" <:> tarFile <:> "to" <:> dir
   need [tarFile]
-  let ?opts = FileStdin tarFile : ?opts
-  runDocker @() [] ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
+  runProg @() [FileStdin tarFile] $
+    docker ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
   putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
 
 dockerCommit ::
-  ( ?opts :: [CmdOption]
-  , ?imageName :: ImageName
+  ( ?imageName :: ImageName
   , ?container :: ContainerId
   ) =>
   [ContainerfileInstruction] ->
   Action ()
 dockerCommit commands =
-  runDocker [] $
-    ["commit", "--include-volumes=false"]
+  runProg [] $
+    docker ["commit", "--include-volumes=false"]
       <> concatMap (("--change" :) . (: [])) commands
       <> [?container, show ?imageName]
 
-dockerPushEnd :: (?opts :: [CmdOption], ?imageName :: ImageName, ?container :: ContainerId) => Action ()
+dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = do
   need ["docker/login"]
   -- runDocker @() [] ["push", show ?imageName]
-  runDocker @() [] . words $ "stop --time=0" <:> ?container
-  runDocker @() [] . words $ "rm" <:> ?container
+  runProg @() [] . docker . words $ "stop --time=0" <:> ?container
+  runProg @() [] . docker . words $ "rm" <:> ?container
 
-withContainer ::
-  (?shakeDir :: FilePath) =>
-  ImageName ->
-  [String] ->
-  ((?container :: ContainerId) => Action a) ->
-  Action a
+withContainer :: ImageName -> [String] -> ((?container :: ContainerId) => Action a) -> Action a
 withContainer image opt act = withTempDir $ \tmp -> do
   let init = "busybox/busybox"
   copyFile' init $ tmp </> "sh"
   Stdout container <-
-    runDocker [] $
+    runProg [] . docker $
       [ "run"
       , "--detach"
       , "-t"
