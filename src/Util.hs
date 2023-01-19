@@ -53,6 +53,7 @@ module Util (
   volumeMount,
   workload,
   Owner,
+  getCurrentOwner,
 ) where
 
 import Control.Monad.State.Strict (MonadState, modify)
@@ -67,7 +68,7 @@ import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import Optics (A_Setter, Is, Optic', over, set, view, (%))
 import Secret (host)
-import System.Posix (GroupID, UserID)
+import System.Posix (GroupID, UserID, getEffectiveGroupID, getEffectiveUserID)
 import TH (deriveJSON)
 
 -- import Data.
@@ -284,6 +285,12 @@ rootUid :: UserID
 rootUid = 0
 rootGid :: GroupID
 rootGid = 0
+
+getCurrentOwner :: IO Owner
+getCurrentOwner =
+  (,)
+    <$> getEffectiveUserID
+    <*> getEffectiveGroupID
 
 workload ::
   (?namespace :: Text, ?app :: Text, ?name :: Text) =>

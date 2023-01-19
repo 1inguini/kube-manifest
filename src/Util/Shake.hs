@@ -21,7 +21,7 @@ module Util.Shake (
   tar,
 ) where
 
-import Util (Owner, rootOwn)
+import Util (Owner, getCurrentOwner, rootOwn)
 
 import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
@@ -48,15 +48,17 @@ import Development.Shake (
   phony,
   produces,
   putError,
+  putInfo,
   putWarn,
   readFile',
+  withoutTargets,
   writeFileLines,
   (%>),
  )
 import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
-import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
+import System.Directory (copyFile, createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist)
-import System.FilePath (dropExtension, dropFileName, takeDirectory, takeFileName, (<.>), (</>))
+import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, hasTrailingPathSeparator, takeDirectory, takeFileName, (<.>), (</>))
 import System.Posix (GroupID, UserID, setSymbolicLinkOwnerAndGroup)
 
 instance Exceptions.MonadThrow Action where
@@ -84,13 +86,13 @@ sudoSetup :: Rules ()
 sudoSetup = do
   phony "auth" $ do
     Exit noNeedPassword <-
-      runProg [EchoStdout False] $
+      runProg [] $
         sudoProgram : words "--non-interactive --validate"
     case noNeedPassword of
       ExitFailure _ -> do
         putWarn $ "input password for" <:> sudoProgram
         input <- cs <$> liftIO ByteString.getLine
-        runProg [StdinBS input] $ sudoProgram : words "--validate --stdin"
+        runProg [EchoStdout False, StdinBS input] $ sudoProgram : words "--validate --stdin"
       ExitSuccess -> pure ()
 
 pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
@@ -154,14 +156,14 @@ listDirectoryRecursive dir = liftIO $ do
 getDirectoryContentsRecursive :: FilePath -> Action [FilePath]
 getDirectoryContentsRecursive dir = do
   let par :: [FilePath] -> [Action [FilePath]]
-      par = fmap $ \path -> do
-        let deepPath = dir </> path
-        isDir <- doesDirectoryExist deepPath
+      par = fmap $ \content -> do
+        let fullPath = dir </> content
+        isDir <- doesDirectoryExist fullPath
         if isDir
           then do
-            ls <- getDirectoryContentsRecursive deepPath
-            pure $ (path </>) <$> ls
-          else pure [path]
+            ls <- getDirectoryContentsRecursive fullPath
+            pure . (addTrailingPathSeparator content :) $ (content </>) <$> ls
+          else pure [content]
   ls <- getDirectoryContents dir
   concat <$> parallel (par ls)
 getDirectoryContentsRecursivePrefixed :: FilePath -> Action [FilePath]
@@ -175,13 +177,13 @@ copyDir srcdir dstdir = do
           dstfile = dstdir </> path
         let
           dstdir = dropFileName dstfile
-        mkdir dstdir
-        liftIO $ uncurry (setSymbolicLinkOwnerAndGroup dstdir) ?owner
-        void . try @Action @IOError $ liftIO $ removeFile dstfile -- symlink safety
-        copyFile' srcfile dstfile
-        liftIO $ uncurry (setSymbolicLinkOwnerAndGroup dstfile) ?owner
-  paths <- readFile' $ dirTarget srcdir
-  parallel_ . par $ lines paths
+        liftIO $ do
+          mkdir dstdir
+          void . try @IO @IOError $ removeFile dstfile -- symlink safety
+          copyFile srcfile dstfile
+          uncurry (setSymbolicLinkOwnerAndGroup dstfile) ?owner
+  paths <- getDirectoryContentsRecursive srcdir
+  parallel_ . par $ paths
 
 dirExtention :: String
 dirExtention = ".ls"
@@ -190,15 +192,18 @@ dirTarget :: String -> String
 dirTarget = (<.> dirExtention)
 
 infix 1 `dir`
-dir :: (?shakeDir :: FilePath) => FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
+dir :: FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
 dir pat act = do
-  dirTarget pat %> \out -> do
-    let ?dir = ?shakeDir </> dropExtension out
-    mkdir ?dir
-    act
-    ls <- getDirectoryContentsRecursive ?dir
-    produces $ (?dir </>) <$> ls
-    writeFileLines out ls
+  let target = dirTarget pat
+  phony (addTrailingPathSeparator pat) $ need [target]
+  withoutTargets $
+    target %> \out -> do
+      let ?dir = dropExtension out
+      mkdir ?dir
+      act
+      ls <- getDirectoryContentsRecursive ?dir
+      produces $ (?dir </>) <$> filter (not . hasTrailingPathSeparator) ls
+      writeFileLines out ls
 
 tar :: (UserID, GroupID) -> FilePath -> Action ()
 tar (user, group) out =
