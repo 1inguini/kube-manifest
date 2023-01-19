@@ -1,17 +1,19 @@
 module Main (main) where
 
-import Util (nonrootGid, nonrootOwn, nonrootUid, registry, rootOwn)
+import Util (nonrootGid, nonrootOwn, nonrootUid, registry)
 import Util.Shake (
   dir,
   dirFile,
   gitClone,
   listDirectoryRecursive,
   mkdir,
+  needPacman,
+  pacmanSetup,
   parallel_,
   producesDirectory,
   runProg,
+  sudoSetup,
   tar,
-  (<:>),
  )
 import Util.Shake.Container (
   ImageName (ImageName),
@@ -31,16 +33,13 @@ import qualified Util.Shake.Container as Image
 import Control.Exception.Safe (finally)
 import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import qualified Data.ByteString as ByteString
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
-import Data.Functor (($>))
 import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
-  CmdOption (Cwd, StdinBS),
-  Exit (Exit),
+  CmdOption (Cwd),
   Lint (LintBasic),
   Rules,
   ShakeOptions (
@@ -57,10 +56,8 @@ import Development.Shake (
     shakeThreads
   ),
   need,
-  phony,
   produces,
   progressSimple,
-  putWarn,
   readFile',
   shakeArgsOptionsWith,
   shakeOptions,
@@ -70,7 +67,6 @@ import Development.Shake (
   (%>),
   (&%>),
  )
-import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
 import System.Directory (
   getCurrentDirectory,
   makeAbsolute,
@@ -165,46 +161,6 @@ import Text.Heredoc (str)
 
 -- main :: IO ()
 -- main = generate
-
-sudoProgram, pacmanProgram, aurProgram :: String
-sudoProgram = "sudo"
-pacmanProgram = "pacman"
-aurProgram = "yay"
-
-needSudo :: Action ([String] -> [String])
-pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
-needSudo = need ["sudo"] $> (sudoProgram :) . (words "--non-interactive" <>)
-sudoSetup :: Rules ()
-sudoSetup = do
-  phony "sudo" $ do
-    Exit noNeedPassword <- runProg [] $ sudoProgram : words "--non-interactive --validate"
-    case noNeedPassword of
-      ExitFailure _ -> do
-        putWarn $ "input password for" <:> sudoProgram
-        input <- cs <$> liftIO ByteString.getLine
-        runProg [StdinBS input] $ sudoProgram : words "--validate --stdin"
-      ExitSuccess -> pure ()
-
-pacArgs =
-  [ "--noconfirm"
-  , "--config=" <> ?projectRoot </> "src/pacman.conf"
-  , "--dbpath=" <> ?shakeDir </> "pacman"
-  ]
-needPacman :: Action ([String] -> [String])
-needPacman = do
-  need ["pacman/sync/.tar"]
-  sudo <- needSudo
-  pure $ sudo . (pacmanProgram :)
-needAur :: Action ([String] -> [String])
-needAur = needPacman $> (aurProgram :) . (["--noprovides"] <>)
-pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
-pacmanSetup = do
-  "pacman/sync/.tar" %> \out -> do
-    need [?projectRoot </> "src/pacman.conf"]
-    sudo <- needSudo
-    runProg @() [] (sudo $ pacmanProgram : pacArgs <> ["-Sy"])
-    produces ["pacman/local/ALPM_DB_VERSION"]
-    tar rootOwn out
 
 nonrootImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
 nonrootImage = do

@@ -20,20 +20,22 @@ module Util.Shake.Container (
   needImages,
   registry,
   dockerSetup,
+  needDockerLogin,
 ) where
 
 import qualified Util
 import Util.Shake (runProg, (<:>))
 
 import Control.Exception.Safe (throwString)
-import Control.Monad (void)
+import Control.Monad (guard, void)
+import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.List as List
 import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
-  CmdOption (FileStdin),
+  CmdOption (FileStdin, StdinBS),
   Exit (Exit),
   RuleResult,
   Rules,
@@ -44,6 +46,7 @@ import Development.Shake (
   phony,
   phonys,
   putInfo,
+  putWarn,
   withTempDir,
  )
 import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
@@ -62,8 +65,8 @@ import Development.Shake.Rule (
  )
 import GHC.Generics (Generic)
 import Optics (view)
-import System.Exit (ExitCode (ExitSuccess))
-import System.FilePath (splitDirectories, (</>))
+import System.Exit (ExitCode (ExitFailure, ExitSuccess))
+import System.FilePath (makeRelative, splitDirectories, (</>))
 
 newtype ImageRepo = ImageRepo {repo :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
@@ -152,13 +155,28 @@ addTaggedImageTarget = addTarget . show
 
 dockerProgram :: String
 dockerProgram = "podman"
-dockerSetup :: Rules ()
-dockerSetup = do
-  phony "docker/login" $
-    runProg [] $
-      dockerProgram : ["login", head . splitDirectories . cs $ Util.registry]
 docker :: [String] -> [String]
 docker = (dockerProgram :)
+needDockerLogin :: String -> Action ()
+needDockerLogin registry = need ["docker/login" </> registry]
+dockerSetup :: Rules ()
+dockerSetup = do
+  addTarget $ "docker/login" </> head (splitDirectories (cs Util.registry))
+  phonys $ \target -> do
+    guard $ "docker/login/" `List.isPrefixOf` target
+    let registry = makeRelative "docker/login" target
+    Just $ do
+      Exit noNeedPassword <- runProg [] . docker $ ["login", "--get-login", registry]
+      case noNeedPassword of
+        ExitFailure _ -> do
+          putWarn $ "input username for `docker login" <:> registry <> "`"
+          username <- cs <$> liftIO ByteString.getLine
+          putWarn $ "input password for `docker login" <:> registry <> "`"
+          password <- cs <$> liftIO ByteString.getLine
+          runProg [StdinBS password] $
+            docker ["login", "--username=" <> username, "--password-stdin"]
+        ExitSuccess -> pure ()
+      runProg [] $ docker ["login", head . splitDirectories . cs $ Util.registry]
 
 dockerCopy :: (?container :: ContainerId) => FilePath -> FilePath -> Action ()
 dockerCopy tarFile dir = do

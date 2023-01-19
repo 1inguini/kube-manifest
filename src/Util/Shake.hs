@@ -11,18 +11,31 @@ module Util.Shake (
   tar,
   producesDirectory,
   copyDir,
+  needPermission,
+  sudoProgram,
+  pacmanProgram,
+  aurProgram,
+  sudoSetup,
+  needSudo,
+  needPacman,
+  needAur,
+  pacmanSetup,
 ) where
 
-import Util (Owner)
+import Util (Owner, rootOwn)
 
 import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (filterM, void)
+import qualified Data.ByteString as ByteString
+import Data.Functor (($>))
+import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
-  CmdOption (Cwd),
+  CmdOption (Cwd, StdinBS),
   CmdResult,
+  Exit (Exit),
   FilePattern,
   Rules,
   StdoutTrim (StdoutTrim),
@@ -36,11 +49,13 @@ import Development.Shake (
   phony,
   produces,
   putError,
+  putWarn,
   readFile',
   withoutTargets,
   writeFile',
   (%>),
  )
+import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
 import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
 import System.FilePath (addTrailingPathSeparator, dropFileName, takeDirectory, takeFileName, (</>))
@@ -57,6 +72,48 @@ instance Exceptions.MonadThrow Rules where
 
 (<:>) :: String -> String -> String
 x <:> y = x <> " " <> y
+
+sudoProgram, pacmanProgram, aurProgram :: String
+sudoProgram = "sudo"
+pacmanProgram = "pacman"
+aurProgram = "yay"
+
+needPermission :: Action ()
+needPermission = need ["auth"]
+needSudo :: Action ([String] -> [String])
+needSudo = needPermission $> (sudoProgram :) . (words "--non-interactive" <>)
+sudoSetup :: Rules ()
+sudoSetup = do
+  phony "auth" $ do
+    Exit noNeedPassword <- runProg [] $ sudoProgram : words "--non-interactive --validate"
+    case noNeedPassword of
+      ExitFailure _ -> do
+        putWarn $ "input password for" <:> sudoProgram
+        input <- cs <$> liftIO ByteString.getLine
+        runProg [StdinBS input] $ sudoProgram : words "--validate --stdin"
+      ExitSuccess -> pure ()
+
+pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
+pacArgs =
+  [ "--noconfirm"
+  , "--config=" <> ?projectRoot </> "src/pacman.conf"
+  , "--dbpath=" <> ?shakeDir </> "pacman"
+  ]
+needPacman :: Action ([String] -> [String])
+needPacman = do
+  need ["pacman/sync/.tar"]
+  sudo <- needSudo
+  pure $ sudo . (pacmanProgram :)
+needAur :: Action ([String] -> [String])
+needAur = needPacman $> (aurProgram :) . (["--noprovides"] <>)
+pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+pacmanSetup = do
+  "pacman/sync/.tar" %> \out -> do
+    need [?projectRoot </> "src/pacman.conf"]
+    sudo <- needSudo
+    runProg @() [] . sudo $ pacmanProgram : pacArgs <> ["-Sy"]
+    produces ["pacman/local/ALPM_DB_VERSION"]
+    tar rootOwn out
 
 gitClone :: String -> String -> FilePath -> Action ()
 gitClone repo tag dst = do
