@@ -120,10 +120,10 @@ pacmanSetup = do
 
 gitClone :: String -> String -> FilePath -> Action ()
 gitClone repo tag dst = do
-  mkdir dst
-  liftIO $ removeDirectoryRecursive dst
-  let ?opts = []
-  runProg [] ["git", "clone", "--branch=" <> tag, repo, dst]
+  isRepo <- doesDirectoryExist $ dst </> ".git"
+  if isRepo
+    then runProg [Cwd dst] $ words "git fetch --depth=1 origin" <> [tag]
+    else runProg [] $ words "git clone --depth=1 --single-branch" <> ["--branch=" <> tag, repo, dst]
 
 listGitFiles :: FilePath -> Action [FilePath]
 listGitFiles repoDir = do
