@@ -9,7 +9,6 @@ module Util.Shake (
   parallel_,
   runProg,
   tar,
-  producesDirectory,
   copyDir,
   needPermission,
   sudoProgram,
@@ -27,7 +26,7 @@ import Util (Owner, rootOwn)
 import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.State.Strict (filterM, void)
+import Control.Monad.State.Strict (void)
 import qualified Data.ByteString as ByteString
 import Data.Functor (($>))
 import Data.String.Conversions (cs)
@@ -51,14 +50,13 @@ import Development.Shake (
   putError,
   putWarn,
   readFile',
-  withoutTargets,
-  writeFile',
+  writeFileLines,
   (%>),
  )
 import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
 import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
-import qualified System.Directory as Sys (doesDirectoryExist, doesFileExist)
-import System.FilePath (addTrailingPathSeparator, dropFileName, takeDirectory, takeFileName, (</>))
+import qualified System.Directory as Sys (doesDirectoryExist)
+import System.FilePath (dropFileName, takeDirectory, takeFileName, (</>))
 import System.Posix (GroupID, UserID, setSymbolicLinkOwnerAndGroup)
 
 instance Exceptions.MonadThrow Action where
@@ -81,7 +79,7 @@ aurProgram = "yay"
 needPermission :: Action ()
 needPermission = need ["auth"]
 needSudo :: Action ([String] -> [String])
-needSudo = needPermission $> (sudoProgram :) . (words "--non-interactive" <>)
+needSudo = needPermission $> (sudoProgram :) . (words "--non-interactive --" <>)
 sudoSetup :: Rules ()
 sudoSetup = do
   phony "auth" $ do
@@ -99,12 +97,12 @@ pacArgs =
   , "--config=" <> ?projectRoot </> "src/pacman.conf"
   , "--dbpath=" <> ?shakeDir </> "pacman"
   ]
-needPacman :: Action ([String] -> [String])
+needPacman :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Action ([String] -> [String])
 needPacman = do
   need ["pacman/sync/.tar"]
   sudo <- needSudo
-  pure $ sudo . (pacmanProgram :)
-needAur :: Action ([String] -> [String])
+  pure $ sudo . (pacmanProgram :) . (pacArgs <>)
+needAur :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Action ([String] -> [String])
 needAur = needPacman $> (aurProgram :) . (["--noprovides"] <>)
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
@@ -112,7 +110,8 @@ pacmanSetup = do
     need [?projectRoot </> "src/pacman.conf"]
     sudo <- needSudo
     runProg @() [] . sudo $ pacmanProgram : pacArgs <> ["-Sy"]
-    produces ["pacman/local/ALPM_DB_VERSION"]
+    dbfiles <- getDirectoryContentsRecursivePrefixed "pacman/sync"
+    produces $ "pacman/local/ALPM_DB_VERSION" : dbfiles
     tar rootOwn out
 
 gitClone :: String -> String -> FilePath -> Action ()
@@ -160,15 +159,11 @@ getDirectoryContentsRecursive dir = do
           then do
             ls <- getDirectoryContentsRecursive deepPath
             pure $ (path </>) <$> ls
-          else pure []
+          else pure [path]
   ls <- filter (/= dirFile) <$> getDirectoryContents dir
   concat <$> parallel (par ls)
-
-producesDirectory :: FilePath -> Action [FilePath]
-producesDirectory dir = do
-  ls <- getDirectoryContentsRecursive dir
-  produces $ (dir </>) <$> ls
-  pure ls
+getDirectoryContentsRecursivePrefixed :: FilePath -> Action [FilePath]
+getDirectoryContentsRecursivePrefixed dir = fmap (dir </>) <$> getDirectoryContentsRecursive dir
 
 copyDir :: (?owner :: Owner) => FilePath -> FilePath -> Action ()
 copyDir srcdir dstdir = do
@@ -192,17 +187,12 @@ dirFile = ".ls"
 infix 1 `dir`
 dir :: (?shakeDir :: FilePath) => FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
 dir pat act = do
-  phony (addTrailingPathSeparator pat) $ need [pat </> dirFile]
-  withoutTargets $
-    pat </> dirFile %> \out ->
-      let ?dir = ?shakeDir </> takeDirectory out
-       in do
-            act
-            ls <-
-              filterM (\file -> (file /= dirFile &&) <$> liftIO (Sys.doesFileExist $ ?dir </> file))
-                =<< listDirectoryRecursive ?dir
-            produces $ (?dir </>) <$> ls
-            writeFile' out $ unlines ls
+  pat </> dirFile %> \out -> do
+    let ?dir = ?shakeDir </> takeDirectory out
+    act
+    ls <- getDirectoryContentsRecursive ?dir
+    produces $ (?dir </>) <$> ls
+    writeFileLines out ls
 
 tar :: (UserID, GroupID) -> FilePath -> Action ()
 tar (user, group) out =

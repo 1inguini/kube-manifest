@@ -4,13 +4,13 @@ import Util (nonrootGid, nonrootOwn, nonrootUid, registry)
 import Util.Shake (
   dir,
   dirFile,
+  getDirectoryContentsRecursive,
   gitClone,
   listDirectoryRecursive,
   mkdir,
   needPacman,
   pacmanSetup,
   parallel_,
-  producesDirectory,
   runProg,
   sudoSetup,
   tar,
@@ -55,6 +55,7 @@ import Development.Shake (
     shakeShare,
     shakeThreads
   ),
+  getDirectoryFiles,
   need,
   produces,
   progressSimple,
@@ -73,6 +74,7 @@ import System.Directory (
   setCurrentDirectory,
  )
 import System.FilePath (
+  dropFileName,
   takeDirectory,
   (</>),
  )
@@ -249,10 +251,9 @@ archlinuxImage = do
 
 musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl = do
-  "musl/rootfs" </> dirFile %> \out -> do
+  "musl/rootfs" `dir` do
     pacman <- needPacman
     runProg @() [] $ pacman ["-S", "--root=musl/rootfs", "musl"]
-    writeFileLines out =<< producesDirectory out
 
   "musl/lib/.tar" %> \out -> do
     runProg [] $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
