@@ -5,8 +5,11 @@ module Util.Shake (
   dir,
   dirTarget,
   getDirectoryContentsRecursive,
+  getDirectoryFilesRecursivePrefixed,
   gitClone,
   listDirectoryRecursive,
+  listGitFiles,
+  listGitFilesPrefixed,
   mkdir,
   needAur,
   needPacman,
@@ -19,9 +22,10 @@ module Util.Shake (
   sudoProgram,
   sudoSetup,
   tar,
+  gitTarget,
 ) where
 
-import Util (Owner, getCurrentOwner, rootOwn)
+import Util (rootOwn)
 
 import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
@@ -40,7 +44,6 @@ import Development.Shake (
   StdoutTrim (StdoutTrim),
   actionCatch,
   command,
-  copyFile',
   doesDirectoryExist,
   getDirectoryContents,
   need,
@@ -48,9 +51,7 @@ import Development.Shake (
   phony,
   produces,
   putError,
-  putInfo,
   putWarn,
-  readFile',
   withoutTargets,
   writeFileLines,
   (%>),
@@ -114,7 +115,7 @@ pacmanSetup = do
     need [?projectRoot </> "src/pacman.conf"]
     sudo <- needSudo
     runProg @() [] . sudo $ pacmanProgram : pacArgs <> ["-Sy"]
-    dbfiles <- getDirectoryContentsRecursivePrefixed "pacman/sync"
+    dbfiles <- getDirectoryFilesRecursivePrefixed "pacman/sync"
     produces $ "pacman/local/ALPM_DB_VERSION" : dbfiles
     tar rootOwn out
 
@@ -122,14 +123,21 @@ gitClone :: String -> String -> FilePath -> Action ()
 gitClone repo tag dst = do
   isRepo <- doesDirectoryExist $ dst </> ".git"
   if isRepo
-    then runProg [Cwd dst] $ words "git fetch --depth=1 origin" <> [tag]
-    else runProg [] $ words "git clone --depth=1 --single-branch" <> ["--branch=" <> tag, repo, dst]
+    then do
+      runProg @() [Cwd dst] $ words "git fetch --depth=1 origin" <> [tag]
+      runProg @() [Cwd dst] $ words "git reset --hard" <> [tag]
+    else do
+      liftIO $ removeDirectoryRecursive dst
+      runProg @() [] $ words "git clone --depth=1 --single-branch" <> ["--branch=" <> tag, repo, dst]
 
 listGitFiles :: FilePath -> Action [FilePath]
 listGitFiles repoDir = do
   StdoutTrim repoFiles <- runProg [Cwd repoDir] $ words "git ls-tree -r --name-only HEAD"
   gitFiles <- fmap (".git" </>) <$> listDirectoryRecursive (repoDir </> ".git")
   pure $ gitFiles <> lines repoFiles
+
+listGitFilesPrefixed :: FilePath -> Action [FilePath]
+listGitFilesPrefixed repoDir = fmap (repoDir </>) <$> listGitFiles repoDir
 
 defaultOpts :: [CmdOption]
 defaultOpts = []
@@ -166,10 +174,12 @@ getDirectoryContentsRecursive dir = do
           else pure [content]
   ls <- getDirectoryContents dir
   concat <$> parallel (par ls)
-getDirectoryContentsRecursivePrefixed :: FilePath -> Action [FilePath]
-getDirectoryContentsRecursivePrefixed dir = fmap (dir </>) <$> getDirectoryContentsRecursive dir
 
-copyDir :: (?owner :: Owner) => FilePath -> FilePath -> Action ()
+getDirectoryFilesRecursivePrefixed :: FilePath -> Action [FilePath]
+getDirectoryFilesRecursivePrefixed dir =
+  fmap (dir </>) . filter (not . hasTrailingPathSeparator) <$> getDirectoryContentsRecursive dir
+
+copyDir :: FilePath -> FilePath -> Action ()
 copyDir srcdir dstdir = do
   let par = fmap $ \path -> do
         let
@@ -181,15 +191,17 @@ copyDir srcdir dstdir = do
           mkdir dstdir
           void . try @IO @IOError $ removeFile dstfile -- symlink safety
           copyFile srcfile dstfile
-          uncurry (setSymbolicLinkOwnerAndGroup dstfile) ?owner
+  -- uncurry (setSymbolicLinkOwnerAndGroup dstfile) ?owner
   paths <- getDirectoryContentsRecursive srcdir
   parallel_ . par $ paths
 
-dirExtention :: String
+dirExtention, gitExtention :: String
 dirExtention = ".ls"
+gitExtention = ".git"
 
-dirTarget :: String -> String
+dirTarget, gitTarget :: String -> String
 dirTarget = (<.> dirExtention) . dropTrailingPathSeparator
+gitTarget = (<.> gitExtention) . dirTarget
 
 infix 1 `dir`
 dir :: FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
@@ -201,9 +213,8 @@ dir pat act = do
       let ?dir = dropExtension out
       mkdir ?dir
       act
-      ls <- getDirectoryContentsRecursive ?dir
-      produces $ (?dir </>) <$> filter (not . hasTrailingPathSeparator) ls
-      writeFileLines out ls
+      produces =<< getDirectoryFilesRecursivePrefixed ?dir
+      writeFileLines out =<< getDirectoryContentsRecursive ?dir
 
 tar :: (UserID, GroupID) -> FilePath -> Action ()
 tar (user, group) out =
@@ -214,9 +225,9 @@ tar (user, group) out =
     , "--numeric-owner"
     , "--owner=" <> show user
     , "--group=" <> show group
-    , "--exclude=" <> takeFileName out
-    , "--file=" <> out
-    , "--directory=" <> dropFileName out
+    , -- , "--exclude=" <> takeFileName out
+      "--file=" <> out
+    , "--directory=" <> dropExtension out
     , "."
     ]
 

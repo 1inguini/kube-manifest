@@ -1,10 +1,15 @@
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+
 module Main (main) where
 
-import Util (nonrootGid, nonrootOwn, nonrootUid, registry)
+import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid, registry)
 import Util.Shake (
+  copyDir,
   dir,
   dirTarget,
+  getDirectoryFilesRecursivePrefixed,
   gitClone,
+  listGitFilesPrefixed,
   mkdir,
   needPacman,
   pacmanSetup,
@@ -53,11 +58,15 @@ import Development.Shake (
     shakeShare,
     shakeThreads
   ),
+  addTarget,
   need,
+  phony,
+  produces,
   progressSimple,
   shakeArgsOptionsWith,
   shakeOptions,
   want,
+  withoutTargets,
   writeFile',
   (%>),
   (&%>),
@@ -65,9 +74,11 @@ import Development.Shake (
 import System.Directory (
   getCurrentDirectory,
   makeAbsolute,
+  removeDirectoryRecursive,
   setCurrentDirectory,
  )
 import System.FilePath (
+  dropFileName,
   takeDirectory,
   (</>),
  )
@@ -247,15 +258,22 @@ musl = do
   "musl/rootfs" `dir` do
     pacman <- needPacman
     runProg @() [] $ pacman ["-S", "--root=musl/rootfs", "musl"]
+    produces =<< getDirectoryFilesRecursivePrefixed ?dir
 
-  "musl/lib/.tar" %> \out -> do
-    runProg [] $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
+  phony "musl/lib/" $ need ["musl/lib.tar"]
+  "musl/lib.tar" %> \out -> do
+    need [dirTarget "musl/rootfs"]
+    owner <- liftIO getCurrentOwner
+    copyDir "musl/rootfs/usr/lib/musl/lib" "musl/lib"
+    tar owner out
+
+-- runProg [] $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
 
 skalibs :: (?shakeDir :: FilePath) => Rules ()
 skalibs = do
   let version = "v2.12.0.1"
   "skalibs/src/.git/" `dir` do
-    gitClone "https://github.com/skarnet/skalibs.git" version $ takeDirectory . takeDirectory $ ?dir
+    gitClone "https://github.com/skarnet/skalibs.git" version $ takeDirectory ?dir
 
   let cd = Cwd "skalibs/src"
   "skalibs/src/config.mak" %> \out -> do
@@ -280,71 +298,78 @@ skalibs = do
 s6PortableUtils :: (?shakeDir :: FilePath) => Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
-  let s6 = "s6-portable-utils"
+  addTarget "s6-utils/bin/<binary-name>"
 
-  ((s6 </> "bin") </>)
-    <$> [ "s6-basename"
-        , "s6-cat"
-        , "s6-chmod"
-        , "s6-chown"
-        , "s6-clock"
-        , "s6-cut"
-        , "s6-dirname"
-        , "s6-dumpenv"
-        , "s6-echo"
-        , "s6-env"
-        , "s6-expr"
-        , "s6-false"
-        , "s6-format-filter"
-        , "s6-grep"
-        , "s6-head"
-        , "s6-hiercopy"
-        , "s6-linkname"
-        , "s6-ln"
-        , "s6-ls"
-        , "s6-maximumtime"
-        , "s6-mkdir"
-        , "s6-mkfifo"
-        , "s6-nice"
-        , "s6-nuke"
-        , "s6-pause"
-        , "s6-printenv"
-        , "s6-quote"
-        , "s6-quote-filter"
-        , "s6-rename"
-        , "s6-rmrf"
-        , "s6-seq"
-        , "s6-sleep"
-        , "s6-sort"
-        , "s6-sync"
-        , "s6-tai64ndiff"
-        , "s6-tail"
-        , "s6-test"
-        , "s6-touch"
-        , "s6-true"
-        , "s6-uniquename"
-        , "s6-unquote"
-        , "s6-unquote-filter"
-        , "s6-update-symlinks"
-        , "seekablepipe"
-        ]
-    &%> \outs@(out : _) -> do
-      gitClone "https://github.com/skarnet/s6-portable-utils.git" version $ s6 </> "src"
-      need [dirTarget "musl/lib", dirTarget "skalibs/lib"]
-      let cd = Cwd (s6 </> "src")
+  withoutTargets $ do
+    ("s6-utils/src" </>) <$> ["configure", "Makefile"] &%> \outs@(out : _) -> do
+      let ?dir = dropFileName out
+      gitClone "https://github.com/skarnet/s6-portable-utils.git" version ?dir
+      produces . filter (`notElem` outs) =<< listGitFilesPrefixed ?dir
+
+    ("s6-utils/src" </>) <$> ["config.mak", "src/include/s6-portable-utils/config.h"] &%> \outs -> do
+      need ["s6-utils/src/configure", "musl/lib/", "skalibs/lib/", "skalibs/sysdeps/"]
       runProg @()
-        [cd]
+        [Cwd "s6-utils/src"]
         [ "./configure"
-        , "--bindir=" <> ?shakeDir </> takeDirectory out
         , "--enable-static-libc"
+        , "--bindir=" <> ?shakeDir </> "s6-utils/bin"
         , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
         , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
         , "--with-libs=" <> ?shakeDir </> "musl/lib"
         ]
-      let make = runProg [cd] . ("make" :) . (: [])
-      make "all"
-      make "strip"
-      make "install-bin"
+
+    ("s6-utils/bin" </>)
+      <$> [ "s6-basename"
+          , "s6-cat"
+          , "s6-chmod"
+          , "s6-chown"
+          , "s6-clock"
+          , "s6-cut"
+          , "s6-dirname"
+          , "s6-dumpenv"
+          , "s6-echo"
+          , "s6-env"
+          , "s6-expr"
+          , "s6-false"
+          , "s6-format-filter"
+          , "s6-grep"
+          , "s6-head"
+          , "s6-hiercopy"
+          , "s6-linkname"
+          , "s6-ln"
+          , "s6-ls"
+          , "s6-maximumtime"
+          , "s6-mkdir"
+          , "s6-mkfifo"
+          , "s6-nice"
+          , "s6-nuke"
+          , "s6-pause"
+          , "s6-printenv"
+          , "s6-quote"
+          , "s6-quote-filter"
+          , "s6-rename"
+          , "s6-rmrf"
+          , "s6-seq"
+          , "s6-sleep"
+          , "s6-sort"
+          , "s6-sync"
+          , "s6-tai64ndiff"
+          , "s6-tail"
+          , "s6-test"
+          , "s6-touch"
+          , "s6-true"
+          , "s6-uniquename"
+          , "s6-unquote"
+          , "s6-unquote-filter"
+          , "s6-update-symlinks"
+          , "seekablepipe"
+          ]
+      &%> \outs@(out : _) -> do
+        need ["musl/lib/", "skalibs/lib/", "skalibs/sysdeps/", "s6-utils/src/config.mak"]
+        let make = runProg [Cwd "s6-utils/src"] . ("make" :) . (: [])
+        make "all"
+        make "strip"
+        make "install-bin"
 
 busybox :: Rules ()
 busybox = download "busybox" "busybox" *> traverse_ singleApplet applets
