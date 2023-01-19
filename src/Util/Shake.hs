@@ -83,7 +83,9 @@ needSudo = needPermission $> (sudoProgram :) . (words "--non-interactive --" <>)
 sudoSetup :: Rules ()
 sudoSetup = do
   phony "auth" $ do
-    Exit noNeedPassword <- runProg [] $ sudoProgram : words "--non-interactive --validate"
+    Exit noNeedPassword <-
+      runProg [EchoStdout False] $
+        sudoProgram : words "--non-interactive --validate"
     case noNeedPassword of
       ExitFailure _ -> do
         putWarn $ "input password for" <:> sudoProgram
