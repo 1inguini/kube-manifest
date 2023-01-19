@@ -252,20 +252,30 @@ musl = do
     runProg [] $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
 
 skalibs :: (?shakeDir :: FilePath) => Rules ()
-skalibs =
-  "skalibs/lib/" `dir` do
-    let version = "v2.12.0.1"
-    gitClone "https://github.com/skarnet/skalibs.git" version "skalibs/src"
+skalibs = do
+  let version = "v2.12.0.1"
+  "skalibs/src/.git/" `dir` do
+    gitClone "https://github.com/skarnet/skalibs.git" version $ takeDirectory . takeDirectory $ ?dir
 
-    let cd = Cwd "skalibs/src"
-    runProg @() [cd] $ words "./configure --disable-shared --libdir=../lib --sysdepdir=../sysdeps"
-    let make = runProg @() [cd] . ("make" :) . (: [])
-    make "all"
-    make "strip"
-    parallel_
-      [ make "install-lib"
-      , make "install-sysdeps"
+  let cd = Cwd "skalibs/src"
+  "skalibs/src/config.mak" %> \out -> do
+    need ["skalibs/src/.git/"]
+    runProg @() [cd] $
+      [ "./configure"
+      , "--disable-shared"
+      , "--libdir=" <> ?shakeDir </> "skalibs/lib"
+      , "--sysdepdir=" <> ?shakeDir </> "skalibs/sysdeps"
       ]
+
+  let make = runProg @() [cd] . ("make" :) . (: [])
+  "skalibs/lib/" `dir` do
+    need ["skalibs/src/config.mak"]
+    make "strip"
+    make "install-lib"
+
+  "skalibs/sysdeps/" `dir` do
+    need ["skalibs/src/config.mak"]
+    make "install-sysdeps"
 
 s6PortableUtils :: (?shakeDir :: FilePath) => Rules ()
 s6PortableUtils = do

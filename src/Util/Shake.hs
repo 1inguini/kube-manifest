@@ -58,7 +58,7 @@ import Development.Shake (
 import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
 import System.Directory (copyFile, createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist)
-import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, hasTrailingPathSeparator, takeDirectory, takeFileName, (<.>), (</>))
+import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, takeDirectory, takeFileName, (<.>), (</>))
 import System.Posix (GroupID, UserID, setSymbolicLinkOwnerAndGroup)
 
 instance Exceptions.MonadThrow Action where
@@ -189,7 +189,7 @@ dirExtention :: String
 dirExtention = ".ls"
 
 dirTarget :: String -> String
-dirTarget = (<.> dirExtention)
+dirTarget = (<.> dirExtention) . dropTrailingPathSeparator
 
 infix 1 `dir`
 dir :: FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
