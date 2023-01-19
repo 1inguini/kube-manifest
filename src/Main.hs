@@ -3,10 +3,8 @@ module Main (main) where
 import Util (nonrootGid, nonrootOwn, nonrootUid, registry)
 import Util.Shake (
   dir,
-  dirFile,
-  getDirectoryContentsRecursive,
+  dirTarget,
   gitClone,
-  listDirectoryRecursive,
   mkdir,
   needPacman,
   pacmanSetup,
@@ -55,16 +53,12 @@ import Development.Shake (
     shakeShare,
     shakeThreads
   ),
-  getDirectoryFiles,
   need,
-  produces,
   progressSimple,
-  readFile',
   shakeArgsOptionsWith,
   shakeOptions,
   want,
   writeFile',
-  writeFileLines,
   (%>),
   (&%>),
  )
@@ -74,7 +68,6 @@ import System.Directory (
   setCurrentDirectory,
  )
 import System.FilePath (
-  dropFileName,
   takeDirectory,
   (</>),
  )
@@ -212,16 +205,16 @@ archlinuxImage = do
             nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
         , rootExec [] ["locale-gen"]
         ]
-      src <- fmap lines . readFile' $ "archlinux/aur-helper" </> dirFile
-      current <- listDirectoryRecursive "archlinux/aur-helper"
-      produces $ filter (`elem` (dirFile : src)) current
+      -- src <- fmap lines . readFile' $ "archlinux/aur-helper" </> dirFile
+      -- current <- listDirectoryRecursive "archlinux/aur-helper"
+      -- produces $ filter (`elem` (dirFile : src)) current
       dockerPushEnd
 
   -- "archlinux/aur-helper/" `dir` do
   --   gitClone "https://aur.archlinux.org/yay-bin.git" "master" ?dir
 
   "archlinux/aur-helper.tar" %> \out -> do
-    need ["archlinux/aur-helper" </> dirFile]
+    need [dirTarget "archlinux/aur-helper"]
     tar nonrootOwn out
 
   writeFile'
@@ -327,7 +320,7 @@ s6PortableUtils = do
         ]
     &%> \outs@(out : _) -> do
       gitClone "https://github.com/skarnet/s6-portable-utils.git" version $ s6 </> "src"
-      need ["musl/lib" </> dirFile, "skalibs/lib" </> dirFile]
+      need [dirTarget "musl/lib", dirTarget "skalibs/lib"]
       let cd = Cwd (s6 </> "src")
       runProg @()
         [cd]

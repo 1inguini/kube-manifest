@@ -1,24 +1,24 @@
 module Util.Shake (
   (<:>),
+  aurProgram,
+  copyDir,
   dir,
-  dirFile,
+  dirTarget,
   getDirectoryContentsRecursive,
   gitClone,
   listDirectoryRecursive,
   mkdir,
+  needAur,
+  needPacman,
+  needPermission,
+  needSudo,
+  pacmanProgram,
+  pacmanSetup,
   parallel_,
   runProg,
-  tar,
-  copyDir,
-  needPermission,
   sudoProgram,
-  pacmanProgram,
-  aurProgram,
   sudoSetup,
-  needSudo,
-  needPacman,
-  needAur,
-  pacmanSetup,
+  tar,
 ) where
 
 import Util (Owner, rootOwn)
@@ -32,7 +32,7 @@ import Data.Functor (($>))
 import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
-  CmdOption (Cwd, StdinBS),
+  CmdOption (Cwd, EchoStdout, StdinBS),
   CmdResult,
   Exit (Exit),
   FilePattern,
@@ -56,7 +56,7 @@ import Development.Shake (
 import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
 import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist)
-import System.FilePath (dropFileName, takeDirectory, takeFileName, (</>))
+import System.FilePath (dropExtension, dropFileName, takeDirectory, takeFileName, (<.>), (</>))
 import System.Posix (GroupID, UserID, setSymbolicLinkOwnerAndGroup)
 
 instance Exceptions.MonadThrow Action where
@@ -162,7 +162,7 @@ getDirectoryContentsRecursive dir = do
             ls <- getDirectoryContentsRecursive deepPath
             pure $ (path </>) <$> ls
           else pure [path]
-  ls <- filter (/= dirFile) <$> getDirectoryContents dir
+  ls <- getDirectoryContents dir
   concat <$> parallel (par ls)
 getDirectoryContentsRecursivePrefixed :: FilePath -> Action [FilePath]
 getDirectoryContentsRecursivePrefixed dir = fmap (dir </>) <$> getDirectoryContentsRecursive dir
@@ -180,17 +180,21 @@ copyDir srcdir dstdir = do
         void . try @Action @IOError $ liftIO $ removeFile dstfile -- symlink safety
         copyFile' srcfile dstfile
         liftIO $ uncurry (setSymbolicLinkOwnerAndGroup dstfile) ?owner
-  paths <- readFile' $ srcdir </> dirFile
+  paths <- readFile' $ dirTarget srcdir
   parallel_ . par $ lines paths
 
-dirFile :: String
-dirFile = ".ls"
+dirExtention :: String
+dirExtention = ".ls"
+
+dirTarget :: String -> String
+dirTarget = (<.> dirExtention)
 
 infix 1 `dir`
 dir :: (?shakeDir :: FilePath) => FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
 dir pat act = do
-  pat </> dirFile %> \out -> do
-    let ?dir = ?shakeDir </> takeDirectory out
+  dirTarget pat %> \out -> do
+    let ?dir = ?shakeDir </> dropExtension out
+    mkdir ?dir
     act
     ls <- getDirectoryContentsRecursive ?dir
     produces $ (?dir </>) <$> ls
