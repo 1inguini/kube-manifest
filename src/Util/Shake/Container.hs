@@ -34,6 +34,7 @@ import qualified Data.ByteString as ByteString
 import qualified Data.List as List
 import Data.Maybe (catMaybes)
 import Data.String.Conversions (cs)
+import Data.Tuple.Optics (_1)
 import Development.Shake (
   Action,
   CmdOption (FileStdin, StdinBS),
@@ -65,7 +66,7 @@ import Development.Shake.Rule (
   noLint,
  )
 import GHC.Generics (Generic)
-import Optics (view)
+import Optics (view, (%))
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import System.FilePath (makeRelative, splitDirectories, (</>))
 import Text.Heredoc (here)
@@ -74,8 +75,8 @@ newtype ImageRepo = ImageRepo {repo :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
 newtype ImageTag = ImageTag {tag :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
-newtype ImageName = ImageName (ImageRepo, ImageTag) -- (name, tag)
-  deriving (Typeable, Eq, Hashable, Binary, NFData)
+newtype ImageName = ImageName {name :: (ImageRepo, ImageTag)} -- (name, tag)
+  deriving (Generic, Typeable, Eq, Hashable, Binary, NFData)
 instance Show ImageName where
   show (ImageName (repo, tag)) = view #repo repo <> ":" <> view #tag tag
 newtype Image = ImageId {id :: ByteString}
@@ -202,7 +203,7 @@ dockerCommit =
 
 dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = do
-  need ["docker/login"]
+  need ["docker/login" </> (head . splitDirectories . view (#name % _1 % #repo)) ?imageName]
   -- runDocker @() [] ["push", show ?imageName]
   runProg @() [] . docker . words $ "stop --time=0" <:> ?container
   runProg @() [] . docker . words $ "rm" <:> ?container
