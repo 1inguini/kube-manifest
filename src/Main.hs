@@ -165,9 +165,9 @@ import Text.Heredoc (str)
 nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   Image.registry "nonroot" `image` do
-    ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `withContainer` [] $ do
+    ImageName (Image.registry "scratch", latest) `withContainer` [] $ do
       dockerCopy "nonroot/rootfs.tar" "/"
-      dockerCommit ["ENTRYPOINT /bin/sh"]
+      dockerCommit
       dockerPushEnd
 
   "nonroot/rootfs.tar" %> \out -> do
@@ -213,6 +213,7 @@ archlinuxImage = do
       -- src <- fmap lines . readFile' $ "archlinux/aur-helper" </> dirFile
       -- current <- listDirectoryRecursive "archlinux/aur-helper"
       -- produces $ filter (`elem` (dirFile : src)) current
+      dockerCommit
       dockerPushEnd
 
   "archlinux/aur-helper/.git"

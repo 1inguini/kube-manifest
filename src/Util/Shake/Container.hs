@@ -32,6 +32,7 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.List as List
+import Data.Maybe (catMaybes)
 import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
@@ -40,8 +41,11 @@ import Development.Shake (
   RuleResult,
   Rules,
   Stdout (Stdout),
+  StdoutTrim (StdoutTrim, fromStdoutTrim),
   addTarget,
   need,
+  par,
+  parallel,
   phonys,
   putInfo,
   putWarn,
@@ -64,6 +68,7 @@ import GHC.Generics (Generic)
 import Optics (view)
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import System.FilePath (makeRelative, splitDirectories, (</>))
+import Text.Heredoc (here)
 
 newtype ImageRepo = ImageRepo {repo :: String}
   deriving (Generic, Show, Typeable, Eq, Hashable, Binary, NFData)
@@ -186,13 +191,13 @@ dockerCopy tarFile dir = do
 dockerCommit ::
   ( ?imageName :: ImageName
   , ?container :: ContainerId
+  , ?instructions :: [ContainerfileInstruction]
   ) =>
-  [ContainerfileInstruction] ->
   Action ()
-dockerCommit commands =
+dockerCommit =
   runProg [] $
     docker ["commit", "--include-volumes=false"]
-      <> concatMap (("--change" :) . (: [])) commands
+      <> concatMap (("--change" :) . (: [])) ?instructions
       <> [?container, show ?imageName]
 
 dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
@@ -202,18 +207,35 @@ dockerPushEnd = do
   runProg @() [] . docker . words $ "stop --time=0" <:> ?container
   runProg @() [] . docker . words $ "rm" <:> ?container
 
-withContainer :: ImageName -> [String] -> ((?container :: ContainerId) => Action a) -> Action a
+withContainer ::
+  ImageName ->
+  [String] ->
+  ((?container :: ContainerId, ?instructions :: [ContainerfileInstruction]) => Action a) ->
+  Action a
 withContainer image opt act = do
-  let init = "/bin/catatonit"
-  Stdout container <-
-    runProg [] . docker $
-      [ "run"
-      , "--detach"
-      , "-t"
-      , "--volume=" <> init <> ":/run/init"
-      , "--entrypoint=/run/init"
-      ]
-        <> opt
-        <> [show image, "-P"]
-  let ?container = head $ lines container
+  let
+    imageName = show image
+    inspect format =
+      fmap fromStdoutTrim . runProg @(StdoutTrim String) [] . docker $
+        ["inspect", imageName, format]
+    init = "/bin/catatonit"
+  need [init]
+  (StdoutTrim container, insts) <-
+    par
+      ( runProg [] . docker $
+          [ "run"
+          , "--detach"
+          , "-t"
+          , "--volume=" <> init <> ":/run/init"
+          , "--entrypoint=/run/init"
+          ]
+            <> opt
+            <> [imageName, "-P"]
+      )
+      $ parallel
+        [ inspect [here|--format=ENTRYPOINT [ {{range $index, $elem := .Config.Entrypoint}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
+        , inspect [here|--format=CMD [ {{range $index, $elem := .Config.Cmd}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
+        ]
+  let ?instructions = insts
+      ?container = container
    in act
