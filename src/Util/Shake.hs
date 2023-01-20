@@ -28,6 +28,7 @@ module Util.Shake (
 import Util (rootOwn)
 
 import Control.Exception.Safe (displayException, throwString, try)
+import Control.Monad (when)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (void)
@@ -45,6 +46,7 @@ import Development.Shake (
   actionCatch,
   command,
   doesDirectoryExist,
+  doesFileExist,
   getDirectoryContents,
   need,
   parallel,
@@ -59,8 +61,8 @@ import Development.Shake (
 import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
 import System.Directory (copyFile, createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist)
-import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, takeDirectory, takeFileName, (<.>), (</>))
-import System.Posix (GroupID, UserID, setSymbolicLinkOwnerAndGroup)
+import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, (<.>), (</>))
+import System.Posix (GroupID, UserID)
 
 instance Exceptions.MonadThrow Action where
   throwM err = do
@@ -120,15 +122,12 @@ pacmanSetup = do
     tar rootOwn out
 
 gitClone :: String -> String -> FilePath -> Action ()
-gitClone repo tag dst = do
-  isRepo <- doesDirectoryExist $ dst </> ".git"
-  if isRepo
-    then do
-      runProg @() [Cwd dst] $ words "git fetch --depth=1 origin" <> [tag]
-      runProg @() [Cwd dst] $ words "git reset --hard" <> [tag]
-    else do
-      liftIO $ removeDirectoryRecursive dst
-      runProg @() [] $ words "git clone --depth=1 --single-branch" <> ["--branch=" <> tag, repo, dst]
+gitClone repo ref dst = do
+  isRepo <- doesFileExist $ dst </> ".git"
+  when isRepo $ do
+    runProg @() [Cwd dst] $ words "git init"
+  runProg @() [Cwd dst] $ words "git fetch --depth=1 --no-tags" <> [repo, ref]
+  runProg @() [Cwd dst] $ words "git reset --hard FETCH_HEAD"
 
 listGitFiles :: FilePath -> Action [FilePath]
 listGitFiles repoDir = do
