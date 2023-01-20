@@ -299,26 +299,24 @@ skalibs = do
 s6PortableUtils :: (?shakeDir :: FilePath) => Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
+
+  "s6-utils/src/.git"
+    `gitCloneRule` ("https://github.com/skarnet/s6-portable-utils.git", "refs/tags" </> version)
+
+  let cd = Cwd "s6-utils/src"
+  "s6-utils/src/config.mak" %> \out -> do
+    need ["s6-utils/src/.git", "musl/lib/", "skalibs/lib/", "skalibs/sysdeps/"]
+    runProg @() [cd] $
+      [ "./configure"
+      , "--enable-static-libc"
+      , "--bindir=" <> ?shakeDir </> "s6-utils/bin"
+      , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
+      , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
+      , "--with-libs=" <> ?shakeDir </> "musl/lib"
+      ]
+
   addTarget "s6-utils/bin/<binary-name>"
-
-  withoutTargets $ do
-    ("s6-utils/src" </>) <$> ["configure", "Makefile"] &%> \outs@(out : _) -> do
-      let ?dir = dropFileName out
-      gitClone "https://github.com/skarnet/s6-portable-utils.git" version ?dir
-      produces . filter (`notElem` outs) =<< getGitFilesPrefixed ?dir
-
-    ("s6-utils/src" </>) <$> ["config.mak", "src/include/s6-portable-utils/config.h"] &%> \outs -> do
-      need ["s6-utils/src/configure", "musl/lib/", "skalibs/lib/", "skalibs/sysdeps/"]
-      runProg @()
-        [Cwd "s6-utils/src"]
-        [ "./configure"
-        , "--enable-static-libc"
-        , "--bindir=" <> ?shakeDir </> "s6-utils/bin"
-        , "--with-sysdeps=" <> ?shakeDir </> "skalibs/sysdeps"
-        , "--with-libs=" <> ?shakeDir </> "skalibs/lib"
-        , "--with-libs=" <> ?shakeDir </> "musl/lib"
-        ]
-
+  withoutTargets $
     ("s6-utils/bin" </>)
       <$> [ "s6-basename"
           , "s6-cat"
@@ -367,8 +365,7 @@ s6PortableUtils = do
           ]
       &%> \outs@(out : _) -> do
         need ["musl/lib/", "skalibs/lib/", "skalibs/sysdeps/", "s6-utils/src/config.mak"]
-        let make = runProg [Cwd "s6-utils/src"] . ("make" :) . (: [])
-        make "all"
+        let make = runProg [cd] . ("make" :) . (: [])
         make "strip"
         make "install-bin"
 
