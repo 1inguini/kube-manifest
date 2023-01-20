@@ -8,8 +8,9 @@ import Util.Shake (
   dir,
   dirTarget,
   getDirectoryFilesRecursivePrefixed,
+  getGitFilesPrefixed,
   gitClone,
-  listGitFilesPrefixed,
+  gitCloneRule,
   mkdir,
   needPacman,
   pacmanSetup,
@@ -272,18 +273,18 @@ musl = do
 skalibs :: (?shakeDir :: FilePath) => Rules ()
 skalibs = do
   let version = "v2.12.0.1"
-  "skalibs/src/.git/" `dir` do
-    gitClone "https://github.com/skarnet/skalibs.git" version $ takeDirectory ?dir
+  "skalibs/src/.git" `gitCloneRule` ("https://github.com/skarnet/skalibs.git", "refs/tags" </> version)
 
   let cd = Cwd "skalibs/src"
   "skalibs/src/config.mak" %> \out -> do
-    need ["skalibs/src/.git/"]
+    need ["skalibs/src/.git"]
     runProg @() [cd] $
       [ "./configure"
       , "--disable-shared"
       , "--libdir=" <> ?shakeDir </> "skalibs/lib"
       , "--sysdepdir=" <> ?shakeDir </> "skalibs/sysdeps"
       ]
+  "skalibs/src/sysdeps.cfg/" `dir` need ["skalibs/src/config.mak"]
 
   let make = runProg @() [cd] . ("make" :) . (: [])
   "skalibs/lib/" `dir` do
@@ -292,7 +293,7 @@ skalibs = do
     make "install-lib"
 
   "skalibs/sysdeps/" `dir` do
-    need ["skalibs/src/config.mak"]
+    need ["skalibs/src/sysdeps.cfg/"]
     make "install-sysdeps"
 
 s6PortableUtils :: (?shakeDir :: FilePath) => Rules ()
@@ -304,7 +305,7 @@ s6PortableUtils = do
     ("s6-utils/src" </>) <$> ["configure", "Makefile"] &%> \outs@(out : _) -> do
       let ?dir = dropFileName out
       gitClone "https://github.com/skarnet/s6-portable-utils.git" version ?dir
-      produces . filter (`notElem` outs) =<< listGitFilesPrefixed ?dir
+      produces . filter (`notElem` outs) =<< getGitFilesPrefixed ?dir
 
     ("s6-utils/src" </>) <$> ["config.mak", "src/include/s6-portable-utils/config.h"] &%> \outs -> do
       need ["s6-utils/src/configure", "musl/lib/", "skalibs/lib/", "skalibs/sysdeps/"]

@@ -6,10 +6,11 @@ module Util.Shake (
   dirTarget,
   getDirectoryContentsRecursive,
   getDirectoryFilesRecursivePrefixed,
+  getGitFilesPrefixed,
   gitClone,
+  gitCloneRule,
+  gitTarget,
   listDirectoryRecursive,
-  listGitFiles,
-  listGitFilesPrefixed,
   mkdir,
   needAur,
   needPacman,
@@ -22,7 +23,6 @@ module Util.Shake (
   sudoProgram,
   sudoSetup,
   tar,
-  gitTarget,
 ) where
 
 import Util (rootOwn)
@@ -61,7 +61,7 @@ import Development.Shake (
 import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
 import System.Directory (copyFile, createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist)
-import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, (<.>), (</>))
+import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, takeDirectory, (<.>), (</>))
 import System.Posix (GroupID, UserID)
 
 instance Exceptions.MonadThrow Action where
@@ -123,20 +123,26 @@ pacmanSetup = do
 
 gitClone :: String -> String -> FilePath -> Action ()
 gitClone repo ref dst = do
-  isRepo <- doesFileExist $ dst </> ".git"
+  isRepo <- doesFileExist $ dst </> ".git/HEAD"
   when isRepo $ do
     runProg @() [Cwd dst] $ words "git init"
   runProg @() [Cwd dst] $ words "git fetch --depth=1 --no-tags" <> [repo, ref]
   runProg @() [Cwd dst] $ words "git reset --hard FETCH_HEAD"
 
-listGitFiles :: FilePath -> Action [FilePath]
-listGitFiles repoDir = do
-  StdoutTrim repoFiles <- runProg [Cwd repoDir] $ words "git ls-tree -r --name-only HEAD"
-  gitFiles <- fmap (".git" </>) <$> listDirectoryRecursive (repoDir </> ".git")
-  pure $ gitFiles <> lines repoFiles
+gitCloneRule :: FilePath -> (String, String) -> Rules ()
+gitCloneRule gitDir (repo, ref) = do
+  let target = gitDir </> "HEAD"
+  phony gitDir $ need [target]
+  target %> \out -> do
+    let dir = takeDirectory gitDir
+    gitClone repo ref dir
+    produces =<< getGitFilesPrefixed dir
 
-listGitFilesPrefixed :: FilePath -> Action [FilePath]
-listGitFilesPrefixed repoDir = fmap (repoDir </>) <$> listGitFiles repoDir
+getGitFilesPrefixed :: FilePath -> Action [FilePath]
+getGitFilesPrefixed repoDir = do
+  StdoutTrim repoFiles <- runProg [Cwd repoDir] $ words "git ls-tree -r --name-only HEAD"
+  gitFiles <- getDirectoryFilesRecursivePrefixed (repoDir </> ".git")
+  pure $ gitFiles <> (fmap (repoDir </>) . lines) repoFiles
 
 defaultOpts :: [CmdOption]
 defaultOpts = []
