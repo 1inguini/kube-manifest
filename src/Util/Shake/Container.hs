@@ -44,12 +44,14 @@ import Development.Shake (
   Stdout (Stdout),
   StdoutTrim (StdoutTrim, fromStdoutTrim),
   addTarget,
+  copyFile',
   need,
   par,
   parallel,
   phonys,
   putInfo,
   putWarn,
+  withTempDir,
  )
 import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
 import Development.Shake.Rule (
@@ -213,21 +215,21 @@ withContainer ::
   [String] ->
   ((?container :: ContainerId, ?instructions :: [ContainerfileInstruction]) => Action a) ->
   Action a
-withContainer image opt act = do
+withContainer image opt act = withTempDir $ \tmp -> do
   let
     imageName = show image
     inspect format =
       fmap fromStdoutTrim . runProg @(StdoutTrim String) [] . docker $
         ["inspect", imageName, format]
     init = "/bin/catatonit"
-  need [init]
+  copyFile' init $ tmp </> "init"
   (StdoutTrim container, insts) <-
     par
       ( runProg [] . docker $
           [ "run"
           , "--detach"
           , "-t"
-          , "--volume=" <> init <> ":/run/init"
+          , "--volume=" <> tmp <> ":/run"
           , "--entrypoint=/run/init"
           ]
             <> opt
