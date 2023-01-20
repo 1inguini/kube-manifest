@@ -41,13 +41,10 @@ import Development.Shake (
   Rules,
   Stdout (Stdout),
   addTarget,
-  copyFile',
   need,
-  phony,
   phonys,
   putInfo,
   putWarn,
-  withTempDir,
  )
 import Development.Shake.Classes (Binary, Hashable, NFData, Typeable)
 import Development.Shake.Rule (
@@ -206,18 +203,17 @@ dockerPushEnd = do
   runProg @() [] . docker . words $ "rm" <:> ?container
 
 withContainer :: ImageName -> [String] -> ((?container :: ContainerId) => Action a) -> Action a
-withContainer image opt act = withTempDir $ \tmp -> do
-  let init = "busybox/busybox"
-  copyFile' init $ tmp </> "sh"
+withContainer image opt act = do
+  let init = "/bin/catatonit"
   Stdout container <-
     runProg [] . docker $
       [ "run"
       , "--detach"
       , "-t"
-      , "--volume=" <> tmp <> ":/tmp"
-      , "--entrypoint=/tmp/sh"
+      , "--volume=" <> init <> ":/run/init"
+      , "--entrypoint=/run/init"
       ]
         <> opt
-        <> [show image]
+        <> [show image, "-P"]
   let ?container = head $ lines container
    in act

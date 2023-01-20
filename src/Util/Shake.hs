@@ -8,8 +8,7 @@ module Util.Shake (
   getDirectoryFilesRecursivePrefixed,
   getGitFilesPrefixed,
   gitClone,
-  gitCloneRule,
-  gitTarget,
+  gitCloneAction,
   listDirectoryRecursive,
   mkdir,
   needAur,
@@ -121,23 +120,6 @@ pacmanSetup = do
     produces $ "pacman/local/ALPM_DB_VERSION" : dbfiles
     tar rootOwn out
 
-gitClone :: String -> String -> FilePath -> Action ()
-gitClone repo ref dst = do
-  isRepo <- doesFileExist $ dst </> ".git/HEAD"
-  when isRepo $ do
-    runProg @() [Cwd dst] $ words "git init"
-  runProg @() [Cwd dst] $ words "git fetch --depth=1 --no-tags" <> [repo, ref]
-  runProg @() [Cwd dst] $ words "git reset --hard FETCH_HEAD"
-
-gitCloneRule :: FilePath -> (String, String) -> Rules ()
-gitCloneRule gitDir (repo, ref) = do
-  let target = gitDir </> "HEAD"
-  phony gitDir $ need [target]
-  target %> \out -> do
-    let dir = takeDirectory gitDir
-    gitClone repo ref dir
-    produces =<< getGitFilesPrefixed dir
-
 getGitFilesPrefixed :: FilePath -> Action [FilePath]
 getGitFilesPrefixed repoDir = do
   StdoutTrim repoFiles <- runProg [Cwd repoDir] $ words "git ls-tree -r --name-only HEAD"
@@ -200,13 +182,10 @@ copyDir srcdir dstdir = do
   paths <- getDirectoryContentsRecursive srcdir
   parallel_ . par $ paths
 
-dirExtention, gitExtention :: String
+dirExtention :: String
 dirExtention = ".ls"
-gitExtention = ".git"
-
-dirTarget, gitTarget :: String -> String
+dirTarget :: String -> String
 dirTarget = (<.> dirExtention) . dropTrailingPathSeparator
-gitTarget = (<.> gitExtention) . dirTarget
 
 infix 1 `dir`
 dir :: FilePattern -> ((?dir :: FilePath) => Action ()) -> Rules ()
@@ -220,6 +199,23 @@ dir pat act = do
       act
       produces =<< getDirectoryFilesRecursivePrefixed ?dir
       writeFileLines out =<< getDirectoryContentsRecursive ?dir
+
+gitCloneAction :: String -> String -> FilePath -> Action ()
+gitCloneAction repo ref dst = do
+  isRepo <- doesFileExist $ dst </> ".git/HEAD"
+  when isRepo $ do
+    runProg @() [Cwd dst] $ words "git init"
+  runProg @() [Cwd dst] $ words "git fetch --depth=1 --no-tags" <> [repo, ref]
+  runProg @() [Cwd dst] $ words "git reset --hard FETCH_HEAD"
+
+gitClone :: FilePath -> (String, String) -> Rules ()
+gitClone gitDir (repo, ref) = do
+  let target = gitDir </> "HEAD"
+  phony gitDir $ need [target]
+  target %> \out -> do
+    let dir = takeDirectory gitDir
+    gitCloneAction repo ref dir
+    produces =<< getGitFilesPrefixed dir
 
 tar :: (UserID, GroupID) -> FilePath -> Action ()
 tar (user, group) out =

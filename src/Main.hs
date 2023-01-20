@@ -7,10 +7,7 @@ import Util.Shake (
   copyDir,
   dir,
   dirTarget,
-  getDirectoryFilesRecursivePrefixed,
-  getGitFilesPrefixed,
   gitClone,
-  gitCloneRule,
   mkdir,
   needPacman,
   pacmanSetup,
@@ -62,7 +59,6 @@ import Development.Shake (
   addTarget,
   need,
   phony,
-  produces,
   progressSimple,
   shakeArgsOptionsWith,
   shakeOptions,
@@ -75,12 +71,9 @@ import Development.Shake (
 import System.Directory (
   getCurrentDirectory,
   makeAbsolute,
-  removeDirectoryRecursive,
   setCurrentDirectory,
  )
 import System.FilePath (
-  dropFileName,
-  takeDirectory,
   (</>),
  )
 import System.Posix (
@@ -169,7 +162,7 @@ import Text.Heredoc (str)
 -- main :: IO ()
 -- main = generate
 
-nonrootImage :: (?opts :: [CmdOption], ?shakeDir :: FilePath) => Rules ()
+nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   Image.registry "nonroot" `image` do
     ImageName (ImageRepo $ cs Util.registry </> "scratch", latest) `withContainer` [] $ do
@@ -222,8 +215,8 @@ archlinuxImage = do
       -- produces $ filter (`elem` (dirFile : src)) current
       dockerPushEnd
 
-  -- "archlinux/aur-helper/" `dir` do
-  --   gitClone "https://aur.archlinux.org/yay-bin.git" "master" ?dir
+  "archlinux/aur-helper/.git"
+    `gitClone` ("https://aur.archlinux.org/yay-bin.git", "refs/heads/master")
 
   "archlinux/aur-helper.tar" %> \out -> do
     need [dirTarget "archlinux/aur-helper"]
@@ -259,7 +252,6 @@ musl = do
   "musl/rootfs" `dir` do
     pacman <- needPacman
     runProg @() [] $ pacman ["-S", "--root=musl/rootfs", "musl"]
-    produces =<< getDirectoryFilesRecursivePrefixed ?dir
 
   phony "musl/lib/" $ need ["musl/lib.tar"]
   "musl/lib.tar" %> \out -> do
@@ -273,7 +265,7 @@ musl = do
 skalibs :: (?shakeDir :: FilePath) => Rules ()
 skalibs = do
   let version = "v2.12.0.1"
-  "skalibs/src/.git" `gitCloneRule` ("https://github.com/skarnet/skalibs.git", "refs/tags" </> version)
+  "skalibs/src/.git" `gitClone` ("https://github.com/skarnet/skalibs.git", "refs/tags" </> version)
 
   let cd = Cwd "skalibs/src"
   "skalibs/src/config.mak" %> \out -> do
@@ -301,7 +293,7 @@ s6PortableUtils = do
   let version = "v2.2.5.0"
 
   "s6-utils/src/.git"
-    `gitCloneRule` ("https://github.com/skarnet/s6-portable-utils.git", "refs/tags" </> version)
+    `gitClone` ("https://github.com/skarnet/s6-portable-utils.git", "refs/tags" </> version)
 
   let cd = Cwd "s6-utils/src"
   "s6-utils/src/config.mak" %> \out -> do
