@@ -154,7 +154,7 @@ localhost :: String -> ImageRepo
 localhost = ImageRepo . ("localhost" </>)
 
 shake :: String -> ImageRepo
-shake = ImageRepo . (".shake" </>)
+shake = localhost . ("shake" </>)
 
 registry :: String -> ImageRepo
 registry = ImageRepo . (cs Util.registry </>)
