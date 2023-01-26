@@ -162,6 +162,13 @@ import Text.Heredoc (str)
 -- main :: IO ()
 -- main = generate
 
+scratchImage :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+scratchImage = do
+  let scratch = ?projectRoot </> "src/scratch.tar"
+  Image.registry "scratch" `image` do
+    need [scratch]
+    runProg [] $ docker ["load", "--input", scratch]
+
 nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   Image.registry "nonroot" `image` do
@@ -395,6 +402,7 @@ rules = do
   s6PortableUtils
   busybox
 
+  scratchImage
   nonrootImage
   archlinuxImage
 
