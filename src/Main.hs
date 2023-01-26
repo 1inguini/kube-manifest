@@ -16,11 +16,13 @@ import Util.Shake (
   tar,
  )
 import Util.Shake.Container (
+  ContainerId,
   ImageName (ImageName),
   addContainerImageRule,
   dockerCommit,
   dockerCopy,
   dockerExec,
+  dockerExport,
   dockerImport,
   dockerPush,
   dockerPushEnd,
@@ -198,25 +200,43 @@ nonrootImage = do
 
 archlinuxImage :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
-  Image.registry "archlinux" `image` do
-    ImageName (Image.dockerIo "archlinux", latest) `withContainer` [] $ do
-      let rootExec, nonrootExec :: [String] -> [String] -> Action ()
-          rootExec opt = dockerExec (["--user=root"] <> opt)
-          nonrootExec opt = dockerExec (["--user=nonroot"] <> opt)
+  let rootExec, nonrootExec :: (?container :: ContainerId) => [String] -> [String] -> Action ()
+      rootExec opt = dockerExec (["--user=root"] <> opt)
+      nonrootExec opt = dockerExec (["--user=nonroot"] <> opt)
+
+  Image.localhost "archlinux/files-added" `image` do
+    ImageName (Image.dockerIo "library/archlinux", latest) `withContainer` [] $ do
       parallel_
         [ dockerCopy "archlinux/etc.tar" "/etc/"
         , dockerCopy "pacman/sync.tar" "/var/lib/pacman/sync"
         , dockerCopy "archlinux/aur-helper.tar" "/home/nonroot/aur-helper/"
         ]
-      rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
-      rootExec [] ["locale-gen"]
-      nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
-
-      -- src <- fmap lines . readFile' $ "archlinux/aur-helper" </> dirFile
-      -- current <- listDirectoryRecursive "archlinux/aur-helper"
-      -- produces $ filter (`elem` (dirFile : src)) current
       dockerCommit
-      dockerPushEnd
+
+  Image.localhost "archlinux/users-added" `image` do
+    ImageName (Image.localhost "archlinux/files-added", latest) `withContainer` [] $ do
+      rootExec [] ["groupadd", "nonroot", "--gid=" <> show nonrootGid]
+      rootExec [] $
+        words "useradd nonroot -m -s /usr/bin/nologin"
+          <> ["--gid=" <> show nonrootGid, "--uid=" <> show nonrootUid]
+      dockerCommit
+
+  Image.localhost "archlinux/aur-added" `image` do
+    ImageName (Image.localhost "archlinux/users-added", latest) `withContainer` [] $ do
+      rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
+      parallel_
+        [ rootExec [] ["locale-gen"]
+        , nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
+        ]
+      dockerCommit
+
+  "archlinux/rootfs.tar" %> \out -> do
+    ImageName (Image.localhost "archlinux/aur-added", latest) `withContainer` [] $ do
+      dockerExport out
+
+  Image.registry "archlinux" `image` do
+    dockerImport "archlinux/rootfs.tar" [] ?imageName
+    dockerPush
 
   "archlinux/aur-helper/.git"
     `gitClone` ("https://aur.archlinux.org/yay-bin.git", "refs/heads/master")

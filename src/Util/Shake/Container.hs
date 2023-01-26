@@ -204,6 +204,7 @@ dockerCopy tarFile dir = do
   putInfo $ "`docker cp` from" <:> tarFile <:> "to" <:> dir
   need [tarFile]
   docker <- needDocker
+  dockerExec [] ["/run/busybox", "mkdir", "-p", dir]
   runProg @() [FileStdin tarFile] $
     docker ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
   putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
@@ -283,9 +284,10 @@ withContainer ::
   ((?container :: ContainerId, ?instructions :: [ContainerfileInstruction]) => Action a) ->
   Action a
 withContainer image opt act = withTempDir $ \tmp -> do
-  let init = "/bin/catatonit"
   docker <- needDocker
-  copyFile' init $ tmp </> "init"
+  needImage image
+  copyFile' "/bin/catatonit" $ tmp </> "init"
+  copyFile' "busybox/busybox" $ tmp </> "busybox"
   (insts, StdoutTrim container) <-
     par (let ?imageName = image in getInstructions) . runProg [] . docker $
       [ "run"
@@ -298,4 +300,6 @@ withContainer image opt act = withTempDir $ \tmp -> do
         <> [show image, "-P"]
   let ?instructions = insts
       ?container = container
-  act
+  result <- act
+  dockerEnd
+  pure result
