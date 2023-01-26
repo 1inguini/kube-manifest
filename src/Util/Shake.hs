@@ -115,7 +115,7 @@ pacArgs =
 needPacman :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Action ([String] -> [String])
 needPacman = do
   pacman <- needExe pacmanProgram
-  need ["pacman/sync/.tar"]
+  need ["pacman/sync.tar"]
   sudo <- needSudo
   pure $ sudo . (pacman :) . (pacArgs <>)
 needAur :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Action ([String] -> [String])
@@ -125,7 +125,7 @@ needAur = do
   pure $ (aur :) . (["--noprovides"] <>)
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
-  "pacman/sync/.tar" %> \out -> do
+  "pacman/sync.tar" %> \out -> do
     need [?projectRoot </> "src/pacman.conf"]
     sudo <- needSudo
     pacman <- needExe pacmanProgram

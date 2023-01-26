@@ -27,6 +27,7 @@ module Util.Shake.Container (
   withContainer,
   dockerExec,
   localhost,
+  timestamp,
 ) where
 
 import qualified Util
@@ -75,7 +76,7 @@ import Development.Shake.Rule (
 import GHC.Generics (Generic)
 import Optics (view, (%))
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
-import System.FilePath (makeRelative, splitDirectories, (</>))
+import System.FilePath (dropExtension, makeRelative, splitDirectories, (</>))
 import Text.Heredoc (here)
 
 newtype ImageRepo = ImageRepo {repo :: String}
@@ -136,6 +137,10 @@ type ContainerfileInstruction = String
 
 latest :: ImageTag
 latest = ImageTag "latest"
+
+timestamp :: Action ImageTag
+timestamp = do
+  ImageTag . fromStdoutTrim <$> runProg [] ["date", "+%s"]
 
 dockerIo :: String -> ImageRepo
 dockerIo = ImageRepo . ("docker.io" </>)
@@ -214,15 +219,17 @@ dockerExport tarFile = do
   runProg @() [] $ docker ["export", "--output=" <> tarFile, ?container]
 
 dockerImport ::
-  (?imageName :: ImageName) =>
-  [ContainerfileInstruction] ->
   FilePath ->
+  [ContainerfileInstruction] ->
+  ImageName ->
   Action ()
-dockerImport insts tarFile = do
+dockerImport tarFile insts image = do
   need [tarFile]
   docker <- needDocker
   runProg [] $
-    docker ["import", "--quiet"] <> concatMap (("--change" :) . (: [])) insts <> [tarFile, show ?imageName]
+    docker ["import", "--quiet"]
+      <> concatMap (("--change" :) . (: [])) insts
+      <> [tarFile, show image]
 
 dockerCommit ::
   ( ?imageName :: ImageName
@@ -253,41 +260,42 @@ dockerEnd = do
 dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = parallel_ [dockerPush, dockerEnd]
 
+getInstructions :: (?imageName :: ImageName) => Action [ContainerfileInstruction]
+getInstructions = do
+  docker <- needDocker
+  let inspect format = do
+        (Exit _, StdoutTrim inst) <- runProg [] . docker $ ["inspect", show ?imageName, format]
+        pure inst
+  parallel
+    [ inspect [here|CMD [ {{range $index, $elem := .Config.Cmd}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
+    , inspect [here|ENTRYPOINT [ {{range $index, $elem := .Config.Entrypoint}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
+    , inspect [here|ENV{{range $elem := .Config.Env}}{{$elems := split $elem "="}} {{index $elems 0}}="{{join (slice $elems 1) "="}}"{{end}}|]
+    , inspect [here|EXPOSE{{range $index, $elem := .Config.ExposedPorts}} {{$index}}{{end}}|]
+    , inspect [here|LABEL{{range $elem := .Config.Labels}}{{$elems := split $elem "="}} "{{index $elems 0}}"="{{join (slice $elems 1) "="}}"{{end}}|]
+    , inspect [here|STOPSIGNAL {{.Config.StopSignal}}|]
+    , inspect [here|VOLUME [ {{range $index, $elem := .Config.Volumes}}{{if $index}}, {{end}}"{{$index}}"{{end}} ]|]
+    , inspect [here|WORKDIR {{.Config.WorkingDir}}|]
+    ]
+
 withContainer ::
   ImageName ->
   [String] ->
   ((?container :: ContainerId, ?instructions :: [ContainerfileInstruction]) => Action a) ->
   Action a
 withContainer image opt act = withTempDir $ \tmp -> do
+  let init = "/bin/catatonit"
   docker <- needDocker
-  let imageName = show image
-      inspect format =
-        fmap fromStdoutTrim . runProg @(StdoutTrim String) [] . docker $
-          ["inspect", imageName, format]
-      init = "/bin/catatonit"
   copyFile' init $ tmp </> "init"
-  (StdoutTrim container, insts) <-
-    par
-      ( runProg [] . docker $
-          [ "run"
-          , "--detach"
-          , "-t"
-          , "--volume=" <> tmp <> ":/run"
-          , "--entrypoint=/run/init"
-          ]
-            <> opt
-            <> [imageName, "-P"]
-      )
-      $ parallel
-        [ inspect [here|CMD [ {{range $index, $elem := .Config.Cmd}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
-        , inspect [here|ENTRYPOINT [ {{range $index, $elem := .Config.Entrypoint}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
-        , inspect [here|ENV{{range $elem := .Config.Env}}{{$elems := split $elem "="}} {{index $elems 0}}="{{join (slice $elems 1) "="}}"{{end}}|]
-        , inspect [here|EXPOSE{{range $index, $elem := .Config.ExposedPorts}} {{$index}}{{end}}|]
-        , inspect [here|LABEL{{range $elem := .Config.Labels}}{{$elems := split $elem "="}} "{{index $elems 0}}"="{{join (slice $elems 1) "="}}"{{end}}|]
-        , inspect [here|STOPSIGNAL {{.Config.StopSignal}}|]
-        , inspect [here|VOLUME [ {{range $index, $elem := .Config.Volumes}}{{if $index}}, {{end}}"{{$index}}"{{end}} ]|]
-        , inspect [here|WORKDIR {{.Config.WorkingDir}}|]
-        ]
+  (insts, StdoutTrim container) <-
+    par (let ?imageName = image in getInstructions) . runProg [] . docker $
+      [ "run"
+      , "--detach"
+      , "-t"
+      , "--volume=" <> tmp <> ":/run"
+      , "--entrypoint=/run/init"
+      ]
+        <> opt
+        <> [show image, "-P"]
   let ?instructions = insts
       ?container = container
-   in act
+  act
