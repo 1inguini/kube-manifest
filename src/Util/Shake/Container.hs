@@ -200,13 +200,15 @@ dockerExport tarFile = do
   runProg @() [] $ docker ["export", "--output=" <> tarFile, ?container]
 
 dockerImport ::
-  ImageName ->
+  (?imageName :: ImageName) =>
   [ContainerfileInstruction] ->
+  FilePath ->
   Action ()
-dockerImport image insts = do
+dockerImport insts tarFile = do
+  need [tarFile]
   docker <- needDocker
   runProg [] $
-    docker ["import", "--quiet"] <> concatMap (("--change" :) . (: [])) insts <> [show image]
+    docker ["import", "--quiet"] <> concatMap (("--change" :) . (: [])) insts <> [tarFile, show ?imageName]
 
 dockerCommit ::
   ( ?imageName :: ImageName
