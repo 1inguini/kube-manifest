@@ -22,6 +22,7 @@ module Util.Shake (
   sudoProgram,
   sudoSetup,
   tar,
+  needExe,
 ) where
 
 import Util (rootOwn)
@@ -80,6 +81,13 @@ sudoProgram = "sudo"
 pacmanProgram = "pacman"
 aurProgram = "yay"
 
+needExe :: String -> Action FilePath
+needExe command = do
+  need ["/bin/env"]
+  StdoutTrim path <- runProg [] ["/bin/env", "which", command]
+  need [path]
+  pure path
+
 needPermission :: Action ()
 needPermission = need ["auth"]
 needSudo :: Action ([String] -> [String])
@@ -87,14 +95,15 @@ needSudo = needPermission $> (sudoProgram :) . (words "--non-interactive --" <>)
 sudoSetup :: Rules ()
 sudoSetup = do
   phony "auth" $ do
+    sudo <- needExe sudoProgram
     Exit noNeedPassword <-
       runProg [] $
-        sudoProgram : words "--non-interactive --validate"
+        sudo : words "--non-interactive --validate"
     case noNeedPassword of
       ExitFailure _ -> do
         putWarn $ "input password for" <:> sudoProgram
         input <- cs <$> liftIO ByteString.getLine
-        runProg [EchoStdout False, StdinBS input] $ sudoProgram : words "--validate --stdin"
+        runProg [EchoStdout False, StdinBS input] $ sudo : words "--validate --stdin"
       ExitSuccess -> pure ()
 
 pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
@@ -105,17 +114,22 @@ pacArgs =
   ]
 needPacman :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Action ([String] -> [String])
 needPacman = do
+  pacman <- needExe pacmanProgram
   need ["pacman/sync/.tar"]
   sudo <- needSudo
-  pure $ sudo . (pacmanProgram :) . (pacArgs <>)
+  pure $ sudo . (pacman :) . (pacArgs <>)
 needAur :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Action ([String] -> [String])
-needAur = needPacman $> (aurProgram :) . (["--noprovides"] <>)
+needAur = do
+  _ <- needPacman
+  aur <- needExe aurProgram
+  pure $ (aur :) . (["--noprovides"] <>)
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 pacmanSetup = do
   "pacman/sync/.tar" %> \out -> do
     need [?projectRoot </> "src/pacman.conf"]
     sudo <- needSudo
-    runProg @() [] . sudo $ pacmanProgram : pacArgs <> ["-Sy"]
+    pacman <- needExe pacmanProgram
+    runProg @() [] . sudo $ pacman : pacArgs <> ["-Sy"]
     dbfiles <- getDirectoryFilesRecursivePrefixed "pacman/sync"
     produces $ "pacman/local/ALPM_DB_VERSION" : dbfiles
     tar rootOwn out

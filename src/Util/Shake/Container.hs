@@ -8,23 +8,23 @@ module Util.Shake.Container (
   ImageTag (..),
   addContainerImageRule,
   addTaggedImageTarget,
-  docker,
   dockerCommit,
   dockerCopy,
-  withContainer,
   dockerIo,
   dockerPushEnd,
+  dockerSetup,
   image,
   latest,
+  needDocker,
+  needDockerLogin,
   needImage,
   needImages,
   registry,
-  dockerSetup,
-  needDockerLogin,
+  withContainer,
 ) where
 
 import qualified Util
-import Util.Shake (runProg, (<:>))
+import Util.Shake (needExe, runProg, (<:>))
 
 import Control.Exception.Safe (throwString)
 import Control.Monad (guard, void)
@@ -32,7 +32,6 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.List as List
-import Data.Maybe (catMaybes)
 import Data.String.Conversions (cs)
 import Data.Tuple.Optics (_1)
 import Development.Shake (
@@ -94,6 +93,7 @@ addContainerImageRule = addBuiltinRule noLint imageIdentity run
 
   newStore :: ImageName -> Action (Maybe ByteString)
   newStore name = do
+    docker <- needDocker
     (Exit exitCode, Stdout stdout) <-
       runProg [] . docker $ words "images --no-trunc --quiet" <> [show name]
     case (exitCode, ByteString.split (fromIntegral $ fromEnum '\n') stdout) of
@@ -160,8 +160,10 @@ addTaggedImageTarget = addTarget . show
 
 dockerProgram :: String
 dockerProgram = "podman"
-docker :: [String] -> [String]
-docker = (dockerProgram :)
+needDocker :: Action ([String] -> [String])
+needDocker = do
+  docker <- needExe dockerProgram
+  pure (docker :)
 needDockerLogin :: String -> Action ()
 needDockerLogin registry = need ["docker/login" </> registry]
 dockerSetup :: Rules ()
@@ -171,6 +173,7 @@ dockerSetup = do
     guard $ "docker/login/" `List.isPrefixOf` target
     let registry = makeRelative "docker/login" target
     Just $ do
+      docker <- needDocker
       Exit noNeedPassword <- runProg [] . docker $ ["login", "--get-login", registry]
       case noNeedPassword of
         ExitFailure _ -> do
@@ -179,14 +182,14 @@ dockerSetup = do
           putWarn $ "input password for `docker login" <:> registry <> "`"
           password <- cs <$> liftIO ByteString.getLine
           runProg [StdinBS password] $
-            docker ["login", "--username=" <> username, "--password-stdin"]
+            docker ["login", "--username=" <> username, "--password-stdin", registry]
         ExitSuccess -> pure ()
-      runProg [] $ docker ["login", head . splitDirectories . cs $ Util.registry]
 
 dockerCopy :: (?container :: ContainerId) => FilePath -> FilePath -> Action ()
 dockerCopy tarFile dir = do
   putInfo $ "`docker cp` from" <:> tarFile <:> "to" <:> dir
   need [tarFile]
+  docker <- needDocker
   runProg @() [FileStdin tarFile] $
     docker ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
   putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
@@ -197,7 +200,8 @@ dockerCommit ::
   , ?instructions :: [ContainerfileInstruction]
   ) =>
   Action ()
-dockerCommit =
+dockerCommit = do
+  docker <- needDocker
   runProg [] $
     docker ["commit", "--include-volumes=false"]
       <> concatMap (("--change" :) . (: [])) ?instructions
@@ -205,6 +209,7 @@ dockerCommit =
 
 dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = do
+  docker <- needDocker
   need ["docker/login" </> (head . splitDirectories . view (#name % _1 % #repo)) ?imageName]
   -- runDocker @() [] ["push", show ?imageName]
   runProg @() [] . docker . words $ "stop --time=0" <:> ?container
@@ -216,6 +221,7 @@ withContainer ::
   ((?container :: ContainerId, ?instructions :: [ContainerfileInstruction]) => Action a) ->
   Action a
 withContainer image opt act = withTempDir $ \tmp -> do
+  docker <- needDocker
   let
     imageName = show image
     inspect format =

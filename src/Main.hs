@@ -20,13 +20,13 @@ import Util.Shake.Container (
   ImageName (ImageName),
   ImageRepo (ImageRepo),
   addContainerImageRule,
-  docker,
   dockerCommit,
   dockerCopy,
   dockerPushEnd,
   dockerSetup,
   image,
   latest,
+  needDocker,
   withContainer,
  )
 import qualified Util.Shake.Container as Image
@@ -166,6 +166,7 @@ scratchImage :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 scratchImage = do
   let scratch = ?projectRoot </> "src/scratch.tar"
   Image.registry "scratch" `image` do
+    docker <- needDocker
     need [scratch]
     runProg [] $ docker ["load", "--input", scratch]
 
@@ -200,6 +201,7 @@ archlinuxImage :: (?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
   Image.registry "archlinux" `image` do
     ImageName (Image.dockerIo "library/archlinux", latest) `withContainer` [] $ do
+      docker <- needDocker
       let
         dockerExec :: [String] -> Action ()
         dockerExec = runProg [] . docker . (words "exec -i" <>)
