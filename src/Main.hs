@@ -22,6 +22,7 @@ import Util.Shake.Container (
   ImageTag (ImageTag),
   addContainerImageRule,
   dockerCommit,
+  dockerCommitSquash,
   dockerCopy,
   dockerExec,
   dockerExport,
@@ -208,7 +209,7 @@ archlinuxImage = do
 
   dockerPull officalImage
 
-  Image.localhost "archlinux/files-added" `image` do
+  Image.shake "archlinux/files-added" `image` do
     officalImage `withContainer` [] $ do
       parallel_
         [ dockerCopy "archlinux/etc.tar" "/etc/"
@@ -217,16 +218,16 @@ archlinuxImage = do
         ]
       dockerCommit
 
-  Image.localhost "archlinux/users-added" `image` do
-    ImageName (Image.localhost "archlinux/files-added", latest) `withContainer` [] $ do
+  Image.shake "archlinux/users-added" `image` do
+    ImageName (Image.shake "archlinux/files-added", latest) `withContainer` [] $ do
       rootExec [] ["groupadd", "nonroot", "--gid=" <> show nonrootGid]
       rootExec [] $
         words "useradd nonroot -m -s /usr/bin/nologin"
           <> ["--gid=" <> show nonrootGid, "--uid=" <> show nonrootUid]
       dockerCommit
 
-  Image.localhost "archlinux/aur-added" `image` do
-    ImageName (Image.localhost "archlinux/users-added", latest) `withContainer` [] $ do
+  Image.shake "archlinux/aur-added" `image` do
+    ImageName (Image.shake "archlinux/users-added", latest) `withContainer` [] $ do
       rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
       parallel_
         [ rootExec [] ["locale-gen"]
@@ -235,13 +236,10 @@ archlinuxImage = do
       let ?instructions = ?instructions <> ["ENV LANG=en_US.UTF-8"]
       dockerCommit
 
-  "archlinux/rootfs.tar" %> \out -> do
-    ImageName (Image.localhost "archlinux/aur-added", latest) `withContainer` [] $ do
-      dockerExport out
-
   Image.registry "archlinux" `image` do
-    dockerImport "archlinux/rootfs.tar" [] ?imageName
-    dockerPush
+    ImageName (Image.shake "archlinux/aur-added", latest) `withContainer` [] $ do
+      let ?instruction = ?instructions <> ["USER nonroot"]
+      dockerCommitSquash
 
   "archlinux/aur-helper/.git"
     `gitClone` ("https://aur.archlinux.org/yay-bin.git", "refs/heads/master")

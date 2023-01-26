@@ -11,24 +11,27 @@ module Util.Shake.Container (
   dockerCommit,
   dockerCopy,
   dockerEnd,
+  dockerExec,
   dockerExport,
   dockerImport,
   dockerIo,
+  dockerPull,
   dockerPush,
   dockerPushEnd,
   dockerSetup,
+  getInstructions,
   image,
   latest,
+  localhost,
   needDocker,
   needDockerLogin,
   needImage,
   needImages,
   registry,
-  withContainer,
-  dockerExec,
-  localhost,
   timestamp,
-  dockerPull,
+  withContainer,
+  dockerCommitSquash,
+  shake,
 ) where
 
 import qualified Util
@@ -40,7 +43,6 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.List as List
-import Data.Maybe (catMaybes)
 import Data.String.Conversions (cs)
 import Data.Tuple.Optics (_1)
 import Development.Shake (
@@ -79,7 +81,7 @@ import Development.Shake.Rule (
 import GHC.Generics (Generic)
 import Optics (view, (%))
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
-import System.FilePath (dropExtension, makeRelative, splitDirectories, (</>))
+import System.FilePath (makeRelative, splitDirectories, (</>))
 import Text.Heredoc (here)
 
 newtype ImageRepo = ImageRepo {repo :: String}
@@ -150,6 +152,9 @@ dockerIo = ImageRepo . ("docker.io" </>)
 
 localhost :: String -> ImageRepo
 localhost = ImageRepo . ("localhost" </>)
+
+shake :: String -> ImageRepo
+shake = ImageRepo . (".shake" </>)
 
 registry :: String -> ImageRepo
 registry = ImageRepo . (cs Util.registry </>)
@@ -245,18 +250,36 @@ dockerImport tarFile insts image = do
       <> concatMap (("--change" :) . (: [])) insts
       <> [tarFile, show image]
 
+dockerCommit' ::
+  ( ?imageName :: ImageName
+  , ?container :: ContainerId
+  , ?instructions :: [ContainerfileInstruction]
+  ) =>
+  [String] ->
+  Action ()
+dockerCommit' args = do
+  docker <- needDocker
+  runProg [] $
+    docker ["commit", "--include-volumes=false"]
+      <> concatMap (("--change" :) . (: [])) ?instructions
+      <> args
+      <> [?container, show ?imageName]
+
 dockerCommit ::
   ( ?imageName :: ImageName
   , ?container :: ContainerId
   , ?instructions :: [ContainerfileInstruction]
   ) =>
   Action ()
-dockerCommit = do
-  docker <- needDocker
-  runProg [] $
-    docker ["commit", "--include-volumes=false"]
-      <> concatMap (("--change" :) . (: [])) ?instructions
-      <> [?container, show ?imageName]
+dockerCommit = dockerCommit' []
+
+dockerCommitSquash ::
+  ( ?imageName :: ImageName
+  , ?container :: ContainerId
+  , ?instructions :: [ContainerfileInstruction]
+  ) =>
+  Action ()
+dockerCommitSquash = dockerCommit' ["--squash"]
 
 dockerPush :: (?imageName :: ImageName) => Action ()
 dockerPush = do
@@ -274,13 +297,13 @@ dockerEnd = do
 dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = parallel_ [dockerPush, dockerEnd]
 
-getInstructions :: (?imageName :: ImageName) => Action [ContainerfileInstruction]
-getInstructions = do
+getInstructions :: ImageName -> Action [ContainerfileInstruction]
+getInstructions imageName = do
   docker <- needDocker
   let inspect format = do
         (Exit _, StdoutTrim inst) <-
           runProg [] . docker $
-            ["inspect", "--format=" <> format, show ?imageName]
+            ["inspect", "--format=" <> format, show imageName]
         pure inst
   insts <-
     parallel
@@ -307,7 +330,7 @@ withContainer image opt act = withTempDir $ \tmp -> do
   copyFile' "/bin/catatonit" $ tmp </> "init"
   copyFile' "busybox/busybox" $ tmp </> "busybox"
   (insts, StdoutTrim container) <-
-    par (let ?imageName = image in getInstructions) . runProg [] . docker $
+    par (getInstructions image) . runProg [] . docker $
       [ "run"
       , "--detach"
       , "-t"
