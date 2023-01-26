@@ -206,14 +206,12 @@ archlinuxImage = do
       parallel_
         [ dockerCopy "archlinux/etc.tar" "/etc/"
         , dockerCopy "pacman/sync.tar" "/var/lib/pacman/sync"
+        , dockerCopy "archlinux/aur-helper.tar" "/home/nonroot/aur-helper/"
         ]
       rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
-      parallel_
-        [ do
-            dockerCopy "archlinux/aur-helper.tar" "/home/nonroot/aur-helper/"
-            nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
-        , rootExec [] ["locale-gen"]
-        ]
+      rootExec [] ["locale-gen"]
+      nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
+
       -- src <- fmap lines . readFile' $ "archlinux/aur-helper" </> dirFile
       -- current <- listDirectoryRecursive "archlinux/aur-helper"
       -- produces $ filter (`elem` (dirFile : src)) current

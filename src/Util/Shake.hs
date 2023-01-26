@@ -28,7 +28,7 @@ module Util.Shake (
 import Util (rootOwn)
 
 import Control.Exception.Safe (displayException, throwString, try)
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (void)
@@ -59,7 +59,7 @@ import Development.Shake (
   (%>),
  )
 import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
-import System.Directory (copyFile, createDirectoryIfMissing, listDirectory, removeDirectoryRecursive, removeFile)
+import System.Directory (copyFile, createDirectoryIfMissing, doesPathExist, listDirectory, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist)
 import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, takeDirectory, (<.>), (</>))
 import System.Posix (GroupID, UserID)
@@ -214,11 +214,11 @@ dir pat act = do
 
 gitCloneAction :: String -> String -> FilePath -> Action ()
 gitCloneAction repo ref dst = do
-  isRepo <- doesFileExist $ dst </> ".git/HEAD"
-  when isRepo $ do
-    runProg @() [Cwd dst] $ words "git init"
-  runProg @() [Cwd dst] $ words "git fetch --depth=1 --no-tags" <> [repo, ref]
-  runProg @() [Cwd dst] $ words "git reset --hard FETCH_HEAD"
+  void $ runProg @Exit [Cwd dst] $ words "git init"
+  let gitDir = dst </> ".git"
+      git = runProg @() [] . (["git", "--git-dir=" <> gitDir] <>)
+  git $ words "fetch --depth=1 --no-tags" <> [repo, ref]
+  git $ words "reset --hard FETCH_HEAD"
 
 gitClone :: FilePath -> (String, String) -> Rules ()
 gitClone gitDir (repo, ref) = do
@@ -239,7 +239,8 @@ tar (user, group) out =
     , "--owner=" <> show user
     , "--group=" <> show group
     , -- , "--exclude=" <> takeFileName out
-      "--file=" <> out
+      "--exclude=.git"
+    , "--file=" <> out
     , "--directory=" <> dropExtension out
     , "."
     ]
