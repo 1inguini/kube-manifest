@@ -194,6 +194,20 @@ dockerCopy tarFile dir = do
     docker ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
   putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
 
+dockerExport :: (?container :: ContainerId) => FilePath -> Action ()
+dockerExport tarFile = do
+  docker <- needDocker
+  runProg @() [] $ docker ["export", "--output=" <> tarFile, ?container]
+
+dockerImport ::
+  ImageName ->
+  [ContainerfileInstruction] ->
+  Action ()
+dockerImport image insts = do
+  docker <- needDocker
+  runProg [] $
+    docker ["import", "--quiet"] <> concatMap (("--change" :) . (: [])) insts <> [show image]
+
 dockerCommit ::
   ( ?imageName :: ImageName
   , ?container :: ContainerId
@@ -242,8 +256,14 @@ withContainer image opt act = withTempDir $ \tmp -> do
             <> [imageName, "-P"]
       )
       $ parallel
-        [ inspect [here|--format=ENTRYPOINT [ {{range $index, $elem := .Config.Entrypoint}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
-        , inspect [here|--format=CMD [ {{range $index, $elem := .Config.Cmd}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
+        [ inspect [here|CMD [ {{range $index, $elem := .Config.Cmd}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
+        , inspect [here|ENTRYPOINT [ {{range $index, $elem := .Config.Entrypoint}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
+        , inspect [here|ENV{{range $elem := .Config.Env}}{{$elems := split $elem "="}} {{index $elems 0}}="{{join (slice $elems 1) "="}}"{{end}}|]
+        , inspect [here|EXPOSE{{range $index, $elem := .Config.ExposedPorts}} {{$index}}{{end}}|]
+        , inspect [here|LABEL{{range $elem := .Config.Labels}}{{$elems := split $elem "="}} "{{index $elems 0}}"="{{join (slice $elems 1) "="}}"{{end}}|]
+        , inspect [here|STOPSIGNAL {{.Config.StopSignal}}|]
+        , inspect [here|VOLUME [ {{range $index, $elem := .Config.Volumes}}{{if $index}}, {{end}}"{{$index}}"{{end}} ]|]
+        , inspect [here|WORKDIR {{.Config.WorkingDir}}|]
         ]
   let ?instructions = insts
       ?container = container
