@@ -232,6 +232,7 @@ archlinuxImage = do
         [ rootExec [] ["locale-gen"]
         , nonrootExec ["--workdir=/home/nonroot/aur-helper"] ["makepkg", "--noconfirm", "-sir"]
         ]
+      let ?instructions = ?instructions <> ["ENV LANG=en_US.UTF-8"]
       dockerCommit
 
   "archlinux/rootfs.tar" %> \out -> do
