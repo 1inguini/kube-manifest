@@ -23,6 +23,7 @@ module Util.Shake (
   sudoSetup,
   tar,
   needExe,
+  copyFileContent,
 ) where
 
 import Util (rootOwn)
@@ -148,6 +149,12 @@ runProg _ [] = throwString "runProg: empty"
 
 mkdir :: MonadIO m => FilePath -> m ()
 mkdir = liftIO . createDirectoryIfMissing True
+
+-- `copyFile'` keeps permissions, `copyFileContents` will give the new file 644 permission
+copyFileContent :: FilePath -> FilePath -> Action ()
+copyFileContent src dst = do
+  need [src]
+  liftIO $ ByteString.readFile src >>= ByteString.writeFile dst
 
 listDirectoryRecursive :: MonadIO m => FilePath -> m [FilePath]
 listDirectoryRecursive dir = liftIO $ do

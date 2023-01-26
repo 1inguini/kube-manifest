@@ -268,7 +268,7 @@ dockerPush = do
 dockerEnd :: (?container :: ContainerId) => Action ()
 dockerEnd = do
   docker <- needDocker
-  runProg @() [] . docker . words $ "stop --time=0" <:> ?container
+  runProg @() [] . docker . words $ "stop --time=1" <:> ?container
   runProg @() [] . docker . words $ "rm" <:> ?container
 
 dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
@@ -294,7 +294,7 @@ getInstructions = do
       , inspect [here|WORKDIR {{.Config.WorkingDir}}|]
       ]
   pure $
-    filter (`notElem` ["EXPOSE", "LABEL", "STOPSIGNAL", "VOLUME [ ]", "WORKDIR"]) insts
+    filter (`notElem` ["EXPOSE", "LABEL", "STOPSIGNAL", "VOLUME [  ]", "WORKDIR"]) insts
 
 withContainer ::
   ImageName ->

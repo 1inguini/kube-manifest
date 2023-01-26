@@ -5,6 +5,7 @@ module Main (main) where
 import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid, rootOwn)
 import Util.Shake (
   copyDir,
+  copyFileContent,
   dir,
   gitClone,
   mkdir,
@@ -27,7 +28,6 @@ import Util.Shake.Container (
   dockerImport,
   dockerPull,
   dockerPush,
-  dockerPushEnd,
   dockerSetup,
   image,
   latest,
@@ -61,7 +61,6 @@ import Development.Shake (
     shakeThreads
   ),
   addTarget,
-  copyFile',
   need,
   phony,
   progressSimple,
@@ -269,7 +268,7 @@ archlinuxImage = do
         |]
 
   "archlinux/etc/pacman.conf" %> \out ->
-    copyFile' (?projectRoot </> "src/pacman.conf") out
+    copyFileContent (?projectRoot </> "src/pacman.conf") out
 
   "archlinux/etc.tar" %> \out -> do
     need . fmap ("archlinux/etc" </>) $
