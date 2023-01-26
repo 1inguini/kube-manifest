@@ -62,9 +62,9 @@ helm template --values values/harbor.yaml harbor/harbor > manifest/harbor.yaml
 
 ## Application
 
-[x] Harbor
-[ ] GitBucket
-[ ] roundcube
-[ ] snikket
-[ ] roundcube
-[ ] mail server
+* [x] Harbor
+* [ ] GitBucket
+* [ ] roundcube
+* [ ] snikket
+* [ ] roundcube
+* [ ] mail server
