@@ -199,10 +199,10 @@ nonrootImage = do
 archlinuxImage :: (?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
   Image.registry "archlinux" `image` do
-    ImageName (Image.dockerIo "library/archlinux", latest) `withContainer` [] $ do
+    ImageName (Image.localhost "archlinux", latest) `withContainer` [] $ do
       let rootExec, nonrootExec :: [String] -> [String] -> Action ()
-          rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
-          nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
+          rootExec opt = dockerExec (["--user=root", ?container] <> opt)
+          nonrootExec opt = dockerExec (["--user=nonroot", ?container] <> opt)
       parallel_
         [ dockerCopy "archlinux/etc.tar" "/etc/"
         , dockerCopy "pacman/db/sync.tar" "/var/lib/pacman/sync"

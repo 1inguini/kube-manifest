@@ -26,6 +26,7 @@ module Util.Shake.Container (
   registry,
   withContainer,
   dockerExec,
+  localhost,
 ) where
 
 import qualified Util
@@ -139,6 +140,9 @@ latest = ImageTag "latest"
 dockerIo :: String -> ImageRepo
 dockerIo = ImageRepo . ("docker.io" </>)
 
+localhost :: String -> ImageRepo
+localhost = ImageRepo . ("localhost" </>)
+
 registry :: String -> ImageRepo
 registry = ImageRepo . (cs Util.registry </>)
 
@@ -199,10 +203,10 @@ dockerCopy tarFile dir = do
     docker ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
   putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
 
-dockerExec :: [String] -> Action ()
-dockerExec args = do
+dockerExec :: (?container :: String) => [String] -> [String] -> Action ()
+dockerExec args cmds = do
   docker <- needDocker
-  runProg [] . docker $ words "exec -i" <> args
+  runProg [] . docker $ words "exec -i" <> args <> [?container] <> cmds
 
 dockerExport :: (?container :: ContainerId) => FilePath -> Action ()
 dockerExport tarFile = do
