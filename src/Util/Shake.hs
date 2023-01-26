@@ -183,11 +183,9 @@ getDirectoryFilesRecursivePrefixed dir =
 copyDir :: FilePath -> FilePath -> Action ()
 copyDir srcdir dstdir = do
   let par = fmap $ \path -> do
-        let
-          srcfile = srcdir </> path
-          dstfile = dstdir </> path
-        let
-          dstdir = dropFileName dstfile
+        let srcfile = srcdir </> path
+            dstfile = dstdir </> path
+        let dstdir = dropFileName dstfile
         liftIO $ do
           mkdir dstdir
           void . try @IO @IOError $ removeFile dstfile -- symlink safety

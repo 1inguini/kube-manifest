@@ -236,12 +236,11 @@ withContainer ::
   Action a
 withContainer image opt act = withTempDir $ \tmp -> do
   docker <- needDocker
-  let
-    imageName = show image
-    inspect format =
-      fmap fromStdoutTrim . runProg @(StdoutTrim String) [] . docker $
-        ["inspect", imageName, format]
-    init = "/bin/catatonit"
+  let imageName = show image
+      inspect format =
+        fmap fromStdoutTrim . runProg @(StdoutTrim String) [] . docker $
+          ["inspect", imageName, format]
+      init = "/bin/catatonit"
   copyFile' init $ tmp </> "init"
   (StdoutTrim container, insts) <-
     par

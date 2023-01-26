@@ -202,12 +202,11 @@ archlinuxImage = do
   Image.registry "archlinux" `image` do
     ImageName (Image.dockerIo "library/archlinux", latest) `withContainer` [] $ do
       docker <- needDocker
-      let
-        dockerExec :: [String] -> Action ()
-        dockerExec = runProg [] . docker . (words "exec -i" <>)
-        rootExec, nonrootExec :: [String] -> [String] -> Action ()
-        rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
-        nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
+      let dockerExec :: [String] -> Action ()
+          dockerExec = runProg [] . docker . (words "exec -i" <>)
+          rootExec, nonrootExec :: [String] -> [String] -> Action ()
+          rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
+          nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
       parallel_
         [ dockerCopy "archlinux/etc.tar" "/etc/"
         , dockerCopy "pacman/db/sync.tar" "/var/lib/pacman/sync"
