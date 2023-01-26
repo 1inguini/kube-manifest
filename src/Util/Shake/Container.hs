@@ -28,6 +28,7 @@ module Util.Shake.Container (
   dockerExec,
   localhost,
   timestamp,
+  dockerPull,
 ) where
 
 import qualified Util
@@ -39,6 +40,7 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.List as List
+import Data.Maybe (catMaybes)
 import Data.String.Conversions (cs)
 import Data.Tuple.Optics (_1)
 import Development.Shake (
@@ -54,6 +56,7 @@ import Development.Shake (
   need,
   par,
   parallel,
+  phony,
   phonys,
   putInfo,
   putWarn,
@@ -199,6 +202,16 @@ dockerSetup = do
             docker ["login", "--username=" <> username, "--password-stdin", registry]
         ExitSuccess -> pure ()
 
+dockerPull :: ImageName -> Rules ()
+dockerPull image = do
+  let imageName = show image
+  phony imageName $ needImage image
+  addUserRule . ImageRule $ \case
+    name | name == image -> Just $ do
+      docker <- needDocker
+      runProg @() [] $ docker ["pull", show image]
+    _ -> Nothing
+
 dockerCopy :: (?container :: ContainerId) => FilePath -> FilePath -> Action ()
 dockerCopy tarFile dir = do
   putInfo $ "`docker cp` from" <:> tarFile <:> "to" <:> dir
@@ -265,18 +278,23 @@ getInstructions :: (?imageName :: ImageName) => Action [ContainerfileInstruction
 getInstructions = do
   docker <- needDocker
   let inspect format = do
-        (Exit _, StdoutTrim inst) <- runProg [] . docker $ ["inspect", show ?imageName, format]
+        (Exit _, StdoutTrim inst) <-
+          runProg [] . docker $
+            ["inspect", "--format=" <> format, show ?imageName]
         pure inst
-  parallel
-    [ inspect [here|CMD [ {{range $index, $elem := .Config.Cmd}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
-    , inspect [here|ENTRYPOINT [ {{range $index, $elem := .Config.Entrypoint}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
-    , inspect [here|ENV{{range $elem := .Config.Env}}{{$elems := split $elem "="}} {{index $elems 0}}="{{join (slice $elems 1) "="}}"{{end}}|]
-    , inspect [here|EXPOSE{{range $index, $elem := .Config.ExposedPorts}} {{$index}}{{end}}|]
-    , inspect [here|LABEL{{range $elem := .Config.Labels}}{{$elems := split $elem "="}} "{{index $elems 0}}"="{{join (slice $elems 1) "="}}"{{end}}|]
-    , inspect [here|STOPSIGNAL {{.Config.StopSignal}}|]
-    , inspect [here|VOLUME [ {{range $index, $elem := .Config.Volumes}}{{if $index}}, {{end}}"{{$index}}"{{end}} ]|]
-    , inspect [here|WORKDIR {{.Config.WorkingDir}}|]
-    ]
+  insts <-
+    parallel
+      [ inspect [here|CMD [ {{range $index, $elem := .Config.Cmd}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
+      , inspect [here|ENTRYPOINT [ {{range $index, $elem := .Config.Entrypoint}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
+      , inspect [here|ENV{{range $elem := .Config.Env}}{{$elems := split $elem "="}} {{index $elems 0}}="{{join (slice $elems 1) "="}}"{{end}}|]
+      , inspect [here|EXPOSE{{range $index, $elem := .Config.ExposedPorts}} {{$index}}{{end}}|]
+      , inspect [here|LABEL{{range $elem := .Config.Labels}}{{$elems := split $elem "="}} "{{index $elems 0}}"="{{join (slice $elems 1) "="}}"{{end}}|]
+      , inspect [here|STOPSIGNAL {{.Config.StopSignal}}|]
+      , inspect [here|VOLUME [ {{range $index, $elem := .Config.Volumes}}{{if $index}}, {{end}}"{{$index}}"{{end}} ]|]
+      , inspect [here|WORKDIR {{.Config.WorkingDir}}|]
+      ]
+  pure $
+    filter (`notElem` ["EXPOSE", "LABEL", "STOPSIGNAL", "VOLUME [ ]", "WORKDIR"]) insts
 
 withContainer ::
   ImageName ->

@@ -18,12 +18,14 @@ import Util.Shake (
 import Util.Shake.Container (
   ContainerId,
   ImageName (ImageName),
+  ImageTag (ImageTag),
   addContainerImageRule,
   dockerCommit,
   dockerCopy,
   dockerExec,
   dockerExport,
   dockerImport,
+  dockerPull,
   dockerPush,
   dockerPushEnd,
   dockerSetup,
@@ -200,12 +202,15 @@ nonrootImage = do
 
 archlinuxImage :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
-  let rootExec, nonrootExec :: (?container :: ContainerId) => [String] -> [String] -> Action ()
+  let officalImage = ImageName (Image.dockerIo "library/archlinux", ImageTag "base-devel")
+      rootExec, nonrootExec :: (?container :: ContainerId) => [String] -> [String] -> Action ()
       rootExec opt = dockerExec (["--user=root"] <> opt)
       nonrootExec opt = dockerExec (["--user=nonroot"] <> opt)
 
+  dockerPull officalImage
+
   Image.localhost "archlinux/files-added" `image` do
-    ImageName (Image.dockerIo "library/archlinux", latest) `withContainer` [] $ do
+    officalImage `withContainer` [] $ do
       parallel_
         [ dockerCopy "archlinux/etc.tar" "/etc/"
         , dockerCopy "pacman/sync.tar" "/var/lib/pacman/sync"
