@@ -247,7 +247,7 @@ dockerImport tarFile insts image = do
   docker <- needDocker
   runProg [] $
     docker ["import", "--quiet"]
-      <> concatMap (("--change" :) . (: [])) insts
+      <> toArgs insts
       <> [tarFile, show image]
 
 dockerCommit' ::
@@ -261,7 +261,7 @@ dockerCommit' args = do
   docker <- needDocker
   runProg [] $
     docker ["commit", "--include-volumes=false"]
-      <> concatMap (("--change" :) . (: [])) ?instructions
+      <> toArgs ?instructions
       <> args
       <> [?container, show ?imageName]
 
@@ -297,6 +297,9 @@ dockerEnd = do
 dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
 dockerPushEnd = parallel_ [dockerPush, dockerEnd]
 
+toArgs :: [ContainerfileInstruction] -> [String]
+toArgs = concatMap (("--change" :) . (: [])) . List.nub
+
 getInstructions :: ImageName -> Action [ContainerfileInstruction]
 getInstructions imageName = do
   docker <- needDocker
@@ -304,20 +307,21 @@ getInstructions imageName = do
         (Exit _, StdoutTrim inst) <-
           runProg [] . docker $
             ["inspect", "--format=" <> format, show imageName]
-        pure inst
+        pure $ lines inst
   insts <-
     parallel
       [ inspect [here|CMD [ {{range $index, $elem := .Config.Cmd}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
       , inspect [here|ENTRYPOINT [ {{range $index, $elem := .Config.Entrypoint}}{{if $index}}, {{end}}"{{$elem}}"{{end}} ]|]
-      , inspect [here|ENV{{range $elem := .Config.Env}}{{$elems := split $elem "="}} {{index $elems 0}}="{{join (slice $elems 1) "="}}"{{end}}|]
-      , inspect [here|EXPOSE{{range $index, $elem := .Config.ExposedPorts}} {{$index}}{{end}}|]
-      , inspect [here|LABEL{{range $elem := .Config.Labels}}{{$elems := split $elem "="}} "{{index $elems 0}}"="{{join (slice $elems 1) "="}}"{{end}}|]
+      , inspect [here|{{range $elem := .Config.Env}}{{$elems := split $elem "="}}ENV {{index $elems 0}}="{{join (slice $elems 1) "="}}"{{println}}{{end}}|]
+      , inspect [here|{{range $index, $elem := .Config.ExposedPorts}}EXPOSE {{$index}}{{println}}{{end}}|]
+      , inspect [here|{{range $elem := .Config.Labels}}{{$elems := split $elem "="}}LABEL "{{index $elems 0}}"="{{join (slice $elems 1) "="}}"{{end}}|]
       , inspect [here|STOPSIGNAL {{.Config.StopSignal}}|]
       , inspect [here|VOLUME [ {{range $index, $elem := .Config.Volumes}}{{if $index}}, {{end}}"{{$index}}"{{end}} ]|]
       , inspect [here|WORKDIR {{.Config.WorkingDir}}|]
       ]
   pure $
-    filter (`notElem` ["EXPOSE", "LABEL", "STOPSIGNAL", "VOLUME [  ]", "WORKDIR"]) insts
+    filter (`notElem` ["EXPOSE", "LABEL", "STOPSIGNAL", "VOLUME [  ]", "WORKDIR"]) . concat $
+      insts
 
 withContainer ::
   ImageName ->
