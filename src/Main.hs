@@ -2,7 +2,7 @@
 
 module Main (main) where
 
-import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid, registry)
+import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid)
 import Util.Shake (
   copyDir,
   dir,
@@ -18,10 +18,11 @@ import Util.Shake (
  )
 import Util.Shake.Container (
   ImageName (ImageName),
-  ImageRepo (ImageRepo),
   addContainerImageRule,
   dockerCommit,
   dockerCopy,
+  dockerImport,
+  dockerPush,
   dockerPushEnd,
   dockerSetup,
   image,
@@ -36,7 +37,6 @@ import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
-import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
@@ -173,10 +173,8 @@ scratchImage = do
 nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   Image.registry "nonroot" `image` do
-    ImageName (Image.registry "scratch", latest) `withContainer` [] $ do
-      dockerCopy "nonroot/rootfs.tar" "/"
-      dockerCommit
-      dockerPushEnd
+    dockerImport [] "nonroot/rootfs.tar"
+    dockerPush
 
   "nonroot/rootfs.tar" %> \out -> do
     need $ ("nonroot/rootfs/etc/" </>) <$> ["passwd", "group"]

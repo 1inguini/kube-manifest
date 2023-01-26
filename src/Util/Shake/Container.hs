@@ -10,7 +10,11 @@ module Util.Shake.Container (
   addTaggedImageTarget,
   dockerCommit,
   dockerCopy,
+  dockerEnd,
+  dockerExport,
+  dockerImport,
   dockerIo,
+  dockerPush,
   dockerPushEnd,
   dockerSetup,
   image,
@@ -24,7 +28,7 @@ module Util.Shake.Container (
 ) where
 
 import qualified Util
-import Util.Shake (needExe, runProg, (<:>))
+import Util.Shake (needExe, parallel_, runProg, (<:>))
 
 import Control.Exception.Safe (throwString)
 import Control.Monad (guard, void)
@@ -223,13 +227,21 @@ dockerCommit = do
       <> concatMap (("--change" :) . (: [])) ?instructions
       <> [?container, show ?imageName]
 
-dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
-dockerPushEnd = do
+dockerPush :: (?imageName :: ImageName) => Action ()
+dockerPush = do
   docker <- needDocker
   need ["docker/login" </> (head . splitDirectories . view (#name % _1 % #repo)) ?imageName]
-  -- runDocker @() [] ["push", show ?imageName]
+
+-- runProg @() [] $ docker ["push", show ?imageName]
+
+dockerEnd :: (?container :: ContainerId) => Action ()
+dockerEnd = do
+  docker <- needDocker
   runProg @() [] . docker . words $ "stop --time=0" <:> ?container
   runProg @() [] . docker . words $ "rm" <:> ?container
+
+dockerPushEnd :: (?imageName :: ImageName, ?container :: ContainerId) => Action ()
+dockerPushEnd = parallel_ [dockerPush, dockerEnd]
 
 withContainer ::
   ImageName ->
