@@ -2,11 +2,10 @@
 
 module Main (main) where
 
-import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid)
+import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid, rootOwn)
 import Util.Shake (
   copyDir,
   dir,
-  dirTarget,
   gitClone,
   mkdir,
   needPacman,
@@ -58,6 +57,7 @@ import Development.Shake (
     shakeThreads
   ),
   addTarget,
+  copyFile',
   need,
   phony,
   progressSimple,
@@ -174,7 +174,7 @@ scratchImage = do
 nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   Image.registry "nonroot" `image` do
-    dockerImport [] "nonroot/rootfs.tar"
+    dockerImport "nonroot/rootfs.tar" [] ?imageName
     dockerPush
 
   "nonroot/rootfs.tar" %> \out -> do
@@ -196,16 +196,16 @@ nonrootImage = do
       , "nonroot:x:" <> show nonrootGid <> ":"
       ]
 
-archlinuxImage :: (?shakeDir :: FilePath) => Rules ()
+archlinuxImage :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
   Image.registry "archlinux" `image` do
-    ImageName (Image.localhost "archlinux", latest) `withContainer` [] $ do
+    ImageName (Image.dockerIo "archlinux", latest) `withContainer` [] $ do
       let rootExec, nonrootExec :: [String] -> [String] -> Action ()
-          rootExec opt = dockerExec (["--user=root", ?container] <> opt)
-          nonrootExec opt = dockerExec (["--user=nonroot", ?container] <> opt)
+          rootExec opt = dockerExec (["--user=root"] <> opt)
+          nonrootExec opt = dockerExec (["--user=nonroot"] <> opt)
       parallel_
         [ dockerCopy "archlinux/etc.tar" "/etc/"
-        , dockerCopy "pacman/db/sync.tar" "/var/lib/pacman/sync"
+        , dockerCopy "pacman/sync.tar" "/var/lib/pacman/sync"
         ]
       rootExec [] $ words "pacman --noconfirm -S git glibc moreutils rsync"
       parallel_
@@ -224,7 +224,7 @@ archlinuxImage = do
     `gitClone` ("https://aur.archlinux.org/yay-bin.git", "refs/heads/master")
 
   "archlinux/aur-helper.tar" %> \out -> do
-    need [dirTarget "archlinux/aur-helper"]
+    need ["archlinux/aur-helper/.git"]
     tar nonrootOwn out
 
   writeFile'
@@ -245,12 +245,17 @@ archlinuxImage = do
         |Server = https://mirrors.cat.net/archlinux/$repo/os/$arch
         |]
 
+  "archlinux/etc/pacman.conf" %> \out ->
+    copyFile' (?projectRoot </> "src/pacman.conf") out
+
   "archlinux/etc.tar" %> \out -> do
     need . fmap ("archlinux/etc" </>) $
       [ "locale.gen"
       , "sudoers"
+      , "pacman.conf"
       , "pacman.d/mirrorlist"
       ]
+    tar rootOwn out
 
 musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl = do
@@ -260,7 +265,7 @@ musl = do
 
   phony "musl/lib/" $ need ["musl/lib.tar"]
   "musl/lib.tar" %> \out -> do
-    need [dirTarget "musl/rootfs"]
+    need ["musl/rootfs/"]
     owner <- liftIO getCurrentOwner
     copyDir "musl/rootfs/usr/lib/musl/lib" "musl/lib"
     tar owner out
