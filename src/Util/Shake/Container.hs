@@ -25,6 +25,7 @@ module Util.Shake.Container (
   needImages,
   registry,
   withContainer,
+  dockerExec,
 ) where
 
 import qualified Util
@@ -197,6 +198,11 @@ dockerCopy tarFile dir = do
   runProg @() [FileStdin tarFile] $
     docker ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
   putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
+
+dockerExec :: [String] -> Action ()
+dockerExec args = do
+  docker <- needDocker
+  runProg [] . docker $ words "exec -i" <> args
 
 dockerExport :: (?container :: ContainerId) => FilePath -> Action ()
 dockerExport tarFile = do

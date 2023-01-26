@@ -21,6 +21,7 @@ import Util.Shake.Container (
   addContainerImageRule,
   dockerCommit,
   dockerCopy,
+  dockerExec,
   dockerImport,
   dockerPush,
   dockerPushEnd,
@@ -199,10 +200,7 @@ archlinuxImage :: (?shakeDir :: FilePath) => Rules ()
 archlinuxImage = do
   Image.registry "archlinux" `image` do
     ImageName (Image.dockerIo "library/archlinux", latest) `withContainer` [] $ do
-      docker <- needDocker
-      let dockerExec :: [String] -> Action ()
-          dockerExec = runProg [] . docker . (words "exec -i" <>)
-          rootExec, nonrootExec :: [String] -> [String] -> Action ()
+      let rootExec, nonrootExec :: [String] -> [String] -> Action ()
           rootExec opt = dockerExec . (opt <>) . (["--user=root", ?container] <>)
           nonrootExec opt = dockerExec . (opt <>) . (["--user=nonroot", ?container] <>)
       parallel_
