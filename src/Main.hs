@@ -336,11 +336,11 @@ openjdk = do
 --   copyDir "musl/rootfs/usr/lib/musl/lib" "musl/lib"
 --   tar owner out
 
-musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+musl :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 musl = do
   "musl/rootfs" `dir` do
     pacman <- needPacman
-    runProg @() [] $ pacman ["-S", "--root=musl/rootfs", "musl"]
+    withRoot . runProg @() [] $ pacman ["-S", "--root=musl/rootfs", "musl"]
 
   phony "musl/lib/" $ need ["musl/lib.tar"]
   "musl/lib.tar" %> \out -> do
@@ -348,8 +348,6 @@ musl = do
     owner <- liftIO getCurrentOwner
     copyDir "musl/rootfs/usr/lib/musl/lib" "musl/lib"
     tar owner out
-
--- runProg [] $ words "sudo mv musl/rootfs/usr/lib/musl/lib/* -t musl/lib"
 
 skalibs :: (?shakeDir :: FilePath) => Rules ()
 skalibs = do
@@ -474,7 +472,6 @@ rules = do
   let ?opts = []
   addContainerImageRule
 
-  -- sudoSetup
   pacmanSetup
   dockerSetup
 

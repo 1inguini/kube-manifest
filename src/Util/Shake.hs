@@ -13,12 +13,10 @@ module Util.Shake (
   mkdir,
   needAur,
   needPacman,
-  needPermission,
   pacmanProgram,
   pacmanSetup,
   parallel_,
   runProg,
-  sudoProgram,
   tar,
   needExe,
   copyFileContent,
@@ -28,42 +26,35 @@ module Util.Shake (
 
 import Util (rootOwn, rootUid)
 
-import Control.Exception.Safe (catch, displayException, throw, throwString, try)
-import Control.Monad (unless, when)
+import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (void)
 import qualified Data.ByteString as ByteString
-import Data.Functor (($>))
-import Data.String.Conversions (cs)
 import Development.Shake (
   Action,
-  CmdOption (Cwd, EchoStdout, StdinBS),
+  CmdOption (Cwd),
   CmdResult,
-  Exit (Exit),
+  Exit,
   FilePattern,
   Rules,
   StdoutTrim (StdoutTrim),
   actionCatch,
   command,
   doesDirectoryExist,
-  doesFileExist,
   getDirectoryContents,
   need,
   parallel,
   phony,
   produces,
   putError,
-  putWarn,
   withoutTargets,
   writeFileLines,
   (%>),
  )
-import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
-import System.Directory (copyFile, createDirectoryIfMissing, doesPathExist, listDirectory, removeFile)
+import System.Directory (copyFile, createDirectoryIfMissing, listDirectory, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist)
 import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, takeDirectory, (<.>), (</>))
-import System.IO.Error (isPermissionError)
 import System.Posix (GroupID, UserID, setEffectiveUserID)
 
 instance Exceptions.MonadThrow Action where
@@ -78,8 +69,7 @@ instance Exceptions.MonadThrow Rules where
 (<:>) :: String -> String -> String
 x <:> y = x <> " " <> y
 
-sudoProgram, pacmanProgram, aurProgram :: String
-sudoProgram = "sudo"
+pacmanProgram, aurProgram :: String
 pacmanProgram = "pacman"
 aurProgram = "yay"
 
@@ -89,25 +79,6 @@ needExe command = do
   StdoutTrim path <- runProg [] ["/bin/env", "which", command]
   need [path]
   pure path
-
-needPermission :: Action ()
-needPermission = need ["auth"]
-
--- needSudo :: Action ([String] -> [String])
--- needSudo = needPermission $> (sudoProgram :) . (words "--non-interactive --" <>)
--- sudoSetup :: Rules ()
--- sudoSetup = do
---   phony "auth" $ do
---     sudo <- needExe sudoProgram
---     Exit noNeedPassword <-
---       runProg [] $
---         sudo : words "--non-interactive --validate"
---     case noNeedPassword of
---       ExitFailure _ -> do
---         putWarn $ "input password for" <:> sudoProgram
---         input <- cs <$> liftIO ByteString.getLine
---         runProg [EchoStdout False, StdinBS input] $ sudo : words "--validate --stdin"
---       ExitSuccess -> pure ()
 
 pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
 pacArgs =
