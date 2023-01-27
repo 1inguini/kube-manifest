@@ -15,15 +15,19 @@ module Util.Shake (
   needAur,
   needExe,
   needPacman,
+  nonrootGid,
+  nonrootOwn,
+  nonrootUid,
   pacmanProgram,
   pacmanSetup,
   parallel_,
+  rootGid,
+  rootOwn,
+  rootUid,
   runProg,
   tar,
   withRoot,
 ) where
-
-import Util (rootOwn, rootUid)
 
 import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
@@ -93,6 +97,22 @@ instance Exceptions.MonadCatch Action where
   catch = actionCatch
 instance Exceptions.MonadThrow Rules where
   throwM = liftIO . Exceptions.throwM
+
+type Owner = (UserID, GroupID)
+
+nonrootOwn :: Owner
+nonrootOwn = (nonrootUid, nonrootGid)
+nonrootUid :: UserID
+nonrootUid = 65532
+nonrootGid :: GroupID
+nonrootGid = 65532
+
+rootOwn :: Owner
+rootOwn = (rootUid, rootGid)
+rootUid :: UserID
+rootUid = 0
+rootGid :: GroupID
+rootGid = 0
 
 (<:>) :: String -> String -> String
 x <:> y = x <> " " <> y

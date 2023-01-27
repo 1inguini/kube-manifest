@@ -47,8 +47,6 @@ common common
     TypeOperators
 
   build-depends:
-    , aeson
-    , aeson-optics
     , base                  ^>=4.16.3.0
     , bytestring
     , casing
@@ -91,7 +89,6 @@ executable build
   -- Modules included in this executable, other than Main.
   other-modules:
     Secret
-    TH
     Util
     Util.Shake
     Util.Shake.Container
@@ -103,7 +100,10 @@ executable build
 executable manifest
   import:         common
   main-is:        Main.hs
-  build-depends:  process
+  build-depends:
+    , aeson
+    , aeson-optics
+    , process
 
   -- Modules included in this executable, other than Main.
   other-modules:
