@@ -187,7 +187,7 @@ scratchImage = do
 nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
   Image.registry "nonroot" `image` do
-    dockerImport "nonroot/rootfs.tar" [] ?imageName
+    dockerImport "nonroot/rootfs.tar" ["USER nonroot", "WORKDIR /home/nonroot"] ?imageName
     dockerPush
 
   "nonroot/rootfs.tar" %> \out -> do
@@ -317,6 +317,7 @@ openjdk = do
       dockerCopy "openjdk/rootfs.tar" "/"
       let ?instructions = ?instructions <> [[here|ENTRYPOINT [ "java", "-jar" ]|]]
       dockerCommitSquash
+      dockerPush
 
 musl :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 musl = do
