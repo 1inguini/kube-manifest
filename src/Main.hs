@@ -6,6 +6,7 @@ import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid, rootOwn)
 import Util.Shake (
   copyDir,
   copyFileContent,
+  copyPath,
   dir,
   gitClone,
   mkdir,
@@ -37,11 +38,12 @@ import Util.Shake.Container (
  )
 import qualified Util.Shake.Container as Image
 
-import Control.Exception.Safe (finally)
+import Control.Exception.Safe (finally, throw, throwString)
 import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
+import qualified Data.List as List
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
@@ -61,10 +63,14 @@ import Development.Shake (
     shakeShare,
     shakeThreads
   ),
+  StdoutTrim (fromStdoutTrim),
   addTarget,
+  copyFile',
   need,
   phony,
   progressSimple,
+  putInfo,
+  putWarn,
   shakeArgsOptionsWith,
   shakeOptions,
   want,
@@ -79,6 +85,10 @@ import System.Directory (
   setCurrentDirectory,
  )
 import System.FilePath (
+  joinPath,
+  makeRelative,
+  splitPath,
+  takeFileName,
   (</>),
  )
 import System.Posix (
@@ -278,6 +288,42 @@ archlinuxImage = do
       ]
     tar rootOwn out
 
+openjdk :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+openjdk = do
+  "openjdk/package/" `dir` do
+    pacman <- needPacman
+    runProg @() [] $ pacman ["-S", "--root=openjdk/package", "jre-openjdk-headless"]
+
+  "openjdk/rootfs" `dir` do
+    pacman <- needPacman
+    need ["openjdk/package/"]
+    files <- fmap (lines . fromStdoutTrim) . runProg [] $ pacman ["-Qql", "jre-openjdk-headless"]
+    let prefix' = "/usr/lib/jvm/"
+    prefix <- case List.find (prefix' `List.isPrefixOf`) files of
+      Nothing -> throwString $ "there is no file matching `" <> prefix' <> "*`"
+      Just path -> pure . joinPath . List.take (length (splitPath prefix') + 1) . splitPath $ path
+    let usr =
+          makeRelative prefix
+            <$> filter
+              ( \path ->
+                  prefix `List.isPrefixOf` path && takeFileName path /= "man"
+              )
+              files
+        etc = makeRelative "/" <$> filter ("/etc/" `List.isPrefixOf`) files
+    traverse_
+      (\path -> copyPath ("openjdk/package" </> makeRelative "/" prefix </> path) (?dir </> "usr" </> path))
+      usr
+    traverse_
+      (\path -> copyPath ("openjdk/package/etc" </> path) (?dir </> path))
+      etc
+
+-- phony "musl/lib/" $ need ["musl/lib.tar"]
+-- "musl/lib.tar" %> \out -> do
+--   need ["musl/rootfs/"]
+--   owner <- liftIO getCurrentOwner
+--   copyDir "musl/rootfs/usr/lib/musl/lib" "musl/lib"
+--   tar owner out
+
 musl :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 musl = do
   "musl/rootfs" `dir` do
@@ -420,6 +466,7 @@ rules = do
   pacmanSetup
   dockerSetup
 
+  openjdk
   musl
   skalibs
   s6PortableUtils

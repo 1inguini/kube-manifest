@@ -24,11 +24,12 @@ module Util.Shake (
   tar,
   needExe,
   copyFileContent,
+  copyPath,
 ) where
 
 import Util (rootOwn)
 
-import Control.Exception.Safe (displayException, throwString, try)
+import Control.Exception.Safe (catch, displayException, throw, throwString, try)
 import Control.Monad (unless, when)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -63,6 +64,7 @@ import GHC.IO.Exception (ExitCode (ExitFailure, ExitSuccess))
 import System.Directory (copyFile, createDirectoryIfMissing, doesPathExist, listDirectory, removeFile)
 import qualified System.Directory as Sys (doesDirectoryExist)
 import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, takeDirectory, (<.>), (</>))
+import System.IO.Error (isPermissionError)
 import System.Posix (GroupID, UserID)
 
 instance Exceptions.MonadThrow Action where
@@ -155,6 +157,18 @@ copyFileContent :: FilePath -> FilePath -> Action ()
 copyFileContent src dst = do
   need [src]
   liftIO $ ByteString.readFile src >>= ByteString.writeFile dst
+
+copyPath :: FilePath -> FilePath -> Action ()
+copyPath src dst = do
+  isDir <- doesDirectoryExist src
+  if isDir
+    then mkdir dst
+    else do
+      need [src]
+      mkdir $ dropFileName dst
+      liftIO $ do
+        removeFile dst
+        copyFile src dst
 
 listDirectoryRecursive :: MonadIO m => FilePath -> m [FilePath]
 listDirectoryRecursive dir = liftIO $ do
