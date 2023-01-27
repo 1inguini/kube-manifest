@@ -2,7 +2,7 @@
 
 module Main (main) where
 
-import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid, rootOwn)
+import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid, rootOwn, rootUid)
 import Util.Shake (
   copyDir,
   copyFileContent,
@@ -14,8 +14,8 @@ import Util.Shake (
   pacmanSetup,
   parallel_,
   runProg,
-  sudoSetup,
   tar,
+  withRoot,
  )
 import Util.Shake.Container (
   ContainerId,
@@ -39,7 +39,7 @@ import Util.Shake.Container (
 import qualified Util.Shake.Container as Image
 
 import Control.Exception.Safe (finally, throw, throwString)
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
@@ -92,6 +92,11 @@ import System.FilePath (
   (</>),
  )
 import System.Posix (
+  UserID,
+  getEffectiveUserID,
+  getEnv,
+  getRealUserID,
+  setEffectiveUserID,
   setFileCreationMask,
   setFileMode,
  )
@@ -288,16 +293,18 @@ archlinuxImage = do
       ]
     tar rootOwn out
 
-openjdk :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+openjdk :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 openjdk = do
   "openjdk/package/" `dir` do
     pacman <- needPacman
-    runProg @() [] $ pacman ["-S", "--root=openjdk/package", "jre-openjdk-headless"]
+    withRoot . runProg @() [] $ pacman ["-S", "--root=openjdk/package", "jre-openjdk-headless"]
 
   "openjdk/rootfs" `dir` do
     pacman <- needPacman
     need ["openjdk/package/"]
-    files <- fmap (lines . fromStdoutTrim) . runProg [] $ pacman ["-Qql", "jre-openjdk-headless"]
+    files <-
+      fmap (lines . fromStdoutTrim) . withRoot . runProg [] $
+        pacman ["-Qql", "jre-openjdk-headless"]
     let prefix' = "/usr/lib/jvm/"
     prefix <- case List.find (prefix' `List.isPrefixOf`) files of
       Nothing -> throwString $ "there is no file matching `" <> prefix' <> "*`"
@@ -310,12 +317,17 @@ openjdk = do
               )
               files
         etc = makeRelative "/" <$> filter ("/etc/" `List.isPrefixOf`) files
-    traverse_
-      (\path -> copyPath ("openjdk/package" </> makeRelative "/" prefix </> path) (?dir </> "usr" </> path))
-      usr
-    traverse_
-      (\path -> copyPath ("openjdk/package/etc" </> path) (?dir </> path))
-      etc
+    withRoot $ do
+      traverse_
+        ( \path ->
+            copyPath
+              ("openjdk/package" </> makeRelative "/" prefix </> path)
+              (?dir </> "usr" </> path)
+        )
+        usr
+      traverse_
+        (\path -> copyPath ("openjdk/package/etc" </> path) (?dir </> path))
+        etc
 
 -- phony "musl/lib/" $ need ["musl/lib.tar"]
 -- "musl/lib.tar" %> \out -> do
@@ -457,12 +469,12 @@ busybox = download "busybox" "busybox" *> traverse_ singleApplet applets
   singleApplet applet =
     download applet $ "busybox_" <> fmap Char.toUpper applet
 
-rules :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+rules :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 rules = do
   let ?opts = []
   addContainerImageRule
 
-  sudoSetup
+  -- sudoSetup
   pacmanSetup
   dockerSetup
 
@@ -478,9 +490,12 @@ rules = do
 
 main :: IO ()
 main = do
+  uid <- maybe (throwString "requires sudo") (pure . read) =<< getEnv "SUDO_UID"
   void $ setFileCreationMask 0o022
   projectRoot <- liftIO $ makeAbsolute =<< getCurrentDirectory
-  let ?projectRoot = projectRoot
+  liftIO $ setEffectiveUserID uid
+  let ?uid = uid
+      ?projectRoot = projectRoot
       ?shakeDir = projectRoot </> shakeFiles shakeOptions
    in shakeArgsOptionsWith
         shakeOptions

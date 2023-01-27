@@ -14,20 +14,19 @@ module Util.Shake (
   needAur,
   needPacman,
   needPermission,
-  needSudo,
   pacmanProgram,
   pacmanSetup,
   parallel_,
   runProg,
   sudoProgram,
-  sudoSetup,
   tar,
   needExe,
   copyFileContent,
   copyPath,
+  withRoot,
 ) where
 
-import Util (rootOwn)
+import Util (rootOwn, rootUid)
 
 import Control.Exception.Safe (catch, displayException, throw, throwString, try)
 import Control.Monad (unless, when)
@@ -65,7 +64,7 @@ import System.Directory (copyFile, createDirectoryIfMissing, doesPathExist, list
 import qualified System.Directory as Sys (doesDirectoryExist)
 import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, takeDirectory, (<.>), (</>))
 import System.IO.Error (isPermissionError)
-import System.Posix (GroupID, UserID)
+import System.Posix (GroupID, UserID, setEffectiveUserID)
 
 instance Exceptions.MonadThrow Action where
   throwM err = do
@@ -93,21 +92,22 @@ needExe command = do
 
 needPermission :: Action ()
 needPermission = need ["auth"]
-needSudo :: Action ([String] -> [String])
-needSudo = needPermission $> (sudoProgram :) . (words "--non-interactive --" <>)
-sudoSetup :: Rules ()
-sudoSetup = do
-  phony "auth" $ do
-    sudo <- needExe sudoProgram
-    Exit noNeedPassword <-
-      runProg [] $
-        sudo : words "--non-interactive --validate"
-    case noNeedPassword of
-      ExitFailure _ -> do
-        putWarn $ "input password for" <:> sudoProgram
-        input <- cs <$> liftIO ByteString.getLine
-        runProg [EchoStdout False, StdinBS input] $ sudo : words "--validate --stdin"
-      ExitSuccess -> pure ()
+
+-- needSudo :: Action ([String] -> [String])
+-- needSudo = needPermission $> (sudoProgram :) . (words "--non-interactive --" <>)
+-- sudoSetup :: Rules ()
+-- sudoSetup = do
+--   phony "auth" $ do
+--     sudo <- needExe sudoProgram
+--     Exit noNeedPassword <-
+--       runProg [] $
+--         sudo : words "--non-interactive --validate"
+--     case noNeedPassword of
+--       ExitFailure _ -> do
+--         putWarn $ "input password for" <:> sudoProgram
+--         input <- cs <$> liftIO ByteString.getLine
+--         runProg [EchoStdout False, StdinBS input] $ sudo : words "--validate --stdin"
+--       ExitSuccess -> pure ()
 
 pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
 pacArgs =
@@ -119,21 +119,23 @@ needPacman :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Action ([Stri
 needPacman = do
   pacman <- needExe pacmanProgram
   need ["pacman/sync.tar"]
-  sudo <- needSudo
-  pure $ sudo . (pacman :) . (pacArgs <>)
+  -- sudo <- needSudo
+  -- pure $ sudo . (pacman :) . (pacArgs <>)
+  pure $ (pacman :) . (pacArgs <>)
 needAur :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Action ([String] -> [String])
 needAur = do
   _ <- needPacman
   aur <- needExe aurProgram
   pure $ (aur :) . (["--noprovides"] <>)
-pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath, ?uid :: UserID) => Rules ()
 pacmanSetup = do
   "pacman/sync.tar" %> \out -> do
     need [?projectRoot </> "src/pacman.conf"]
-    sudo <- needSudo
+    -- sudo <- needSudo
     pacman <- needExe pacmanProgram
-    runProg @() [] . sudo $ pacman : pacArgs <> ["-Sy"]
-    dbfiles <- getDirectoryFilesRecursivePrefixed "pacman/sync"
+    dbfiles <- withRoot $ do
+      runProg @() [] $ pacman : pacArgs <> ["-Sy"]
+      getDirectoryFilesRecursivePrefixed "pacman/sync"
     produces $ "pacman/local/ALPM_DB_VERSION" : dbfiles
     tar rootOwn out
 
@@ -232,6 +234,13 @@ dir pat act = do
       act
       produces =<< getDirectoryFilesRecursivePrefixed ?dir
       writeFileLines out =<< getDirectoryContentsRecursive ?dir
+
+withRoot :: (?uid :: UserID) => Action a -> Action a
+withRoot act = do
+  liftIO $ setEffectiveUserID rootUid
+  result <- act
+  liftIO $ setEffectiveUserID ?uid
+  pure result
 
 gitCloneAction :: String -> String -> FilePath -> Action ()
 gitCloneAction repo ref dst = do

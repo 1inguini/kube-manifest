@@ -56,6 +56,7 @@ module Util (
   getCurrentOwner,
 ) where
 
+import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (MonadState, modify)
 import Data.Aeson (ToJSON (toJSON))
 import qualified Data.Aeson as Aeson
@@ -286,11 +287,12 @@ rootUid = 0
 rootGid :: GroupID
 rootGid = 0
 
-getCurrentOwner :: IO Owner
+getCurrentOwner :: MonadIO m => m Owner
 getCurrentOwner =
-  (,)
-    <$> getEffectiveUserID
-    <*> getEffectiveGroupID
+  liftIO $
+    (,)
+      <$> getEffectiveUserID
+      <*> getEffectiveGroupID
 
 workload ::
   (?namespace :: Text, ?app :: Text, ?name :: Text) =>
