@@ -180,7 +180,13 @@ getDirectoryContentsRecursive dir = do
             ls <- getDirectoryContentsRecursive fullPath
             pure . (addTrailingPathSeparator content :) $ (content </>) <$> ls
           else pure [content]
-  ls <- getDirectoryContents dir
+  -- ls <- getDirectoryContents dir
+  ls <-
+    liftIO $
+      listDirectory dir `catch` \case
+        (e :: IOError)
+          | isPermissionError e -> pure []
+          | otherwise -> throw e
   concat <$> parallel (par ls)
 
 getDirectoryFilesRecursivePrefixed :: FilePath -> Action [FilePath]
