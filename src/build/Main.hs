@@ -8,6 +8,7 @@ import Util.Shake (
   dir,
   gitClone,
   mkdir,
+  needExe,
   needPacman,
   nonrootGid,
   nonrootOwn,
@@ -67,6 +68,7 @@ import Development.Shake (
   addTarget,
   getDirectoryContents,
   need,
+  phony,
   progressSimple,
   putInfo,
   shakeArgsOptionsWith,
@@ -370,6 +372,13 @@ busybox = download "busybox" "busybox" *> traverse_ singleApplet applets
   singleApplet applet =
     download applet $ "busybox_" <> fmap Char.toUpper applet
 
+manifests :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
+manifests = do
+  phony "manifests" $ do
+    need $ (?projectRoot </>) <$> ["src/Manifest.hs"]
+    cabal <- needExe "cabal"
+    runProg [] $ cabal : words "-j manifest"
+
 rules :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 rules = do
   let ?opts = []
@@ -387,6 +396,8 @@ rules = do
   scratchImage
   nonrootImage
   archlinuxImage
+
+  manifests
 
 main :: IO ()
 main = do

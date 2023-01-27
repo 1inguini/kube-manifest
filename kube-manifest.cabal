@@ -96,7 +96,7 @@ executable build
 
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:
-  hs-source-dirs: secret common build
+  hs-source-dirs: secret src/common src/build
 
 executable manifest
   import:         common
@@ -115,7 +115,7 @@ executable manifest
 
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:
-  hs-source-dirs: secret common src
+  hs-source-dirs: secret src/common src
 
 test-suite kube-manifest-test
   import:           common
