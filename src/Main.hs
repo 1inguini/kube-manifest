@@ -94,7 +94,7 @@ import System.Posix (
   setFileCreationMask,
   setFileMode,
  )
-import Text.Heredoc (str)
+import Text.Heredoc (here, str)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 -- processYaml written yaml =
@@ -308,17 +308,25 @@ openjdk = do
         , copyPath usr (?dir </> "usr")
         ]
 
+  "openjdk/rootfs.tar" %> \out -> do
+    need ["openjdk/rootfs/"]
+    tar nonrootOwn out
+
+  Image.registry "openjdk" `image` do
+    ImageName (Image.registry "nonroot", latest) `withContainer` [] $ do
+      dockerCopy "openjdk/rootfs.tar" "/"
+      let ?instructions = ?instructions <> [[here|ENTRYPOINT [ "java", "-jar" ]|]]
+      dockerCommitSquash
+
 musl :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 musl = do
-  "musl/rootfs" `dir` do
+  "musl/rootfs/" `dir` do
     pacman <- needPacman
     withRoot . runProg @() [] $ pacman ["-S", "--root=musl/rootfs", "musl"]
 
-  "musl/lib.tar" %> \out -> do
+  "musl/lib/" `dir` do
     need ["musl/rootfs/"]
-    owner <- liftIO getCurrentOwner
     copyPath "musl/rootfs/usr/lib/musl/lib" "musl/lib"
-    tar owner out
 
 skalibs :: (?shakeDir :: FilePath, ?uid :: UserID) => Rules ()
 skalibs = do
