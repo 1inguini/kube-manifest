@@ -25,7 +25,7 @@ module Util.Shake (
 
 import Util (rootOwn, rootUid)
 
-import Control.Exception.Safe (displayException, throwString)
+import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (void)
@@ -51,11 +51,17 @@ import Development.Shake (
   writeFileLines,
   (%>),
  )
+import GHC.IO.Exception (IOException (IOError))
 import System.Directory (
   copyFile,
   copyPermissions,
   createDirectoryIfMissing,
+  createDirectoryLink,
+  createFileLink,
+  getSymbolicLinkTarget,
   listDirectory,
+  pathIsSymbolicLink,
+  removeDirectoryLink,
   removeFile,
  )
 import qualified System.Directory as Sys (doesDirectoryExist)
@@ -156,22 +162,33 @@ copyFileContent src dst = do
 copyPath :: FilePath -> FilePath -> Action ()
 copyPath src dst = do
   isDir <- doesDirectoryExist src
+  isSymlink <- liftIO $ pathIsSymbolicLink src
   if isDir
     then do
       status <- liftIO $ getFileStatus src
-      mkdir dst
+      if isSymlink
+        then liftIO $ do
+          target <- getSymbolicLinkTarget src
+          void $ try @_ @IOError $ removeDirectoryLink dst
+          createDirectoryLink target dst
+        else do
+          mkdir dst
+          contents <- getDirectoryContents src
+          let par = fmap $ \content -> copyPath (src </> content) (dst </> content)
+          parallel_ . par $ contents
       liftIO $ do
         setOwnerAndGroup dst (fileOwner status) (fileGroup status)
         copyPermissions src dst
-      contents <- getDirectoryContents src
-      let par = fmap $ \content -> copyPath (src </> content) (dst </> content)
-      parallel_ . par $ contents
     else do
       need [src]
-      mkdir $ dropFileName dst
       liftIO $ do
-        removeFile dst
-        copyFile src dst
+        void $ try @_ @IOError $ removeFile dst
+        mkdir $ dropFileName dst
+        if isSymlink
+          then do
+            target <- getSymbolicLinkTarget src
+            createFileLink target dst
+          else copyFile src dst
 
 listDirectoryRecursive :: MonadIO m => FilePath -> m [FilePath]
 listDirectoryRecursive dir = liftIO $ do

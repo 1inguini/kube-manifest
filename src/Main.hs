@@ -61,11 +61,11 @@ import Development.Shake (
     shakeShare,
     shakeThreads
   ),
-  StdoutTrim (fromStdoutTrim),
   addTarget,
+  getDirectoryContents,
   need,
-  phony,
   progressSimple,
+  putInfo,
   shakeArgsOptionsWith,
   shakeOptions,
   want,
@@ -74,6 +74,7 @@ import Development.Shake (
   (%>),
   (&%>),
  )
+import Safe (headMay)
 import System.Directory (
   getCurrentDirectory,
   makeAbsolute,
@@ -293,26 +294,19 @@ openjdk = do
     withRoot . runProg @() [] $ pacman ["-S", "--root=openjdk/package", "jre-openjdk-headless"]
 
   "openjdk/rootfs" `dir` do
-    pacman <- needPacman
     need ["openjdk/package/"]
-    files <-
-      fmap (lines . fromStdoutTrim) . withRoot . runProg [] $
-        pacman ["-Qql", "jre-openjdk-headless"]
-    let prefix' = "/usr/lib/jvm/"
-    prefix <- case List.find (prefix' `List.isPrefixOf`) files of
-      Nothing -> throwString $ "there is no file matching `" <> prefix' <> "*`"
-      Just path -> pure . joinPath . List.take (length (splitPath prefix') + 1) . splitPath $ path
-    let usr =
-          makeRelative prefix
-            <$> filter
-              ( \path ->
-                  prefix `List.isPrefixOf` path && takeFileName path /= "man"
-              )
-              files
-        etc = makeRelative "/" <$> filter ("/etc/" `List.isPrefixOf`) files
-    withRoot $ do
-      copyPath ("openjdk/package" </> makeRelative "/" prefix) (?dir </> "usr")
-      copyPath "openjdk/package/etc" (?dir </> "etc")
+    let prefix' = "openjdk/package/usr/lib/jvm/"
+    children <- getDirectoryContents prefix'
+    -- fmap (lines . fromStdoutTrim) . withRoot . runProg [] $
+    --   pacman ["-Qql", "jre-openjdk-headless"]
+    usr <- case headMay children of
+      Nothing -> throwString $ "there is no directory matching `" <> prefix' <> "*`"
+      Just child -> pure $ prefix' </> child
+    withRoot $
+      parallel_
+        [ copyPath "openjdk/package/etc" (?dir </> "etc")
+        , copyPath usr (?dir </> "usr")
+        ]
 
 musl :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 musl = do
@@ -326,7 +320,7 @@ musl = do
     copyPath "musl/rootfs/usr/lib/musl/lib" "musl/lib"
     tar owner out
 
-skalibs :: (?shakeDir :: FilePath) => Rules ()
+skalibs :: (?shakeDir :: FilePath, ?uid :: UserID) => Rules ()
 skalibs = do
   let version = "v2.12.0.1"
   "skalibs/src/.git" `gitClone` ("https://github.com/skarnet/skalibs.git", "refs/tags" </> version)
