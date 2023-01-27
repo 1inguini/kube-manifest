@@ -182,7 +182,8 @@ scratchImage = do
   Image.registry "scratch" `image` do
     docker <- needDocker
     need [scratch]
-    runProg [] $ docker ["load", "--input", scratch]
+    runProg @() [] $ docker ["load", "--input", scratch]
+    dockerPush
 
 nonrootImage :: (?shakeDir :: FilePath) => Rules ()
 nonrootImage = do
@@ -249,6 +250,7 @@ archlinuxImage = do
     ImageName (Image.shake "archlinux/aur-added", latest) `withContainer` [] $ do
       let ?instruction = ?instructions <> ["USER nonroot"]
       dockerCommitSquash
+      dockerPush
 
   "archlinux/aur-helper/.git"
     `gitClone` ("https://aur.archlinux.org/yay-bin.git", "refs/heads/master")

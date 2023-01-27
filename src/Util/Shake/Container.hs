@@ -284,9 +284,8 @@ dockerCommitSquash = dockerCommit' ["--squash"]
 dockerPush :: (?imageName :: ImageName) => Action ()
 dockerPush = do
   docker <- needDocker
-  -- need ["docker/login" </> (head . splitDirectories . view (#name % _1 % #repo)) ?imageName]
-  -- runProg @() [] $ docker ["push", show ?imageName]
-  pure ()
+  need ["docker/login" </> (head . splitDirectories . view (#name % _1 % #repo)) ?imageName]
+  runProg @() [] $ docker ["push", show ?imageName]
 
 dockerEnd :: (?container :: ContainerId) => Action ()
 dockerEnd = do
