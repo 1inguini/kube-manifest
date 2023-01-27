@@ -45,7 +45,6 @@ import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
-import qualified Data.List as List
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
@@ -71,7 +70,6 @@ import Development.Shake (
   need,
   phony,
   progressSimple,
-  putInfo,
   shakeArgsOptionsWith,
   shakeOptions,
   want,
@@ -86,11 +84,9 @@ import System.Directory (
   makeAbsolute,
   setCurrentDirectory,
  )
+import System.Environment (getArgs, getExecutablePath)
+import System.Exit (exitSuccess)
 import System.FilePath (
-  joinPath,
-  makeRelative,
-  splitPath,
-  takeFileName,
   (</>),
  )
 import System.Posix (
@@ -100,6 +96,7 @@ import System.Posix (
   setFileCreationMask,
   setFileMode,
  )
+import System.Process (callProcess)
 import Text.Heredoc (here, str)
 
 scratchImage :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
@@ -373,9 +370,9 @@ busybox = download "busybox" "busybox" *> traverse_ singleApplet applets
   singleApplet applet =
     download applet $ "busybox_" <> fmap Char.toUpper applet
 
-manifests :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
+manifests :: (?projectRoot :: FilePath) => Rules ()
 manifests = do
-  phony "manifests" $ do
+  phony "manifest" $ do
     need $ (?projectRoot </>) <$> ["src/Manifest.hs"]
     cabal <- needExe "cabal"
     jobs <- shakeThreads <$> getShakeOptions
@@ -383,7 +380,6 @@ manifests = do
 
 rules :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 rules = do
-  let ?opts = []
   addContainerImageRule
 
   pacmanSetup
@@ -403,7 +399,16 @@ rules = do
 
 main :: IO ()
 main = do
-  uid <- maybe (throwString "requires sudo") (pure . read) =<< getEnv "SUDO_UID"
+  exe <- getExecutablePath
+  args <- getArgs
+  uid <-
+    maybe
+      ( do
+          callProcess "sudo" $ "--preserve-env" : exe : args
+          exitSuccess
+      )
+      (pure . read)
+      =<< getEnv "SUDO_UID"
   void $ setFileCreationMask 0o022
   projectRoot <- liftIO $ makeAbsolute =<< getCurrentDirectory
   liftIO $ setEffectiveUserID uid
