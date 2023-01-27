@@ -63,7 +63,6 @@ common common
     , safe
     , safe-exceptions
     , scientific
-    , shake
     , string-conversions
     , template-haskell
     , text
@@ -71,7 +70,6 @@ common common
     , unix
     , unordered-containers
     , vector
-    , yaml
 
   ghc-options:
     -threaded -rtsopts "-with-rtsopts=-N -I0 -qg"
@@ -85,6 +83,7 @@ common common
 executable build
   import:         common
   main-is:        Main.hs
+  build-depends:  shake
 
   -- Modules included in this executable, other than Main.
   other-modules:
@@ -104,10 +103,12 @@ executable manifest
     , aeson
     , aeson-optics
     , process
+    , yaml
 
   -- Modules included in this executable, other than Main.
   other-modules:
     Manifest
+    Manifest.Util
     Secret
     TH
     Util

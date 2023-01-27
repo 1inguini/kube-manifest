@@ -1,7 +1,7 @@
 module Main (main) where
 
-import Util (Yaml, YamlType (HelmValues, Manifest))
-import qualified Util
+import Manifest.Util (Yaml, YamlType (HelmValues, Manifest))
+import qualified Manifest.Util as Util
 
 import Control.Applicative ((<|>))
 import Control.Monad (void)

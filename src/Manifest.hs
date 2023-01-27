@@ -15,10 +15,10 @@ import qualified Data.Text as Text
 import Optics (ix, modifying, over, review, set, (%))
 
 import qualified Data.Aeson.KeyMap as KeyMap
+import Manifest.Util (Yaml)
+import qualified Manifest.Util as Util
 import Secret (externalIp, host)
 import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile)
-import Util (Yaml)
-import qualified Util
 
 openebs :: [Yaml]
 openebs =
