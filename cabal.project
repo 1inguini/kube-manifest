@@ -3,4 +3,4 @@ packages: .
 source-repository-package
   type: git
   location: file:///home/linguini/Desktop/Haskell/shake
-  tag: 525a81cdb3d2608485153cd1b509cc161c253447
+  tag: ac644ee3a4a4e27df93165b3a33f75f108375823
