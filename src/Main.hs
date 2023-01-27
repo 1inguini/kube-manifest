@@ -2,9 +2,8 @@
 
 module Main (main) where
 
-import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid, rootOwn, rootUid)
+import Util (getCurrentOwner, nonrootGid, nonrootOwn, nonrootUid, rootOwn)
 import Util.Shake (
-  copyDir,
   copyFileContent,
   copyPath,
   dir,
@@ -26,7 +25,6 @@ import Util.Shake.Container (
   dockerCommitSquash,
   dockerCopy,
   dockerExec,
-  dockerExport,
   dockerImport,
   dockerPull,
   dockerPush,
@@ -38,8 +36,8 @@ import Util.Shake.Container (
  )
 import qualified Util.Shake.Container as Image
 
-import Control.Exception.Safe (finally, throw, throwString)
-import Control.Monad (void, when)
+import Control.Exception.Safe (finally, throwString)
+import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
@@ -65,12 +63,9 @@ import Development.Shake (
   ),
   StdoutTrim (fromStdoutTrim),
   addTarget,
-  copyFile',
   need,
   phony,
   progressSimple,
-  putInfo,
-  putWarn,
   shakeArgsOptionsWith,
   shakeOptions,
   want,
@@ -93,9 +88,7 @@ import System.FilePath (
  )
 import System.Posix (
   UserID,
-  getEffectiveUserID,
   getEnv,
-  getRealUserID,
   setEffectiveUserID,
   setFileCreationMask,
   setFileMode,
@@ -318,23 +311,8 @@ openjdk = do
               files
         etc = makeRelative "/" <$> filter ("/etc/" `List.isPrefixOf`) files
     withRoot $ do
-      traverse_
-        ( \path ->
-            copyPath
-              ("openjdk/package" </> makeRelative "/" prefix </> path)
-              (?dir </> "usr" </> path)
-        )
-        usr
-      traverse_
-        (\path -> copyPath ("openjdk/package/etc" </> path) (?dir </> path))
-        etc
-
--- phony "musl/lib/" $ need ["musl/lib.tar"]
--- "musl/lib.tar" %> \out -> do
---   need ["musl/rootfs/"]
---   owner <- liftIO getCurrentOwner
---   copyDir "musl/rootfs/usr/lib/musl/lib" "musl/lib"
---   tar owner out
+      copyPath ("openjdk/package" </> makeRelative "/" prefix) (?dir </> "usr")
+      copyPath "openjdk/package/etc" (?dir </> "etc")
 
 musl :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 musl = do
@@ -342,11 +320,10 @@ musl = do
     pacman <- needPacman
     withRoot . runProg @() [] $ pacman ["-S", "--root=musl/rootfs", "musl"]
 
-  phony "musl/lib/" $ need ["musl/lib.tar"]
   "musl/lib.tar" %> \out -> do
     need ["musl/rootfs/"]
     owner <- liftIO getCurrentOwner
-    copyDir "musl/rootfs/usr/lib/musl/lib" "musl/lib"
+    copyPath "musl/rootfs/usr/lib/musl/lib" "musl/lib"
     tar owner out
 
 skalibs :: (?shakeDir :: FilePath) => Rules ()

@@ -1,7 +1,8 @@
 module Util.Shake (
   (<:>),
   aurProgram,
-  copyDir,
+  copyFileContent,
+  copyPath,
   dir,
   dirTarget,
   getDirectoryContentsRecursive,
@@ -12,21 +13,19 @@ module Util.Shake (
   listDirectoryRecursive,
   mkdir,
   needAur,
+  needExe,
   needPacman,
   pacmanProgram,
   pacmanSetup,
   parallel_,
   runProg,
   tar,
-  needExe,
-  copyFileContent,
-  copyPath,
   withRoot,
 ) where
 
 import Util (rootOwn, rootUid)
 
-import Control.Exception.Safe (displayException, throwString, try)
+import Control.Exception.Safe (displayException, throwString)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (void)
@@ -52,10 +51,33 @@ import Development.Shake (
   writeFileLines,
   (%>),
  )
-import System.Directory (copyFile, createDirectoryIfMissing, listDirectory, removeFile)
+import System.Directory (
+  copyFile,
+  copyPermissions,
+  createDirectoryIfMissing,
+  listDirectory,
+  removeFile,
+ )
 import qualified System.Directory as Sys (doesDirectoryExist)
-import System.FilePath (addTrailingPathSeparator, dropExtension, dropFileName, dropTrailingPathSeparator, hasTrailingPathSeparator, takeDirectory, (<.>), (</>))
-import System.Posix (GroupID, UserID, setEffectiveUserID)
+import System.FilePath (
+  addTrailingPathSeparator,
+  dropExtension,
+  dropFileName,
+  dropTrailingPathSeparator,
+  hasTrailingPathSeparator,
+  takeDirectory,
+  (<.>),
+  (</>),
+ )
+import System.Posix (
+  GroupID,
+  UserID,
+  fileGroup,
+  fileOwner,
+  getFileStatus,
+  setEffectiveUserID,
+  setOwnerAndGroup,
+ )
 
 instance Exceptions.MonadThrow Action where
   throwM err = do
@@ -135,7 +157,15 @@ copyPath :: FilePath -> FilePath -> Action ()
 copyPath src dst = do
   isDir <- doesDirectoryExist src
   if isDir
-    then mkdir dst
+    then do
+      status <- liftIO $ getFileStatus src
+      mkdir dst
+      liftIO $ do
+        setOwnerAndGroup dst (fileOwner status) (fileGroup status)
+        copyPermissions src dst
+      contents <- getDirectoryContents src
+      let par = fmap $ \content -> copyPath (src </> content) (dst </> content)
+      parallel_ . par $ contents
     else do
       need [src]
       mkdir $ dropFileName dst
@@ -173,20 +203,6 @@ getDirectoryContentsRecursive dir = do
 getDirectoryFilesRecursivePrefixed :: FilePath -> Action [FilePath]
 getDirectoryFilesRecursivePrefixed dir =
   fmap (dir </>) . filter (not . hasTrailingPathSeparator) <$> getDirectoryContentsRecursive dir
-
-copyDir :: FilePath -> FilePath -> Action ()
-copyDir srcdir dstdir = do
-  let par = fmap $ \path -> do
-        let srcfile = srcdir </> path
-            dstfile = dstdir </> path
-        let dstdir = dropFileName dstfile
-        liftIO $ do
-          mkdir dstdir
-          void . try @IO @IOError $ removeFile dstfile -- symlink safety
-          copyFile srcfile dstfile
-  -- uncurry (setSymbolicLinkOwnerAndGroup dstfile) ?owner
-  paths <- getDirectoryContentsRecursive srcdir
-  parallel_ . par $ paths
 
 dirExtention :: String
 dirExtention = ".ls"
