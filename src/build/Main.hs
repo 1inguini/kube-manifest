@@ -67,6 +67,7 @@ import Development.Shake (
   ),
   addTarget,
   getDirectoryContents,
+  getShakeOptions,
   need,
   phony,
   progressSimple,
@@ -377,7 +378,8 @@ manifests = do
   phony "manifests" $ do
     need $ (?projectRoot </>) <$> ["src/Manifest.hs"]
     cabal <- needExe "cabal"
-    runProg [] $ cabal : words "-j manifest"
+    jobs <- shakeThreads <$> getShakeOptions
+    runProg [] [cabal, "run", "-j" <> show jobs, "manifest"]
 
 rules :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 rules = do
