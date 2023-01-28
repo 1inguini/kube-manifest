@@ -127,8 +127,26 @@ kubernetesDashboard :: [Yaml]
 kubernetesDashboard =
   let ?namespace = "kubernetes-dashboard"
       ?app = "kubernetes-dashboard"
-   in [ Util.manifest $(embedYamlFile "src/kubernetes-dashboard/service-account.yaml")
-      , Util.manifest $(embedYamlFile "src/kubernetes-dashboard/cluster-role-binding.yaml")
+   in [ Util.manifest $
+          let ?name = "admin-user"
+           in Util.object "ServiceAccount"
+      , Util.manifest
+          [yamlQQ|
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: ClusterRoleBinding
+            metadata:
+              name: admin-user
+              labels:
+                app: kubernetes-dashboard
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: ClusterRole
+              name: cluster-admin
+            subjects:
+              - kind: ServiceAccount
+                name: admin-user
+                namespace: kubernetes-dashboard
+          |]
       ]
 
 registry :: [Yaml]

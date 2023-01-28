@@ -394,7 +394,10 @@ manifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => ((?name :: Text
 manifest =
   let ?name = ?app
    in mkYaml Manifest
-        . over (key "metadata" % _Object) (KeyMap.insert "namespace" $ Aeson.String ?namespace)
+        . ( if ?namespace == noNamespace
+              then id
+              else over (key "metadata" % _Object) (KeyMap.insert "namespace" $ Aeson.String ?namespace)
+          )
         . toJSON
 
 helmValues ::
