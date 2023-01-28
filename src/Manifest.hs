@@ -16,12 +16,12 @@ import Optics (ix, modifying, over, review, set, (%))
 
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Yaml.TH (yamlQQ)
-import Manifest.Util (Yaml)
-import qualified Manifest.Util as Util
 import Secret (externalIp, host)
 import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile, objectQQ, yamlExp)
 import Text.Heredoc (here)
 import Util (nonrootGid)
+import Util.Manifest (Yaml)
+import qualified Util.Manifest as Util
 
 openebs :: [Yaml]
 openebs =

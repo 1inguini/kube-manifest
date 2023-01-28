@@ -111,8 +111,8 @@ executable manifest
   -- Modules included in this executable, other than Main.
   other-modules:
     Manifest
-    Manifest.Util
     TH
+    Util.Manifest
 
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:

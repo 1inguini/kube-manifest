@@ -1,4 +1,4 @@
-module Manifest.Util (
+module Util.Manifest (
   Manifest,
   Yaml,
   YamlType (..),
