@@ -142,7 +142,7 @@ dns =
                   , volumes = [Util.configMapVolume]
                   }
           , Util.manifest $
-              Util.configMap (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
+              Util.configMap (KeyMap.singleton "Corefile" ($(embedStringFile "src/manifest/dns/Corefile") :: Text))
           , Util.manifest $
               Util.service $
                 ANON

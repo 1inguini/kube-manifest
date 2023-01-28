@@ -116,7 +116,7 @@ executable manifest
 
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:
-  hs-source-dirs: secret src/common src
+  hs-source-dirs: secret src/common src/manifest
 
 test-suite kube-manifest-test
   import:           common
