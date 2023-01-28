@@ -102,7 +102,7 @@ import Text.Heredoc (here, str)
 
 scratchImage :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
 scratchImage = do
-  let scratch = ?projectRoot </> "src/scratch.tar"
+  let scratch = ?projectRoot </> "src/build/scratch.tar"
   Image.registry "scratch" `image` do
     docker <- needDocker
     need [scratch]
@@ -202,7 +202,7 @@ archlinuxImage = do
         |]
 
   "archlinux/etc/pacman.conf" %> \out ->
-    copyFileContent (?projectRoot </> "src/pacman.conf") out
+    copyFileContent (?projectRoot </> "src/build/pacman.conf") out
 
   "archlinux/etc.tar" %> \out -> do
     need . fmap ("archlinux/etc" </>) $
@@ -267,7 +267,7 @@ skalibs = do
       , "--libdir=" <> ?shakeDir </> "skalibs/lib"
       , "--sysdepdir=" <> ?shakeDir </> "skalibs/sysdeps"
       ]
-  "skalibs/src/sysdeps.cfg/" `dir` need ["skalibs/src/config.mak"]
+  "skalibs/src/sysdeps.cfg/" `dir` need ["skalibs/orc/config.mak"]
 
   let make = runProg @() [cd] . ("make" :) . (: [])
   "skalibs/lib/" `dir` do
