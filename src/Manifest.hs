@@ -137,32 +137,36 @@ registry =
       ?app = "harbor"
    in [ Util.helmValues
           ANON{chart = "harbor/harbor", appLabel = "app"}
-          ANON
-            { expose =
-                ANON
-                  { ingress =
-                      ANON
-                        { annotations = Util.ingressContourTlsAnnotations
-                        , hosts =
-                            ANON
-                              { core = Util.domain
-                              , notary = "notary." <> Util.domain
-                              }
-                        }
-                  , tls =
-                      ANON
-                        { certSource = "secret" :: Text
-                        , secret =
-                            ANON
-                              { secretName = ?app
-                              , notarySecretName = "notary-" <> ?app
-                              } -- ANON{auto = ANON{commonName = Util.domain}}
-                        }
-                  }
-            , caSecretName = ?app
-            , externalURL = "https://" <> Util.domain
-            , updateStrategy = Anon.insert #type ("Recreate" :: Text) ANON{}
-            }
+          $( let ?namespace = "registry"
+                 ?app = "harbor"
+              in yamlExp
+                  ( KeyMap.fromList
+                      [ ("?annotations", toJSON Util.ingressContourTlsAnnotations)
+                      , ("?domain", toJSON Util.domain)
+                      , ("?notary", Aeson.String $([e|"notary." <> Util.domain|]))
+                      , ("?app", Aeson.String ?app)
+                      , ("?notarySecret", Aeson.String $ "notary-" <> ?app)
+                      , ("?url", Aeson.String $ "https://" <> Util.domain)
+                      ]
+                  )
+                  [here|
+                expose:
+                  ingress:
+                    annotations: ?annotations
+                    hosts:
+                      core: ?domain
+                      notary: ?notary
+                  tls:
+                    certSource: secret
+                    secret:
+                      secretName: ?app
+                      notarySecretName: ?notarySecret
+                caSecretName: ?app
+                externalURL: ?url
+                updateStrategy:
+                  type: Recreate
+              |]
+           )
       ]
 
 gitbucket :: [Yaml]

@@ -375,6 +375,7 @@ data YamlType
            , "appLabel" := Text
            ]
       )
+  deriving (Show)
 
 type Yaml =
   Record

@@ -16,7 +16,10 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (members, _String)
 import qualified Data.Aeson.TH as Aeson
 import Data.Maybe (fromMaybe)
+import Data.Record.Anon
+import Data.Record.Anon.Simple (Record)
 import Data.String.Conversions (cs)
+import Data.Text (Text)
 import Data.Yaml (decodeThrow)
 import qualified Data.Yaml as Yaml
 import qualified Language.Haskell.TH as TH
@@ -47,10 +50,10 @@ objectQQ =
 yamlExp :: Yaml.Object -> String -> TH.Q TH.Exp
 yamlExp map str = do
   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
-  lift $ over members replace val
+  lift $ replace val
  where
   replace val =
-    fromMaybe val $ do
+    fromMaybe (over members replace val) $ do
       text <- preview _String val
       KeyMap.lookup (Key.fromText text) map
 
