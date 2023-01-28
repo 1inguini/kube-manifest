@@ -7,6 +7,7 @@ cni0インターフェースはtrustedにブチ込んでおく
 * cabal
 * pacman
 * sudo
+* helm
 
 ## コンテナ
 

@@ -28,8 +28,6 @@ module Util.Shake (
   withRoot,
 ) where
 
-import Util ((<:>))
-
 import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -56,7 +54,6 @@ import Development.Shake (
   writeFileLines,
   (%>),
  )
-import GHC.IO.Exception (IOException (IOError))
 import System.Directory (
   copyFile,
   copyPermissions,
