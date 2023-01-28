@@ -224,7 +224,8 @@ getDirectoryContentsRecursive dir = do
       par = fmap $ \content -> do
         let fullPath = dir </> content
         isDir <- doesDirectoryExist fullPath
-        if isDir
+        isSymlink <- liftIO $ isSymbolicLink <$> getFileStatus fullPath
+        if isDir && not isSymlink
           then do
             ls <- getDirectoryContentsRecursive fullPath
             pure . (addTrailingPathSeparator content :) $ (content </>) <$> ls
