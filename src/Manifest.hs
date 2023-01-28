@@ -27,7 +27,24 @@ openebs :: [Yaml]
 openebs =
   let ?namespace = Util.noNamespace
       ?app = "openebs"
-   in [Util.manifest $(embedYamlFile "src/openebs/storage-class.yaml")]
+   in [ Util.manifest
+          [yamlQQ|
+            apiVersion: storage.k8s.io/v1
+            kind: StorageClass
+            metadata:
+              name: openebs-lvmpv
+              labels:
+                app: openebs
+              annotations:
+                storageclass.kubernetes.io/is-default-class: "true"
+            allowVolumeExpansion: true
+            parameters:
+              storage: "lvm"
+              volgroup: "openebs"
+              fstype: "ext4"
+            provisioner: local.csi.openebs.io
+          |]
+      ]
 
 certManager :: [Yaml]
 certManager =
