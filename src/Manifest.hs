@@ -33,9 +33,51 @@ certManager :: [Yaml]
 certManager =
   let ?namespace = "cert-manager"
       ?app = "cert-manager"
-   in [ Util.manifest $(embedYamlFile "src/cert-manager/selfsigned-issuer.yaml")
-      , Util.manifest $(embedYamlFile "src/cert-manager/1inguini-ca.yaml")
-      , Util.manifest $(embedYamlFile "src/cert-manager/1inguini-ca-cluster-issuer.yaml")
+   in [ Util.manifest
+          [yamlQQ|
+            apiVersion: cert-manager.io/v1
+            kind: Issuer
+            metadata:
+              namespace: cert-manager
+              name: selfsigned-issuer
+              labels:
+                app: cert-manager
+            spec:
+              selfSigned: {}
+          |]
+      , Util.manifest
+          [yamlQQ|
+            apiVersion: cert-manager.io/v1
+            kind: Certificate
+            metadata:
+              namespace: cert-manager
+              name: 1inguini-ca
+              labels:
+                app: cert-manager
+            spec:
+              isCA: true
+              commonName: 1inguini.com
+              secretName: 1inguini-ca
+              privateKey:
+                algorithm: ECDSA
+                size: 256
+              issuerRef:
+                name: selfsigned-issuer
+                kind: Issuer
+                group: cert-manager.io
+          |]
+      , Util.manifest
+          [yamlQQ|
+            apiVersion: cert-manager.io/v1
+            kind: ClusterIssuer
+            metadata:
+              name: 1inguini-ca-cluster-issuer
+              labels:
+                app: cert-manager
+            spec:
+              ca:
+                secretName: 1inguini-ca
+          |]
       ]
 
 -- config for coredns
