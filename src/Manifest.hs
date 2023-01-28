@@ -134,7 +134,6 @@ kubernetesDashboard =
 registry :: [Yaml]
 registry =
   let ?namespace = "registry"
-      ?app = "harbor"
    in [ Util.helmValues
           ANON{chart = "harbor/harbor", appLabel = "app"}
           $( let ?namespace = "registry"
@@ -142,7 +141,7 @@ registry =
               in yamlExp
                   ( KeyMap.fromList
                       [ ("?annotations", toJSON Util.ingressContourTlsAnnotations)
-                      , ("?domain", toJSON Util.domain)
+                      , ("?domain", Aeson.String Util.domain)
                       , ("?notary", Aeson.String $([e|"notary." <> Util.domain|]))
                       , ("?app", Aeson.String ?app)
                       , ("?notarySecret", Aeson.String $ "notary-" <> ?app)
@@ -150,22 +149,22 @@ registry =
                       ]
                   )
                   [here|
-                expose:
-                  ingress:
-                    annotations: ?annotations
-                    hosts:
-                      core: ?domain
-                      notary: ?notary
-                  tls:
-                    certSource: secret
-                    secret:
-                      secretName: ?app
-                      notarySecretName: ?notarySecret
-                caSecretName: ?app
-                externalURL: ?url
-                updateStrategy:
-                  type: Recreate
-              |]
+                    expose:
+                      ingress:
+                        annotations: ?annotations
+                        hosts:
+                          core: ?domain
+                          notary: ?notary
+                      tls:
+                        certSource: secret
+                        secret:
+                          secretName: ?app
+                          notarySecretName: ?notarySecret
+                    caSecretName: ?app
+                    externalURL: ?url
+                    updateStrategy:
+                      type: Recreate
+                  |]
            )
       ]
 

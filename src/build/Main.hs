@@ -48,7 +48,7 @@ import Data.Foldable (traverse_)
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
-  CmdOption (Cwd),
+  CmdOption (Cwd, InheritStdin),
   Lint (LintBasic),
   Rules,
   ShakeOptions (
@@ -95,6 +95,7 @@ import System.Posix (
   setEffectiveUserID,
   setFileCreationMask,
   setFileMode,
+  setUserID,
  )
 import System.Process (callProcess)
 import Text.Heredoc (here, str)
@@ -376,7 +377,8 @@ manifests = do
     need $ (?projectRoot </>) <$> ["src/Manifest.hs"]
     cabal <- needExe "cabal"
     jobs <- shakeThreads <$> getShakeOptions
-    runProg [Cwd ?projectRoot] [cabal, "run", "-j" <> show jobs, "manifest"]
+    -- InheritStdin for colored output?
+    runProg [Cwd ?projectRoot, InheritStdin] [cabal, "run", "-j" <> show jobs, "manifest"]
 
 rules :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 rules = do
@@ -404,13 +406,14 @@ main = do
   uid <-
     maybe
       ( do
-          callProcess "sudo" $ "--preserve-env" : exe : args
+          callProcess "sudo" $ ["--preserve-env", "--", exe] <> args
           exitSuccess
       )
       (pure . read)
       =<< getEnv "SUDO_UID"
   void $ setFileCreationMask 0o022
   projectRoot <- liftIO $ makeAbsolute =<< getCurrentDirectory
+  liftIO $ setUserID uid
   liftIO $ setEffectiveUserID uid
   let ?uid = uid
       ?projectRoot = projectRoot

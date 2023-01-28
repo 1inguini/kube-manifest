@@ -383,20 +383,22 @@ type Yaml =
     , "value" := Aeson.Value
     ]
 
-mkYaml :: (?namespace :: Text, ?app :: Text) => YamlType -> ToJSON json => ((?name :: Text) => json) -> Yaml
+mkYaml :: YamlType -> Aeson.Value -> Yaml
 mkYaml ty value =
   ANON
     { yamlType = ty
-    , value =
-        over (key "metadata" % _Object) (KeyMap.insert "namespace" $ Aeson.String ?namespace) $
-          let ?name = ?app in toJSON value
+    , value = value
     }
 
 manifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => ((?name :: Text) => json) -> Yaml
-manifest = mkYaml Manifest
+manifest =
+  let ?name = ?app
+   in mkYaml Manifest
+        . over (key "metadata" % _Object) (KeyMap.insert "namespace" $ Aeson.String ?namespace)
+        . toJSON
 
 helmValues ::
-  (?namespace :: Text, ?app :: Text) =>
+  (?namespace :: Text) =>
   ToJSON json =>
   Record '["chart" := String, "appLabel" := Text] ->
   json ->
@@ -410,5 +412,6 @@ helmValues meta =
           , appLabel = view #appLabel meta
           }
     )
+    . toJSON
 
 $(deriveJSON ''PathType)
