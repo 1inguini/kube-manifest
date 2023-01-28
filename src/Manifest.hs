@@ -15,6 +15,7 @@ import qualified Data.Text as Text
 import Optics (ix, modifying, over, review, set, (%))
 
 import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Yaml.TH (yamlQQ)
 import Manifest.Util (Yaml)
 import qualified Manifest.Util as Util
 import Secret (externalIp, host)
@@ -55,11 +56,11 @@ dns =
                             { args = ["-conf", mountPath <> "Corefile"] :: [Text]
                             , command = ["/coredns"] :: [Text]
                             , ports =
-                                [ toJSON $ Util.containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
-                                , toJSON $ metrics $ Util.containerPort 9153
-                                , toJSON $ health $ Util.containerPort 8080
-                                , toJSON $ ready $ Util.containerPort 8081
-                                ]
+                                ( Util.containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
+                                , metrics $ Util.containerPort 9153
+                                , health $ Util.containerPort 8080
+                                , ready $ Util.containerPort 8081
+                                )
                             , livenessProbe = health $ Util.httpGetProbe "health"
                             , readinessProbe = ready $ Util.httpGetProbe "ready"
                             , securityContext =
@@ -82,7 +83,7 @@ dns =
           , Util.manifest $
               Util.service $
                 ANON
-                  { externalIPs = [externalIp]
+                  { externalIPs = [Aeson.String externalIp]
                   , ports =
                       [ toJSON $
                           Util.servicePort 53
@@ -103,11 +104,16 @@ projectcontour =
          in Util.manifest $
               Util.service
                 ANON
-                  { externalIPs = [externalIp]
+                  { externalIPs = [Aeson.String externalIp]
                   , ports =
-                      [ ANON{name = "http" :: Text, port = 80 :: Int, targetPort = 8080 :: Int}
-                      , ANON{name = "https" :: Text, port = 443 :: Int, targetPort = 8443 :: Int}
-                      ]
+                      [yamlQQ|
+                        - name: http
+                          port: 80
+                          targetPort: 8080
+                        - name: https
+                          port: 443
+                          targetPort: 8443
+                    |]
                   }
       , Util.manifest
           $ Util.annotate
@@ -218,10 +224,9 @@ gitbucket =
                                       }
                                 , readinessProbe = Util.execCommandProbe ["test", "-e", "/mnt/upperdir/test"]
                                 , volumeMounts =
-                                    [ toJSON $
-                                        Util.name database $
-                                          Util.volumeMount "/mnt"
-                                            `merge` ANON{mountPropagation = "Bidirectional" :: Text}
+                                    [ Util.name database $
+                                        Util.volumeMount "/mnt"
+                                          `merge` ANON{mountPropagation = "Bidirectional" :: Text}
                                     ]
                                 }
                       ]

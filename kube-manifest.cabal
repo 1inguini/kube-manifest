@@ -23,6 +23,7 @@ common common
   default-extensions:
     NoFieldSelectors
     BinaryLiterals
+    ConstraintKinds
     DataKinds
     DeriveGeneric
     DuplicateRecordFields

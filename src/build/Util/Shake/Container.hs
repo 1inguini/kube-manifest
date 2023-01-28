@@ -34,8 +34,9 @@ module Util.Shake.Container (
   shake,
 ) where
 
+import Util ((<:>))
 import qualified Util
-import Util.Shake (needExe, parallel_, runProg, (<:>))
+import Util.Shake (needExe, parallel_, runProg)
 
 import Control.Exception.Safe (throwString)
 import Control.Monad (guard, void)
@@ -157,7 +158,7 @@ shake :: String -> ImageRepo
 shake = localhost . ("shake" </>)
 
 registry :: String -> ImageRepo
-registry = ImageRepo . (cs Util.registry </>)
+registry = ImageRepo . (Util.registry </>)
 
 infix 1 `image`
 image :: ImageRepo -> ((?imageName :: ImageName) => Action ()) -> Rules ()
@@ -190,7 +191,7 @@ needDockerLogin :: String -> Action ()
 needDockerLogin registry = need ["docker/login" </> registry]
 dockerSetup :: Rules ()
 dockerSetup = do
-  addTarget $ "docker/login" </> head (splitDirectories (cs Util.registry))
+  addTarget $ "docker/login" </> head (splitDirectories Util.registry)
   phonys $ \target -> do
     guard $ "docker/login/" `List.isPrefixOf` target
     let registry = makeRelative "docker/login" target

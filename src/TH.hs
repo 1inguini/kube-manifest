@@ -6,13 +6,53 @@ module TH (
   embedModifedYamlFile,
   deriveJSON,
   embedModifedYamlAllFile,
+  yamlExp,
+  objectQQ,
 ) where
 
 import Data.Aeson (Options (sumEncoding))
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Aeson.Optics (members, _String)
 import qualified Data.Aeson.TH as Aeson
+import Data.Maybe (fromMaybe)
+import Data.String.Conversions (cs)
+import Data.Yaml (decodeThrow)
 import qualified Data.Yaml as Yaml
 import qualified Language.Haskell.TH as TH
+import Language.Haskell.TH.Quote (QuasiQuoter (QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType))
 import Language.Haskell.TH.Syntax (Lift (lift), qAddDependentFile)
+import Optics (over, preview)
+import Util ((<:>))
+
+notDefined :: String -> QuasiQuoter
+notDefined name =
+  QuasiQuoter
+    { quoteExp = notDefinedField "quoteExp"
+    , quotePat = notDefinedField "quotePat"
+    , quoteType = notDefinedField "quoteType"
+    , quoteDec = notDefinedField "quoteDec"
+    }
+ where
+  notDefinedField :: String -> String -> TH.Q a
+  notDefinedField field _ = fail (field ++ " is not defined for" <:> name)
+
+objectQQ :: QuasiQuoter
+objectQQ =
+  (notDefined "objectQQ")
+    { quoteExp = \str -> do
+        lift =<< TH.runIO (decodeThrow @_ @Yaml.Object $ cs str)
+    }
+
+yamlExp :: Yaml.Object -> String -> TH.Q TH.Exp
+yamlExp map str = do
+  val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
+  lift $ over members replace val
+ where
+  replace val =
+    fromMaybe val $ do
+      text <- preview _String val
+      KeyMap.lookup (Key.fromText text) map
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =

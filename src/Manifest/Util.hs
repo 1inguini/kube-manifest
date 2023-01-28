@@ -1,10 +1,9 @@
 module Manifest.Util (
   Manifest,
+  Owner,
   Yaml,
   YamlType (..),
   annotate,
-  rootOwn,
-  nonrootOwn,
   assignJSON,
   clusterIssuer,
   configMap,
@@ -15,6 +14,7 @@ module Manifest.Util (
   domain,
   emptyDirVolume,
   execCommandProbe,
+  getCurrentOwner,
   helmValues,
   hostPathVolume,
   httpGetProbe,
@@ -32,6 +32,7 @@ module Manifest.Util (
   namespace,
   noNamespace,
   nonrootGid,
+  nonrootOwn,
   nonrootUid,
   object,
   openebsLvmClaim,
@@ -40,8 +41,8 @@ module Manifest.Util (
   readWriteOnce,
   registry,
   rootGid,
+  rootOwn,
   rootUid,
-  s,
   service,
   servicePort,
   setJSON,
@@ -52,8 +53,6 @@ module Manifest.Util (
   v1,
   volumeMount,
   workload,
-  Owner,
-  getCurrentOwner,
 ) where
 
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -75,9 +74,6 @@ import TH (deriveJSON)
 -- import Data.
 -- import Manifest.Io.K8s.Api.Core.V1 (Namespace)
 -- import Manifest.Io.K8s.Apimachinery.Pkg.Apis.Meta.V1 (ObjectMeta (..))
-
-s :: String -> String
-s = id
 
 registry :: Text
 registry = "registry." <> host <> "/library/"

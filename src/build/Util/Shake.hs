@@ -1,5 +1,4 @@
 module Util.Shake (
-  (<:>),
   aurProgram,
   copyFileContent,
   copyPath,
@@ -28,6 +27,8 @@ module Util.Shake (
   tar,
   withRoot,
 ) where
+
+import Util ((<:>))
 
 import Control.Exception.Safe (displayException, throwString, try)
 import qualified Control.Monad.Catch as Exceptions (MonadCatch (catch), MonadThrow (throwM))
@@ -113,9 +114,6 @@ rootUid :: UserID
 rootUid = 0
 rootGid :: GroupID
 rootGid = 0
-
-(<:>) :: String -> String -> String
-x <:> y = x <> " " <> y
 
 pacmanProgram, aurProgram :: String
 pacmanProgram = "pacman"
