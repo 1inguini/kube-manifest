@@ -19,7 +19,9 @@ import Data.Yaml.TH (yamlQQ)
 import Manifest.Util (Yaml)
 import qualified Manifest.Util as Util
 import Secret (externalIp, host)
-import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile)
+import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile, objectQQ, yamlExp)
+import Text.Heredoc (here)
+import Util (nonrootGid)
 
 openebs :: [Yaml]
 openebs =
@@ -53,7 +55,7 @@ dns =
                       [ Util.container
                           "registry.k8s.io/coredns/coredns:v1.9.3"
                           ANON
-                            { args = ["-conf", mountPath <> "Corefile"] :: [Text]
+                            { args = ["-conf", mountPath <> "Corefile"]
                             , command = ["/coredns"] :: [Text]
                             , ports =
                                 ( Util.containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
@@ -66,10 +68,12 @@ dns =
                             , securityContext =
                                 ANON
                                   { capabilities =
-                                      ANON
-                                        { add = ["NET_BIND_SERVICE"] :: [Text]
-                                        , drop = ["all"] :: [Text]
-                                        }
+                                      [yamlQQ|
+                                        add:
+                                          - NET_BIND_SERVICE
+                                        drop:
+                                          - all
+                                      |]
                                   , readOnlyRootFilesystem = True
                                   }
                             , volumeMounts = [Util.volumeMount mountPath]
@@ -84,11 +88,7 @@ dns =
               Util.service $
                 ANON
                   { externalIPs = [Aeson.String externalIp]
-                  , ports =
-                      [ toJSON $
-                          Util.servicePort 53
-                            `merge` ANON{protocol = "UDP" :: Text}
-                      ]
+                  , ports = [Util.servicePort 53 `merge` ANON{protocol = [yamlQQ|UDP|]}]
                   }
           , Util.manifest $
               metrics $
@@ -235,7 +235,7 @@ gitbucket =
                       , toJSON $ Util.name home Util.emptyDirVolume
                       , toJSON $ Util.name database Util.persistentVolumeClaimVolume
                       ]
-                  , securityContext = ANON{fsGroup = fromEnum Util.nonrootGid}
+                  , securityContext = ANON{fsGroup = fromEnum nonrootGid}
                   }
                 [ Util.openebsLvmClaim "5Gi"
                 , Util.name database $ Util.openebsLvmClaim "1Gi"

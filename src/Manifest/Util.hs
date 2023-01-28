@@ -1,6 +1,5 @@
 module Manifest.Util (
   Manifest,
-  Owner,
   Yaml,
   YamlType (..),
   annotate,
@@ -14,7 +13,6 @@ module Manifest.Util (
   domain,
   emptyDirVolume,
   execCommandProbe,
-  getCurrentOwner,
   helmValues,
   hostPathVolume,
   httpGetProbe,
@@ -31,18 +29,12 @@ module Manifest.Util (
   named,
   namespace,
   noNamespace,
-  nonrootGid,
-  nonrootOwn,
-  nonrootUid,
   object,
   openebsLvmClaim,
   persistentVolumeClaim,
   persistentVolumeClaimVolume,
   readWriteOnce,
   registry,
-  rootGid,
-  rootOwn,
-  rootUid,
   service,
   servicePort,
   setJSON,
@@ -55,7 +47,6 @@ module Manifest.Util (
   workload,
 ) where
 
-import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.State.Strict (MonadState, modify)
 import Data.Aeson (ToJSON (toJSON))
 import qualified Data.Aeson as Aeson
@@ -68,7 +59,6 @@ import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import Optics (A_Setter, Is, Optic', over, set, view, (%))
 import Secret (host)
-import System.Posix (GroupID, UserID, getEffectiveGroupID, getEffectiveUserID)
 import TH (deriveJSON)
 
 -- import Data.
@@ -266,29 +256,6 @@ persistentVolumeClaimVolume =
 
 volumeMount :: (?name :: Text) => Text -> Record _
 volumeMount mountPath = ANON{name = ?name, mountPath = mountPath}
-
-type Owner = (UserID, GroupID)
-
-nonrootOwn :: Owner
-nonrootOwn = (nonrootUid, nonrootGid)
-nonrootUid :: UserID
-nonrootUid = 65532
-nonrootGid :: GroupID
-nonrootGid = 65532
-
-rootOwn :: Owner
-rootOwn = (rootUid, rootGid)
-rootUid :: UserID
-rootUid = 0
-rootGid :: GroupID
-rootGid = 0
-
-getCurrentOwner :: MonadIO m => m Owner
-getCurrentOwner =
-  liftIO $
-    (,)
-      <$> getEffectiveUserID
-      <*> getEffectiveGroupID
 
 workload ::
   (?namespace :: Text, ?app :: Text, ?name :: Text) =>
