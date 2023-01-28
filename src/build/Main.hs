@@ -376,7 +376,7 @@ manifests = do
     need $ (?projectRoot </>) <$> ["src/Manifest.hs"]
     cabal <- needExe "cabal"
     jobs <- shakeThreads <$> getShakeOptions
-    runProg [] [cabal, "run", "-j" <> show jobs, "manifest"]
+    runProg [Cwd ?projectRoot] [cabal, "run", "-j" <> show jobs, "manifest"]
 
 rules :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 rules = do
