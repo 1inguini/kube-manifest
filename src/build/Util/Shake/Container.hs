@@ -36,7 +36,7 @@ module Util.Shake.Container (
 
 import Util ((<:>))
 import qualified Util
-import Util.Shake (needExe, parallel_, runProg)
+import Util.Shake (dir, needExe, parallel_, runProg)
 
 import Control.Exception.Safe (throwString)
 import Control.Monad (guard, void)
@@ -49,6 +49,7 @@ import Data.Tuple.Optics (_1)
 import Development.Shake (
   Action,
   CmdOption (FileStdin, StdinBS),
+  CmdResult,
   Exit (Exit),
   RuleResult,
   Rules,
@@ -228,12 +229,12 @@ dockerCopy tarFile dir = do
   putInfo $ "`docker cp` from" <:> tarFile <:> "to" <:> dir
   need [tarFile]
   docker <- needDocker
-  dockerExec [] ["/run/busybox", "mkdir", "-p", dir]
+  dockerExec @() [] ["/run/busybox", "mkdir", "-p", dir]
   runProg @() [FileStdin tarFile] $
     docker ["cp", "--archive=false", "--overwrite", "-", ?container <> ":" <> dir]
   putInfo $ "done `docker cp` from" <:> tarFile <:> "to" <:> dir
 
-dockerExec :: (?container :: String) => [String] -> [String] -> Action ()
+dockerExec :: (?container :: String, CmdResult r) => [String] -> [String] -> Action r
 dockerExec args cmds = do
   docker <- needDocker
   runProg [] . docker $ words "exec -i" <> args <> [?container] <> cmds
@@ -289,9 +290,10 @@ dockerCommitSquash = dockerCommit' ["--squash"]
 
 dockerPush :: (?imageName :: ImageName) => Action ()
 dockerPush = do
-  docker <- needDocker
-  need ["docker/login" </> (head . splitDirectories . view (#name % _1 % #repo)) ?imageName]
-  runProg @() [] $ docker ["push", show ?imageName]
+  -- docker <- needDocker
+  -- need ["docker/login" </> (head . splitDirectories . view (#name % _1 % #repo)) ?imageName]
+  -- runProg @() [] $ docker ["push", show ?imageName]
+  pure ()
 
 dockerEnd :: (?container :: ContainerId) => Action ()
 dockerEnd = do

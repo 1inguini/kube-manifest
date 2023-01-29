@@ -15,7 +15,9 @@ import Util.Shake (
   nonrootUid,
   pacmanSetup,
   parallel_,
+  rootGid,
   rootOwn,
+  rootUid,
   runProg,
   tar,
   withRoot,
@@ -45,10 +47,11 @@ import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
+import qualified Data.List as List
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
-  CmdOption (Cwd, InheritStdin),
+  CmdOption (Cwd, InheritStdin, Stdin),
   Lint (LintBasic),
   Rules,
   ShakeOptions (
@@ -64,6 +67,7 @@ import Development.Shake (
     shakeShare,
     shakeThreads
   ),
+  StdoutTrim (StdoutTrim, fromStdoutTrim),
   addTarget,
   getDirectoryContents,
   getShakeOptions,
@@ -81,12 +85,18 @@ import Development.Shake (
 import Safe (headMay)
 import System.Directory (
   getCurrentDirectory,
+  listDirectory,
   makeAbsolute,
+  removeDirectoryLink,
   setCurrentDirectory,
  )
 import System.Environment (getArgs, getExecutablePath)
 import System.Exit (exitSuccess)
 import System.FilePath (
+  hasTrailingPathSeparator,
+  joinPath,
+  makeRelative,
+  splitPath,
   (</>),
  )
 import System.Posix (
@@ -134,7 +144,7 @@ nonrootImage = do
       , "nonroot:x:" <> show nonrootGid <> ":"
       ]
 
-archlinuxImage :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Rules ()
+archlinuxImage :: (?projectRoot :: FilePath, ?shakeDir :: FilePath, ?uid :: UserID) => Rules ()
 archlinuxImage = do
   let officalImage = ImageName (Image.dockerIo "library/archlinux", ImageTag "base-devel")
       rootExec, nonrootExec :: (?container :: ContainerId) => [String] -> [String] -> Action ()
@@ -172,7 +182,7 @@ archlinuxImage = do
 
   Image.registry "archlinux" `image` do
     ImageName (Image.shake "archlinux/aur-added", latest) `withContainer` [] $ do
-      let ?instruction = ?instructions <> ["USER nonroot"]
+      let ?instructions = ?instructions <> ["USER nonroot", "WORKDIR /home/nonroot"]
       dockerCommitSquash
       dockerPush
 
@@ -213,24 +223,84 @@ archlinuxImage = do
       ]
     tar rootOwn out
 
+gitbucketImage :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
+gitbucketImage = do
+  let version = "4.38.4"
+  "gitbucket/gitbucket.war" %> \out -> do
+    runProg @()
+      []
+      [ "curl"
+      , "-L"
+      , "-o"
+      , out
+      , "https://github.com/gitbucket/gitbucket/releases/download" </> version </> "gitbucket.war"
+      ]
+
 openjdk :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
 openjdk = do
-  "openjdk/package/" `dir` do
-    pacman <- needPacman
-    withRoot . runProg @() [] $ pacman ["-S", "--root=openjdk/package", "jre-openjdk-headless"]
+  -- "openjdk/package/" `dir` do
+  --   pacman <- needPacman
+  --   withRoot $ do
+  --     runProg @() [] $ pacman ["-S", "--root=openjdk/package", "gcc", "jre-openjdk-headless"]
+  --     runProg @() [] $ words "chown -R" <> [show ?uid, "openjdk/package"]
 
-  "openjdk/rootfs" `dir` do
-    need ["openjdk/package/"]
-    let prefix' = "openjdk/package/usr/lib/jvm/"
-    children <- getDirectoryContents prefix'
-    usr <- case headMay children of
-      Nothing -> throwString $ "there is no directory matching `" <> prefix' <> "*`"
-      Just child -> pure $ prefix' </> child
-    withRoot $
-      parallel_
-        [ copyPath "openjdk/package/etc" (?dir </> "etc")
-        , copyPath usr (?dir </> "usr")
-        ]
+  -- "openjdk/package.tar" %> \out -> do
+  --   need ["openjdk/package/"]
+  --   tar nonrootOwn out
+
+  Image.shake "openjdk/package" `image` do
+    ImageName (Image.registry "archlinux", latest) `withContainer` [] $ do
+      dockerExec @() [] $ words "sudo pacman --noconfirm -S jre-openjdk-headless"
+      dockerCommit
+  --     dockerExec [] ["pacman", "-S", "jre-openjdk-headless"]
+  -- dockerImport "openjdk/package.tar" [] ?imageName
+
+  let getPrefix files =
+        let prefix' = "/usr/lib/jvm/java-"
+         in maybe
+              (throwString "openjdk/prefix")
+              (pure . joinPath . take (length (splitPath prefix')) . splitPath)
+              $ List.find (List.isPrefixOf prefix') files
+
+  "openjdk/rootfs/" `dir` do
+    ImageName (Image.shake "openjdk/package", latest)
+      `withContainer` [ "--user=" <> show rootUid <> ":" <> show rootGid
+                      , "--volume=" <> "." </> ?dir <> ":" <> "/rootfs"
+                      ]
+      $ do
+        StdoutTrim stdout <- dockerExec [] $ words "pacman -Qql jre-openjdk-headless"
+        let files = lines stdout
+        prefix <- getPrefix files
+        dockerExec @() [] $
+          [ "/run/magicpak"
+          , "-v"
+          , "--install-to=/usr/bin/"
+          ]
+            <> filter
+              ( \file ->
+                  not (hasTrailingPathSeparator file) && List.isPrefixOf prefix file
+              )
+              files
+            <> ["/rootfs"]
+        usrs <-
+          fmap (prefix </>) . lines . fromStdoutTrim
+            <$> dockerExec [] ["/run/busybox", "ls", "-1A", prefix]
+        let (etcDirs, etcs) =
+              List.partition hasTrailingPathSeparator $ filter (List.isPrefixOf "/etc") files
+            cp src dst = dockerExec @() [] ["/run/busybox", "cp", "-P", src, dst]
+        dockerExec @() [] $
+          ["/run/busybox", "mkdir", "-p"] <> (("/rootfs" </>) . makeRelative "/" <$> etcDirs)
+        parallel_
+          [ dockerExec @() [] $ words "/run/busybox cp -r -t /rootfs/usr/" <> usrs
+          , parallel_ $ (\etc -> cp etc $ "/rootfs" </> makeRelative "/" etc) <$> etcs
+          ]
+        docker <- needDocker
+        runProg @() [Stdin "/usr/lib/server"] . docker $
+          words "exec -i" <> [?container, "tee", "/tmp/ld.so.conf"]
+
+        dockerExec @() [] $ words "/run/busybox mkdir -p /rootfs/usr/lib/locale/"
+        cp "/usr/lib/locale/locale-archive" "/rootfs/usr/lib/locale/locale-archive"
+        dockerExec [] $ words "ldconfig -f /tmp/ld.so.conf -r /rootfs"
 
   "openjdk/rootfs.tar" %> \out -> do
     need ["openjdk/rootfs/"]
@@ -279,7 +349,7 @@ skalibs = do
     need ["skalibs/src/sysdeps.cfg/"]
     make "install-sysdeps"
 
-s6PortableUtils :: (?shakeDir :: FilePath) => Rules ()
+s6PortableUtils :: (?shakeDir :: FilePath, ?uid :: UserID) => Rules ()
 s6PortableUtils = do
   let version = "v2.2.5.0"
 
@@ -363,13 +433,27 @@ busybox = download "busybox" "busybox" *> traverse_ singleApplet applets
         []
         [ "curl"
         , "-L"
-        , "https://busybox.net/downloads/binaries" </> version <> "-x86_64-linux-musl" </> src
         , "-o"
         , out
+        , "https://busybox.net/downloads/binaries" </> version <> "-x86_64-linux-musl" </> src
         ]
       liftIO $ setFileMode out 0o755
   singleApplet applet =
     download applet $ "busybox_" <> fmap Char.toUpper applet
+
+magicpak :: (?projectRoot :: FilePath, ?uid :: UserID, ?shakeDir :: FilePath) => Rules ()
+magicpak = do
+  let version = "v1.4.0"
+  "magicpak/magicpak" %> \out -> do
+    runProg @()
+      []
+      [ "curl"
+      , "-L"
+      , "-o"
+      , out
+      , "https://github.com/coord-e/magicpak/releases/download" </> version </> "magicpak-x86_64-unknown-linux-musl"
+      ]
+    liftIO $ setFileMode out 0o755
 
 manifests :: (?projectRoot :: FilePath) => Rules ()
 manifests = do
@@ -392,10 +476,12 @@ rules = do
   skalibs
   s6PortableUtils
   busybox
+  magicpak
 
   scratchImage
   nonrootImage
   archlinuxImage
+  gitbucketImage
 
   manifests
 
@@ -413,7 +499,6 @@ main = do
       =<< getEnv "SUDO_UID"
   void $ setFileCreationMask 0o022
   projectRoot <- liftIO $ makeAbsolute =<< getCurrentDirectory
-  liftIO $ setUserID uid
   liftIO $ setEffectiveUserID uid
   let ?uid = uid
       ?projectRoot = projectRoot

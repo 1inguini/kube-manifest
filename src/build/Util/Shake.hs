@@ -54,6 +54,7 @@ import Development.Shake (
   writeFileLines,
   (%>),
  )
+import GHC.IO.Exception (IOException (IOError))
 import System.Directory (
   copyFile,
   copyPermissions,
@@ -64,6 +65,7 @@ import System.Directory (
   listDirectory,
   pathIsSymbolicLink,
   removeDirectoryLink,
+  removeDirectoryRecursive,
   removeFile,
  )
 import qualified System.Directory as Sys (doesDirectoryExist)
@@ -83,6 +85,8 @@ import System.Posix (
   fileGroup,
   fileOwner,
   getFileStatus,
+  getSymbolicLinkStatus,
+  isSymbolicLink,
   setEffectiveUserID,
   setOwnerAndGroup,
  )
@@ -126,7 +130,7 @@ needExe command = do
 pacArgs :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => [String]
 pacArgs =
   [ "--noconfirm"
-  , "--config=" <> ?projectRoot </> "src/pacman.conf"
+  , "--config=" <> ?projectRoot </> "src/build/pacman.conf"
   , "--dbpath=" <> ?shakeDir </> "pacman"
   ]
 needPacman :: (?projectRoot :: FilePath, ?shakeDir :: FilePath) => Action ([String] -> [String])
@@ -144,7 +148,7 @@ needAur = do
 pacmanSetup :: (?projectRoot :: FilePath, ?shakeDir :: FilePath, ?uid :: UserID) => Rules ()
 pacmanSetup = do
   "pacman/sync.tar" %> \out -> do
-    need [?projectRoot </> "src/pacman.conf"]
+    need [?projectRoot </> "src/build/pacman.conf"]
     -- sudo <- needSudo
     pacman <- needExe pacmanProgram
     dbfiles <- withRoot $ do
@@ -188,22 +192,23 @@ copyPath src dst = do
           createDirectoryLink target dst
         else do
           mkdir dst
-          contents <- getDirectoryContents src
+          contents <- if isSymlink then pure [] else getDirectoryContents src
           let par = fmap $ \content -> copyPath (src </> content) (dst </> content)
           parallel_ . par $ contents
       liftIO $ do
         setOwnerAndGroup dst (fileOwner status) (fileGroup status)
         copyPermissions src dst
     else do
-      need [src]
       liftIO $ do
         void $ try @_ @IOError $ removeFile dst
         mkdir $ dropFileName dst
-        if isSymlink
-          then do
-            target <- getSymbolicLinkTarget src
-            createFileLink target dst
-          else copyFile src dst
+      if isSymlink
+        then liftIO $ do
+          target <- getSymbolicLinkTarget src
+          createFileLink target dst
+        else do
+          need [src]
+          liftIO $ copyFile src dst
 
 listDirectoryRecursive :: MonadIO m => FilePath -> m [FilePath]
 listDirectoryRecursive dir = liftIO $ do
@@ -224,14 +229,19 @@ getDirectoryContentsRecursive dir = do
       par = fmap $ \content -> do
         let fullPath = dir </> content
         isDir <- doesDirectoryExist fullPath
-        isSymlink <- liftIO $ isSymbolicLink <$> getFileStatus fullPath
-        if isDir && not isSymlink
+        if isDir
           then do
             ls <- getDirectoryContentsRecursive fullPath
             pure . (addTrailingPathSeparator content :) $ (content </>) <$> ls
-          else pure [content]
-  ls <- getDirectoryContents dir
-  concat <$> parallel (par ls)
+          else do
+            isSymlink <- liftIO $ pathIsSymbolicLink fullPath
+            pure $ if isSymlink then [] else [content]
+  isSymlink <- liftIO $ pathIsSymbolicLink dir
+  if isSymlink
+    then pure []
+    else do
+      ls <- getDirectoryContents dir
+      concat <$> parallel (par ls)
 
 getDirectoryFilesRecursivePrefixed :: FilePath -> Action [FilePath]
 getDirectoryFilesRecursivePrefixed dir =
@@ -250,7 +260,7 @@ dir pat act = do
   withoutTargets $
     target %> \out -> do
       let ?dir = dropExtension out
-      liftIO $ removeDirectoryRecursive ?dir
+      void $ try @_ @IOError $ liftIO $ removeDirectoryRecursive ?dir
       mkdir ?dir
       act
       produces =<< getDirectoryFilesRecursivePrefixed ?dir
@@ -266,10 +276,8 @@ withRoot act = do
 gitCloneAction :: String -> String -> FilePath -> Action ()
 gitCloneAction repo ref dst = do
   void $ runProg @Exit [Cwd dst] $ words "git init"
-  let gitDir = dst </> ".git"
-      git = runProg @() [] . (["git", "--git-dir=" <> gitDir] <>)
-  git $ words "fetch --depth=1 --no-tags" <> [repo, ref]
-  git $ words "reset --hard FETCH_HEAD"
+  runProg @() [Cwd dst] $ words "git fetch --depth=1 --no-tags" <> [repo, ref]
+  runProg @() [Cwd dst] $ words "git reset --hard FETCH_HEAD"
 
 gitClone :: FilePath -> (String, String) -> Rules ()
 gitClone gitDir (repo, ref) = do
