@@ -250,6 +250,7 @@ dir pat act = do
   withoutTargets $
     target %> \out -> do
       let ?dir = dropExtension out
+      liftIO $ removeDirectoryRecursive ?dir
       mkdir ?dir
       act
       produces =<< getDirectoryFilesRecursivePrefixed ?dir
