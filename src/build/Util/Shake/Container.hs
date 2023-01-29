@@ -208,6 +208,11 @@ dockerSetup = do
             docker ["login", "--username=" <> username, "--password-stdin", registry]
         ExitSuccess -> pure ()
 
+  "docker/init-volume/" `dir` do
+    copyFile' "/bin/catatonit" $ ?dir </> "init"
+    copyFile' "busybox/busybox" $ ?dir </> "busybox"
+    copyFile' "magicpak/magicpak" $ ?dir </> "magicpak"
+
 dockerPull :: ImageName -> Rules ()
 dockerPull image = do
   let imageName = show image
@@ -328,17 +333,16 @@ withContainer ::
   [String] ->
   ((?container :: ContainerId, ?instructions :: [ContainerfileInstruction]) => Action a) ->
   Action a
-withContainer image opt act = withTempDir $ \tmp -> do
+withContainer image opt act = do
   docker <- needDocker
+  need ["docker/init-volume/"]
   needImage image
-  copyFile' "/bin/catatonit" $ tmp </> "init"
-  copyFile' "busybox/busybox" $ tmp </> "busybox"
   (insts, StdoutTrim container) <-
     par (getInstructions image) . runProg [] . docker $
       [ "run"
       , "--detach"
       , "-t"
-      , "--volume=" <> tmp <> ":/run"
+      , "--volume=" <> "./docker/init-volume" <> ":/run"
       , "--entrypoint=/run/init"
       ]
         <> opt
