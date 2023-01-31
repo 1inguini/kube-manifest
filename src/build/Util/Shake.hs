@@ -54,7 +54,6 @@ import Development.Shake (
   writeFileLines,
   (%>),
  )
-import GHC.IO.Exception (IOException (IOError))
 import System.Directory (
   copyFile,
   copyPermissions,
@@ -85,8 +84,6 @@ import System.Posix (
   fileGroup,
   fileOwner,
   getFileStatus,
-  getSymbolicLinkStatus,
-  isSymbolicLink,
   setEffectiveUserID,
   setOwnerAndGroup,
  )

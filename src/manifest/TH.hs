@@ -47,6 +47,11 @@ objectQQ =
         lift =<< TH.runIO (decodeThrow @_ @Yaml.Object $ cs str)
     }
 
+-- yamlExp :: String -> TH.Q TH.Exp
+-- yamlExp str = do
+--   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
+--   lift val
+
 yamlExp :: Yaml.Object -> String -> TH.Q TH.Exp
 yamlExp map str = do
   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
