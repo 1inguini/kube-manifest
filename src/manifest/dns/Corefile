@@ -6,7 +6,7 @@
   ready :8081
   prometheus :9153
   forward . 172.16.232.1
-  cache 30
+  cache 3600
   loop
   loadbalance
 

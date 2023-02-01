@@ -48,6 +48,7 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import qualified Data.Char as Char
 import Data.Foldable (traverse_)
 import qualified Data.List as List
+import Data.Maybe (fromMaybe)
 import Development.Shake (
   Action,
   Change (ChangeModtimeAndDigest),
@@ -103,6 +104,7 @@ import System.Posix (
   UserID,
   getEnv,
   setEffectiveUserID,
+  setEnv,
   setFileCreationMask,
   setFileMode,
   setUserID,
@@ -458,7 +460,7 @@ magicpak = do
 manifests :: (?projectRoot :: FilePath) => Rules ()
 manifests = do
   phony "manifest" $ do
-    need $ (?projectRoot </>) <$> ["src/Manifest.hs"]
+    need $ (?projectRoot </>) <$> ["src/manifest/Manifest.hs"]
     cabal <- needExe "cabal"
     jobs <- shakeThreads <$> getShakeOptions
     -- InheritStdin for colored output?
@@ -493,6 +495,8 @@ main = do
     maybe
       ( do
           callProcess "sudo" $ ["--preserve-env", "--", exe] <> args
+          username <- fromMaybe "root" <$> getEnv "SUDO_USER"
+          setEnv "USER" username True
           exitSuccess
       )
       (pure . read)
