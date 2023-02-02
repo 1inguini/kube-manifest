@@ -15,8 +15,9 @@ import qualified Data.Text as Text
 import Optics (ix, modifying, over, review, set, (%))
 
 import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Text.Encoding.Base64 (encodeBase64)
 import Data.Yaml.TH (yamlQQ)
-import Secret (externalIp, host)
+import Secret
 import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile, objectQQ, yamlExp)
 import Text.Heredoc (here)
 import Util (nonrootGid)
@@ -51,50 +52,71 @@ certManager =
   let ?namespace = "cert-manager"
       ?app = "cert-manager"
    in [ Util.manifest
-          [yamlQQ|
-            apiVersion: cert-manager.io/v1
-            kind: Issuer
-            metadata:
-              namespace: cert-manager
-              name: selfsigned-issuer
-              labels:
-                app: cert-manager
-            spec:
-              selfSigned: {}
-          |]
+          $( yamlExp
+              ( KeyMap.fromList
+                  [ ("?key", Aeson.String $ encodeBase64 cloudflareOriginCAKey)
+                  ]
+              )
+              [here|
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  namespace: cert-manager
+                  name: cloudflare-origin-ca-key
+                data:
+                  key: ?key
+              |]
+           )
       , Util.manifest
           [yamlQQ|
-            apiVersion: cert-manager.io/v1
-            kind: Certificate
+            apiVersion: cert-manager.k8s.cloudflare.com/v1
+            kind: OriginIssuer
             metadata:
               namespace: cert-manager
-              name: 1inguini-ca
+              name: cloudflare-issuer
               labels:
                 app: cert-manager
             spec:
-              isCA: true
-              commonName: 1inguini.com
-              secretName: 1inguini-ca
-              privateKey:
-                algorithm: ECDSA
-                size: 256
-              issuerRef:
-                name: selfsigned-issuer
-                kind: Issuer
-                group: cert-manager.io
+              requestType: OriginECC
+              auth:
+                serviceKeyRef:
+                  name: cloudflare-origin-ca-key
+                  key: key
           |]
-      , Util.manifest
-          [yamlQQ|
-            apiVersion: cert-manager.io/v1
-            kind: ClusterIssuer
-            metadata:
-              name: 1inguini-ca-cluster-issuer
-              labels:
-                app: cert-manager
-            spec:
-              ca:
-                secretName: 1inguini-ca
-          |]
+          -- , Util.manifest
+          --     [yamlQQ|
+          --       apiVersion: cert-manager.io/v1
+          --       kind: Certificate
+          --       metadata:
+          --         namespace: cert-manager
+          --         name: 1inguini-ca
+          --         labels:
+          --           app: cert-manager
+          --       spec:
+          --         isCA: true
+          --         commonName: 1inguini.com
+          --         secretName: 1inguini-ca
+          --         privateKey:
+          --           algorithm: ECDSA
+          --           size: 256
+          --           rotationPolicy: Always
+          --         issuerRef:
+          --           group: cert-manager.k8s.cloudflare.com
+          --           kind: OriginIssuer
+          --           name: cloudflare-issuer
+          --     |]
+          -- , Util.manifest
+          --   [yamlQQ|
+          --     apiVersion: cert-manager.io/v1
+          --     kind: ClusterIssuer
+          --     metadata:
+          --       name: 1inguini-ca-cluster-issuer
+          --       labels:
+          --         app: cert-manager
+          --     spec:
+          --       ca:
+          --         secretName: 1inguini-ca
+          --   |]
       ]
 
 -- config for coredns
