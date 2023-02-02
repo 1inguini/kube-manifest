@@ -56,6 +56,7 @@ import Data.Aeson.Optics (AsValue (_Object), key)
 import Data.Record.Anon (AllFields, Merge, RowHasField, pattern (:=))
 import Data.Record.Anon.Simple (Record, insert, merge, project)
 import qualified Data.Record.Anon.Simple as Anon
+import Data.String.Interpolate (i)
 import Data.Text (Text)
 import Optics (A_Setter, Is, Optic', over, set, view, (%))
 import Secret (host)

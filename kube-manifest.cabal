@@ -106,7 +106,6 @@ executable manifest
   build-depends:
     , aeson
     , aeson-optics
-    , base64
     , yaml
 
   -- Modules included in this executable, other than Main.
