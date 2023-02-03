@@ -10,18 +10,22 @@ module TH (
   objectQQ,
 ) where
 
-import Data.Aeson (Options (sumEncoding))
+import Control.Monad (foldM)
+import Data.Aeson (Options (sumEncoding), ToJSON (toJSON))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (members, _String)
 import qualified Data.Aeson.TH as Aeson
+import qualified Data.List as List
 import Data.Maybe (fromMaybe)
 import Data.Record.Anon
-import Data.Record.Anon.Simple (Record)
+import qualified Data.Record.Anon.Advanced as Record.Advanced
+import Data.Record.Anon.Simple (Record, toAdvanced)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import Data.Yaml (decodeThrow)
 import qualified Data.Yaml as Yaml
+import GHC.TypeLits (Symbol)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote (QuasiQuoter (QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType))
 import Language.Haskell.TH.Syntax (Lift (lift), qAddDependentFile)
@@ -52,13 +56,22 @@ objectQQ =
 --   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
 --   lift val
 
-yamlExp :: String -> TH.Q TH.Exp
-yamlExp str = do
+yamlExp :: [String] -> String -> TH.Q TH.Exp
+yamlExp varNames str = do
   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
+  row <-
+    TH.parensT
+      $ foldM
+        ( \exp field -> do
+            [t|($(TH.litT $ TH.strTyLit field) ':= $(TH.varT =<< TH.newName "a")) ': ($(pure exp))|]
+        )
+        TH.PromotedNilT
+      $ List.reverse varNames
+  let r = pure row
   vars <- TH.newName "vars"
   TH.LamE [TH.VarP vars]
     <$> [|
-      let replace :: (AllFields r ToJSON, KnownFields r) => Record r -> Yaml.Value -> Yaml.Value
+      let replace :: (AllFields $r ToJSON, KnownFields $r) => Record $r -> Yaml.Value -> Yaml.Value
           replace vars val =
             fromMaybe (over members (replace vars) val) $ do
               text <- preview _String val

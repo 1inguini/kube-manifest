@@ -51,11 +51,9 @@ certManager :: [Yaml]
 certManager =
   let ?namespace = "cert-manager"
       ?app = "cert-manager"
-   in [ Util.manifest
+   in [ Util.manifest $
           $( yamlExp
-              ( KeyMap.fromList
-                  [("?token", Aeson.String cloudflareToken)]
-              )
+              ["_token"]
               [here|
                 apiVersion: v1
                 kind: Secret
@@ -66,9 +64,10 @@ certManager =
                   labels:
                     app: cert-manager
                 stringData:
-                  api-token: ?token
+                  api-token: _token
               |]
            )
+            ANON{_token = Aeson.String cloudflareToken}
       , Util.manifest
           [yamlQQ|
             apiVersion: cert-manager.io/v1
@@ -249,38 +248,43 @@ kubernetesDashboard =
 registry :: [Yaml]
 registry =
   let ?namespace = "registry"
+      ?app = "harbor"
    in [ Util.helmValues
           ANON{chart = "harbor/harbor", appLabel = "app"}
-          $( let ?namespace = "registry"
-                 ?app = "harbor"
-              in yamlExp
-                  ( KeyMap.fromList
-                      [ ("?annotations", toJSON Util.ingressContourTlsAnnotations)
-                      , ("?domain", Aeson.String Util.domain)
-                      , ("?notary", Aeson.String $([e|"notary." <> Util.domain|]))
-                      , ("?app", Aeson.String ?app)
-                      , ("?notarySecret", Aeson.String $ "notary-" <> ?app)
-                      , ("?url", Aeson.String $ "https://" <> Util.domain)
-                      ]
-                  )
-                  [here|
+          $ $( yamlExp
+                [ "_annotations"
+                , "_domain"
+                , "_notary"
+                , "_app"
+                , "_notarySecret"
+                , "_url"
+                ]
+                [here|
                     expose:
                       ingress:
-                        annotations: ?annotations
+                        annotations: _annotations
                         hosts:
-                          core: ?domain
-                          notary: ?notary
+                          core: _domain
+                          notary: _notary
                       tls:
                         certSource: secret
                         secret:
-                          secretName: ?app
-                          notarySecretName: ?notarySecret
-                    caSecretName: ?app
-                    externalURL: ?url
+                          secretName: _app
+                          notarySecretName: _notarySecret
+                    caSecretName: _app
+                    externalURL: _url
                     updateStrategy:
                       type: Recreate
                   |]
-           )
+             )
+            ANON
+              { _annotations = Util.ingressContourTlsAnnotations
+              , _domain = Util.domain
+              , _notary = "notary." <> Util.domain
+              , _app = Aeson.String ?app
+              , _notarySecret = "notary-" <> ?app
+              , _url = "https://" <> Util.domain
+              }
       ]
 
 gitbucket :: [Yaml]
