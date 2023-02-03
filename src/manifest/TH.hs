@@ -52,15 +52,22 @@ objectQQ =
 --   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
 --   lift val
 
-yamlExp :: Yaml.Object -> String -> TH.Q TH.Exp
-yamlExp map str = do
+yamlExp :: String -> TH.Q TH.Exp
+yamlExp str = do
   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
-  lift $ replace val
- where
-  replace val =
-    fromMaybe (over members replace val) $ do
-      text <- preview _String val
-      KeyMap.lookup (Key.fromText text) map
+  vars <- TH.newName "vars"
+  TH.LamE [TH.VarP vars]
+    <$> [|
+      let replace :: (AllFields r ToJSON, KnownFields r) => Record r -> Yaml.Value -> Yaml.Value
+          replace vars val =
+            fromMaybe (over members (replace vars) val) $ do
+              text <- preview _String val
+              lookup (cs text) $
+                Record.Advanced.toList $
+                  Record.Advanced.cmap (Proxy :: Proxy ToJSON) (K . toJSON . unI) $
+                    toAdvanced vars
+       in replace $(TH.varE vars) val
+      |]
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =
