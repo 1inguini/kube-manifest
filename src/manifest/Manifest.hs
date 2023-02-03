@@ -12,11 +12,12 @@ import qualified Data.Record.Anon.Simple as Anon
 import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Text.Encoding.Base64 (encodeBase64)
 import Optics (ix, modifying, over, review, set, (%))
 
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Yaml.TH (yamlQQ)
-import Secret (externalIp, host)
+import Secret
 import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile, objectQQ, yamlExp)
 import Text.Heredoc (here)
 import Util (nonrootGid)
@@ -51,50 +52,87 @@ certManager =
   let ?namespace = "cert-manager"
       ?app = "cert-manager"
    in [ Util.manifest
-          [yamlQQ|
-            apiVersion: cert-manager.io/v1
-            kind: Issuer
-            metadata:
-              namespace: cert-manager
-              name: selfsigned-issuer
-              labels:
-                app: cert-manager
-            spec:
-              selfSigned: {}
-          |]
-      , Util.manifest
-          [yamlQQ|
-            apiVersion: cert-manager.io/v1
-            kind: Certificate
-            metadata:
-              namespace: cert-manager
-              name: 1inguini-ca
-              labels:
-                app: cert-manager
-            spec:
-              isCA: true
-              commonName: 1inguini.com
-              secretName: 1inguini-ca
-              privateKey:
-                algorithm: ECDSA
-                size: 256
-              issuerRef:
-                name: selfsigned-issuer
-                kind: Issuer
-                group: cert-manager.io
-          |]
+          $( yamlExp
+              ( KeyMap.fromList
+                  [("?token", Aeson.String cloudflareToken)]
+              )
+              [here|
+                apiVersion: v1
+                kind: Secret
+                type: Opaque
+                metadata:
+                  namespace: cert-manager
+                  name: cloudflare-api-token
+                  labels:
+                    app: cert-manager
+                stringData:
+                  api-token: ?token
+              |]
+           )
       , Util.manifest
           [yamlQQ|
             apiVersion: cert-manager.io/v1
             kind: ClusterIssuer
             metadata:
+              # namespace: cert-manager
               name: 1inguini-ca-cluster-issuer
               labels:
                 app: cert-manager
             spec:
-              ca:
-                secretName: 1inguini-ca
+              acme:
+                # You must replace this email address with your own.
+                # Let's Encrypt will use this to contact you about expiring
+                # certificates, and issues related to your account.
+                email: 9647142@gmail.com
+                server: https://acme-staging-v02.api.letsencrypt.org/directory
+                privateKeySecretRef:
+                  # Secret resource that will be used to store the account's private key.
+                  name: letsencrypt-issuer-account-key
+                solvers:
+                - http01:
+                    ingress: {}
+                # - dns01:
+                #     cloudflare:
+                #       apiTokenSecretRef:
+                #         name: cloudflare-api-token
+                #         key: api-token
           |]
+          -- , Util.manifest
+          --     [yamlQQ|
+          --       apiVersion: cert-manager.io/v1
+          --       kind: Certificate
+          --       metadata:
+          --         namespace: cert-manager
+          --         name: 1inguini-ca
+          --         labels:
+          --           app: cert-manager
+          --       spec:
+          --         duration: 2160h # 90d
+          --         renewBefore: 360h # 15d
+          --         isCA: true
+          --         secretName: 1inguini-ca
+          --         privateKey:
+          --           algorithm: ECDSA
+          --           size: 256
+          --         dnsNames:
+          --         - 1inguini.com
+          --         issuerRef:
+          --           name: letsencrypt-issuer
+          --           kind: Issuer
+          --           group: cert-manager.io
+          --     |]
+          -- , Util.manifest
+          --     [yamlQQ|
+          --       apiVersion: cert-manager.io/v1
+          --       kind: ClusterIssuer
+          --       metadata:
+          --         name: 1inguini-ca-cluster-issuer
+          --         labels:
+          --           app: cert-manager
+          --       spec:
+          --         ca:
+          --           secretName: 1inguini-ca
+          --     |]
       ]
 
 -- config for coredns
