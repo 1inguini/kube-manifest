@@ -18,7 +18,7 @@ import Optics (ix, modifying, over, review, set, (%))
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Yaml.TH (yamlQQ)
 import Secret
-import TH (embedModifedYamlFile, embedYamlAllFile, embedYamlFile, objectQQ, yamlExp)
+import TH (yamlExp)
 import Text.Heredoc (here)
 import Util (nonrootGid)
 import Util.Manifest (Yaml)
@@ -26,7 +26,7 @@ import qualified Util.Manifest as Util
 
 openebs :: [Yaml]
 openebs =
-  let ?namespace = Util.noNamespace
+  let ?name = Util.noNamespace
       ?app = "openebs"
    in [ Util.manifest
           [yamlQQ|
@@ -60,14 +60,14 @@ certManager =
                 type: Opaque
                 metadata:
                   namespace: cert-manager
-                  name: cloudflare-api-token
+                  name: cloudflare-origin-ca-key
                   labels:
                     app: cert-manager
                 stringData:
                   api-token: _token
               |]
            )
-            ANON{_token = Aeson.String cloudflareToken}
+            ANON{_token = Aeson.String cloudflareOriginCAKey}
       , Util.manifest
           [yamlQQ|
             apiVersion: cert-manager.io/v1

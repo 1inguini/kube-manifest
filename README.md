@@ -2,6 +2,8 @@
 
 cni0インターフェースはtrustedにブチ込んでおく
 
+cert-managerのあとに<https://github.com/cloudflare/origin-ca-issuer>を導入する。
+
 ## Prerequisites
 
 * cabal
