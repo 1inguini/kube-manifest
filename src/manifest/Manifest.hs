@@ -1,4 +1,7 @@
-module Manifest where
+module Manifest (
+  yamls,
+)
+where
 
 import Control.Monad.State.Strict (MonadState, execState, modify)
 import Data.Aeson (toJSON)
@@ -16,9 +19,8 @@ import Data.Text.Encoding.Base64 (encodeBase64)
 import Optics (ix, modifying, over, review, set, (%))
 
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Yaml.TH (yamlQQ)
 import Secret
-import TH (yamlExp)
+import TH (yamlQQ)
 import Text.Heredoc (here)
 import Util (nonrootGid)
 import Util.Manifest (Yaml)
@@ -52,20 +54,18 @@ certManager =
   let ?namespace = "cert-manager"
       ?app = "cert-manager"
    in [ Util.manifest $
-          $( yamlExp
-              [here|
-                apiVersion: v1
-                kind: Secret
-                type: Opaque
-                metadata:
-                  namespace: cert-manager
-                  name: cloudflare-origin-ca-key
-                  labels:
-                    app: cert-manager
-                stringData:
-                  api-token: $token
-              |]
-           )
+          [yamlQQ|
+            apiVersion: v1
+            kind: Secret
+            type: Opaque
+            metadata:
+              namespace: cert-manager
+              name: cloudflare-origin-ca-key
+              labels:
+                app: cert-manager
+            stringData:
+              api-token: $token
+          |]
             ANON{token = Aeson.String cloudflareOriginCAKey}
       , Util.manifest
           [yamlQQ|
@@ -250,25 +250,23 @@ registry =
       ?app = "harbor"
    in [ Util.helmValues
           ANON{chart = "harbor/harbor", appLabel = "app"}
-          $ $( yamlExp
-                [here|
-                    expose:
-                      ingress:
-                        annotations: $annotations
-                        hosts:
-                          core: $domain
-                          notary: $notary
-                      tls:
-                        certSource: secret
-                        secret:
-                          secretName: $app
-                          notarySecretName: $notarySecret
-                    caSecretName: $app
-                    externalURL: $url
-                    updateStrategy:
-                      type: Recreate
-                  |]
-             )
+          $ [yamlQQ|
+              expose:
+                ingress:
+                  annotations: $annotations
+                  hosts:
+                    core: $domain
+                    notary: $notary
+                tls:
+                  certSource: secret
+                  secret:
+                    secretName: $app
+                    notarySecretName: $notarySecret
+              caSecretName: $app
+              externalURL: $url
+              updateStrategy:
+                type: Recreate
+            |]
             ANON
               { annotations = Util.ingressContourTlsAnnotations
               , app = Aeson.String ?app

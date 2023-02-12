@@ -6,14 +6,11 @@ module TH (
   embedModifedYamlFile,
   deriveJSON,
   embedModifedYamlAllFile,
-  yamlExp,
-  objectQQ,
+  yamlQQ,
 ) where
 
 import Control.Monad (foldM)
 import Data.Aeson (Options (sumEncoding), ToJSON (toJSON))
-import qualified Data.Aeson.Key as Key
-import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (members, _String)
 import qualified Data.Aeson.TH as Aeson
 import qualified Data.List as List
@@ -26,11 +23,10 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Yaml (decodeThrow)
 import qualified Data.Yaml as Yaml
-import GHC.TypeLits (Symbol)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote (QuasiQuoter (QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType))
 import Language.Haskell.TH.Syntax (Lift (lift), qAddDependentFile)
-import Optics (ifoldMapOf, ifoldrOf, over, preview)
+import Optics (ifoldrOf, over, preview)
 import Util ((<:>))
 
 notDefined :: String -> QuasiQuoter
@@ -45,48 +41,47 @@ notDefined name =
   notDefinedField :: String -> String -> TH.Q a
   notDefinedField field _ = fail (field ++ " is not defined for" <:> name)
 
-objectQQ :: QuasiQuoter
-objectQQ =
-  (notDefined "objectQQ")
-    { quoteExp = \str -> do
-        lift =<< TH.runIO (decodeThrow @_ @Yaml.Object $ cs str)
-    }
-
--- yamlExp :: String -> TH.Q TH.Exp
--- yamlExp str = do
---   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
---   lift val
+yamlQQ :: QuasiQuoter
+yamlQQ = (notDefined "yamlQQ"){quoteExp = yamlExp}
 
 yamlExp :: String -> TH.Q TH.Exp
 yamlExp str = do
   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
-  row <- TH.parensT $ ifoldrOf members (const mkRow) TH.promotedNilT val
-  let r = pure row
-  vars <- TH.newName "vars"
-  TH.LamE [TH.VarP vars]
-    <$> [|
-      let varMap :: [(String, Yaml.Value)]
-          varMap =
-            Record.Advanced.toList $
-              Record.Advanced.cmap (Proxy :: Proxy ToJSON) (K . toJSON . unI) $
-                toAdvanced $
-                  project ($(TH.varE vars) :: (AllFields $r ToJSON, KnownFields $r) => Record $r)
-          replace :: Yaml.Value -> Yaml.Value
-          replace val =
-            fromMaybe (over members replace val) $ do
-              text <- preview _String val
-              field <- Text.stripPrefix prefix text
-              lookup (cs field) varMap
-       in replace val
-      |]
+  case ifoldrOf members (const toRows) [] val of
+    [] -> [|val|]
+    fields -> do
+      row <-
+        foldl
+          ( \acc field ->
+              [t|
+                (($(TH.litT . TH.strTyLit . cs $ field) ':= $(TH.varT =<< TH.newName "a")) ': $acc)
+                |]
+          )
+          TH.promotedNilT
+          fields
+      let r = pure row
+      vars <- TH.newName "vars"
+      TH.LamE [TH.VarP vars]
+        <$> [|
+          let replace ::
+                (AllFields $r ToJSON, KnownFields $r) => Record $r -> Yaml.Value -> Yaml.Value
+              replace vars val =
+                fromMaybe (over members (replace vars) val) $ do
+                  text <- preview _String val
+                  field <- Text.stripPrefix prefix text
+                  lookup (cs field) $
+                    Record.Advanced.toList $
+                      Record.Advanced.cmap (Proxy :: Proxy ToJSON) (K . toJSON . unI) $
+                        toAdvanced vars
+           in replace (project $(TH.varE vars)) val
+          |]
  where
   prefix = "$"
-  mkRow :: Yaml.Value -> TH.Q TH.Type -> TH.Q TH.Type
-  mkRow val acc = fromMaybe acc $ do
+  toRows :: Yaml.Value -> [Text] -> [Text]
+  toRows val acc = fromMaybe (ifoldrOf members (const toRows) acc val) $ do
     text <- preview _String val
     field <- Text.stripPrefix prefix text
-    pure
-      [t|($(TH.litT . TH.strTyLit . cs $ field) ':= $(TH.varT =<< TH.newName "a")) ': ($acc)|]
+    pure . List.nub $ field : acc
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =
