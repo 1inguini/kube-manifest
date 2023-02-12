@@ -23,13 +23,14 @@ import qualified Data.Record.Anon.Advanced as Record.Advanced
 import Data.Record.Anon.Simple (Record, toAdvanced)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Yaml (decodeThrow)
 import qualified Data.Yaml as Yaml
 import GHC.TypeLits (Symbol)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote (QuasiQuoter (QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType))
 import Language.Haskell.TH.Syntax (Lift (lift), qAddDependentFile)
-import Optics (over, preview)
+import Optics (ifoldMapOf, ifoldrOf, over, preview)
 import Util ((<:>))
 
 notDefined :: String -> QuasiQuoter
@@ -56,31 +57,41 @@ objectQQ =
 --   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
 --   lift val
 
-yamlExp :: [String] -> String -> TH.Q TH.Exp
-yamlExp varNames str = do
+yamlExp :: String -> TH.Q TH.Exp
+yamlExp str = do
   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
-  row <-
-    TH.parensT
-      $ foldM
-        ( \exp field -> do
-            [t|($(TH.litT $ TH.strTyLit field) ':= $(TH.varT =<< TH.newName "a")) ': ($(pure exp))|]
-        )
-        TH.PromotedNilT
-      $ List.reverse varNames
+  row <- TH.parensT $ collectVars val
   let r = pure row
   vars <- TH.newName "vars"
   TH.LamE [TH.VarP vars]
     <$> [|
-      let replace :: (AllFields $r ToJSON, KnownFields $r) => Record $r -> Yaml.Value -> Yaml.Value
-          replace vars val =
-            fromMaybe (over members (replace vars) val) $ do
+      let varMap :: [(String, Yaml.Value)]
+          varMap =
+            Record.Advanced.toList $
+              Record.Advanced.cmap (Proxy :: Proxy ToJSON) (K . toJSON . unI) $
+                toAdvanced $
+                  project ($(TH.varE vars) :: (AllFields $r ToJSON, KnownFields $r) => Record $r)
+          replace :: Yaml.Value -> Yaml.Value
+          replace val =
+            fromMaybe (over members replace val) $ do
               text <- preview _String val
-              lookup (cs text) $
-                Record.Advanced.toList $
-                  Record.Advanced.cmap (Proxy :: Proxy ToJSON) (K . toJSON . unI) $
-                    toAdvanced vars
-       in replace $(TH.varE vars) val
+              field <- Text.stripPrefix prefix text
+              lookup (cs field) varMap
+       in replace val
       |]
+ where
+  prefix = "$"
+  collectVars :: Yaml.Value -> TH.Q TH.Type
+  collectVars =
+    ifoldrOf
+      members
+      ( \_ val acc -> fromMaybe acc $ do
+          text <- preview _String val
+          field <- Text.stripPrefix prefix text
+          pure
+            [t|($(TH.litT . TH.strTyLit . cs $ field) ':= $(TH.varT =<< TH.newName "a")) ': ($acc)|]
+      )
+      TH.promotedNilT
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =

@@ -26,7 +26,7 @@ import qualified Util.Manifest as Util
 
 openebs :: [Yaml]
 openebs =
-  let ?name = Util.noNamespace
+  let ?namespace = Util.noNamespace
       ?app = "openebs"
    in [ Util.manifest
           [yamlQQ|
@@ -53,7 +53,6 @@ certManager =
       ?app = "cert-manager"
    in [ Util.manifest $
           $( yamlExp
-              ["_token"]
               [here|
                 apiVersion: v1
                 kind: Secret
@@ -64,10 +63,10 @@ certManager =
                   labels:
                     app: cert-manager
                 stringData:
-                  api-token: _token
+                  api-token: $token
               |]
            )
-            ANON{_token = Aeson.String cloudflareOriginCAKey}
+            ANON{token = Aeson.String cloudflareOriginCAKey}
       , Util.manifest
           [yamlQQ|
             apiVersion: cert-manager.io/v1
@@ -252,38 +251,31 @@ registry =
    in [ Util.helmValues
           ANON{chart = "harbor/harbor", appLabel = "app"}
           $ $( yamlExp
-                [ "_annotations"
-                , "_domain"
-                , "_notary"
-                , "_app"
-                , "_notarySecret"
-                , "_url"
-                ]
                 [here|
                     expose:
                       ingress:
-                        annotations: _annotations
+                        annotations: $annotations
                         hosts:
-                          core: _domain
-                          notary: _notary
+                          core: $domain
+                          notary: $notary
                       tls:
                         certSource: secret
                         secret:
-                          secretName: _app
-                          notarySecretName: _notarySecret
-                    caSecretName: _app
-                    externalURL: _url
+                          secretName: $app
+                          notarySecretName: $notarySecret
+                    caSecretName: $app
+                    externalURL: $url
                     updateStrategy:
                       type: Recreate
                   |]
              )
             ANON
-              { _annotations = Util.ingressContourTlsAnnotations
-              , _domain = Util.domain
-              , _notary = "notary." <> Util.domain
-              , _app = Aeson.String ?app
-              , _notarySecret = "notary-" <> ?app
-              , _url = "https://" <> Util.domain
+              { annotations = Util.ingressContourTlsAnnotations
+              , app = Aeson.String ?app
+              , domain = Util.domain
+              , notary = "notary." <> Util.domain
+              , notarySecret = "notary-" <> ?app
+              , url = "https://" <> Util.domain
               }
       ]
 
