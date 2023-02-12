@@ -60,7 +60,7 @@ objectQQ =
 yamlExp :: String -> TH.Q TH.Exp
 yamlExp str = do
   val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
-  row <- TH.parensT $ collectVars val
+  row <- TH.parensT $ ifoldrOf members (const mkRow) TH.promotedNilT val
   let r = pure row
   vars <- TH.newName "vars"
   TH.LamE [TH.VarP vars]
@@ -81,17 +81,12 @@ yamlExp str = do
       |]
  where
   prefix = "$"
-  collectVars :: Yaml.Value -> TH.Q TH.Type
-  collectVars =
-    ifoldrOf
-      members
-      ( \_ val acc -> fromMaybe acc $ do
-          text <- preview _String val
-          field <- Text.stripPrefix prefix text
-          pure
-            [t|($(TH.litT . TH.strTyLit . cs $ field) ':= $(TH.varT =<< TH.newName "a")) ': ($acc)|]
-      )
-      TH.promotedNilT
+  mkRow :: Yaml.Value -> TH.Q TH.Type -> TH.Q TH.Type
+  mkRow val acc = fromMaybe acc $ do
+    text <- preview _String val
+    field <- Text.stripPrefix prefix text
+    pure
+      [t|($(TH.litT . TH.strTyLit . cs $ field) ':= $(TH.varT =<< TH.newName "a")) ': ($acc)|]
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =
