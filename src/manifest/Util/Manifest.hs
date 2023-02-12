@@ -45,6 +45,7 @@ module Util.Manifest (
   v1,
   volumeMount,
   workload,
+  issuer,
 ) where
 
 import Control.Monad.State.Strict (MonadState, modify)
@@ -58,8 +59,8 @@ import Data.Record.Anon.Simple (Record, insert, merge, project)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import Optics (A_Setter, Is, Optic', over, set, view, (%))
-import Secret (host)
-import TH (deriveJSON)
+import Secret (cloudflareOriginCAKey, host)
+import TH (deriveJSON, yamlQQ)
 
 -- import Data.
 -- import Manifest.Io.K8s.Api.Core.V1 (Namespace)
@@ -310,10 +311,44 @@ data PathType
 clusterIssuer :: Text
 clusterIssuer = "1inguini-ca-cluster-issuer"
 
+issuer :: (?namespace :: Text, ?app :: Text) => [Yaml]
+issuer =
+  manifest
+    . ($ ANON{namespace = ?namespace, app = ?app})
+    <$> [ [yamlQQ|
+            apiVersion: v1
+            kind: Secret
+            type: Opaque
+            metadata:
+              namespace: ?namespace
+              name: cloudflare-origin-ca-key
+              labels:
+                app: ?app
+            stringData:
+              key: $key
+          |]
+            . merge ANON{key = Aeson.String cloudflareOriginCAKey}
+        , [yamlQQ|
+            apiVersion: cert-manager.k8s.cloudflare.com/v1
+            kind: OriginIssuer
+            metadata:
+              name: cloudflare-origin-issuer
+              namespace: $namespace
+              labels:
+                app: $app
+            spec:
+              requestType: OriginECC
+              auth:
+                serviceKeyRef:
+                  name: cloudflare-origin-ca-key
+                  key: key
+          |]
+        ]
+
 ingressContourTlsAnnotations :: KeyMap Text
 ingressContourTlsAnnotations =
   KeyMap.fromList
-    [ ("cert-manager.io/cluster-issuer", clusterIssuer)
+    [ ("cert-manager.io/issuer", "cloudflare-origin-issuer")
     , ("ingress.kubernetes.io/force-ssl-redirect", "true")
     ]
 
