@@ -320,10 +320,10 @@ issuer =
             kind: Secret
             type: Opaque
             metadata:
-              namespace: ?namespace
+              namespace: $namespace
               name: cloudflare-origin-ca-key
               labels:
-                app: ?app
+                app: $app
             stringData:
               key: $key
           |]
@@ -349,6 +349,8 @@ ingressContourTlsAnnotations :: KeyMap Text
 ingressContourTlsAnnotations =
   KeyMap.fromList
     [ ("cert-manager.io/issuer", "cloudflare-origin-issuer")
+    , ("cert-manager.io/issuer-kind", "OriginIssuer")
+    , ("cert-manager.io/issuer-group", "cert-manager.k8s.cloudflare.com")
     , ("ingress.kubernetes.io/force-ssl-redirect", "true")
     ]
 

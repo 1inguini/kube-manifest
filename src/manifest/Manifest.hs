@@ -49,90 +49,6 @@ openebs =
           |]
       ]
 
-certManager :: [Yaml]
-certManager =
-  let ?namespace = "cert-manager"
-      ?app = "cert-manager"
-   in [ Util.manifest $
-          [yamlQQ|
-            apiVersion: v1
-            kind: Secret
-            type: Opaque
-            metadata:
-              namespace: cert-manager
-              name: cloudflare-origin-ca-key
-              labels:
-                app: cert-manager
-            stringData:
-              api-token: $token
-          |]
-            ANON{token = Aeson.String cloudflareOriginCAKey}
-      , Util.manifest
-          [yamlQQ|
-            apiVersion: cert-manager.io/v1
-            kind: ClusterIssuer
-            metadata:
-              # namespace: cert-manager
-              name: 1inguini-ca-cluster-issuer
-              labels:
-                app: cert-manager
-            spec:
-              acme:
-                # You must replace this email address with your own.
-                # Let's Encrypt will use this to contact you about expiring
-                # certificates, and issues related to your account.
-                email: 9647142@gmail.com
-                server: https://acme-staging-v02.api.letsencrypt.org/directory
-                privateKeySecretRef:
-                  # Secret resource that will be used to store the account's private key.
-                  name: letsencrypt-issuer-account-key
-                solvers:
-                - http01:
-                    ingress: {}
-                # - dns01:
-                #     cloudflare:
-                #       apiTokenSecretRef:
-                #         name: cloudflare-api-token
-                #         key: api-token
-          |]
-          -- , Util.manifest
-          --     [yamlQQ|
-          --       apiVersion: cert-manager.io/v1
-          --       kind: Certificate
-          --       metadata:
-          --         namespace: cert-manager
-          --         name: 1inguini-ca
-          --         labels:
-          --           app: cert-manager
-          --       spec:
-          --         duration: 2160h # 90d
-          --         renewBefore: 360h # 15d
-          --         isCA: true
-          --         secretName: 1inguini-ca
-          --         privateKey:
-          --           algorithm: ECDSA
-          --           size: 256
-          --         dnsNames:
-          --         - 1inguini.com
-          --         issuerRef:
-          --           name: letsencrypt-issuer
-          --           kind: Issuer
-          --           group: cert-manager.io
-          --     |]
-          -- , Util.manifest
-          --     [yamlQQ|
-          --       apiVersion: cert-manager.io/v1
-          --       kind: ClusterIssuer
-          --       metadata:
-          --         name: 1inguini-ca-cluster-issuer
-          --         labels:
-          --           app: cert-manager
-          --       spec:
-          --         ca:
-          --           secretName: 1inguini-ca
-          --     |]
-      ]
-
 -- config for coredns
 dns :: [Yaml]
 dns =
@@ -248,9 +164,10 @@ registry :: [Yaml]
 registry =
   let ?namespace = "registry"
       ?app = "harbor"
-   in [ Util.helmValues
-          ANON{chart = "harbor/harbor", appLabel = "app"}
-          $ [yamlQQ|
+   in Util.issuer
+        <> [ Util.helmValues
+              ANON{chart = "harbor/harbor", appLabel = "app"}
+              $ [yamlQQ|
               expose:
                 ingress:
                   annotations: $annotations
@@ -267,15 +184,15 @@ registry =
               updateStrategy:
                 type: Recreate
             |]
-            ANON
-              { annotations = Util.ingressContourTlsAnnotations
-              , app = Aeson.String ?app
-              , domain = Util.domain
-              , notary = "notary." <> Util.domain
-              , notarySecret = "notary-" <> ?app
-              , url = "https://" <> Util.domain
-              }
-      ]
+                ANON
+                  { annotations = Util.ingressContourTlsAnnotations
+                  , app = Aeson.String ?app
+                  , domain = Util.domain
+                  , notary = "notary." <> Util.domain
+                  , notarySecret = "notary-" <> ?app
+                  , url = "https://" <> Util.domain
+                  }
+           ]
 
 gitbucket :: [Yaml]
 gitbucket =
@@ -288,79 +205,79 @@ gitbucket =
           databaseDataPath = "/var/lib/mysql/"
           mariadbVersion = "latest" -- "10.9.4-2"
           gitbucketVersion = "latest" -- 4.38.4
-       in [ Util.manifest Util.namespace
-          , Util.manifest $
-              Util.statefulSet
-                ANON
-                  { initContainers =
-                      [ toJSON $
-                          Util.name homeInit $
-                            Util.container
-                              (Util.registry <> "gitbucket/home-init:latest")
-                              ANON{volumeMounts = [Util.name home $ Util.volumeMount "/mnt/"]}
-                      ]
-                  , containers =
-                      [ toJSON $
-                          Util.container
-                            (Util.registry <> "gitbucket/main:" <> gitbucketVersion)
-                            ANON
-                              { ports = [Util.containerPort 8080]
-                              , livenessProbe = Util.httpGetProbe "/api/v3"
-                              , readinessProbe = Util.httpGetProbe "/api/v3"
-                              , volumeMounts =
-                                  [ toJSON $ Util.volumeMount homePath
-                                  , toJSON $
-                                      Util.name home $
-                                        Util.volumeMount (homePath <> "plugins")
-                                          `merge` ANON{subPath = "plugins" :: Text}
-                                  , toJSON $
-                                      Util.name home $
-                                        Util.volumeMount (homePath <> "database.conf")
-                                          `merge` ANON{subPath = "database.conf" :: Text}
-                                  , toJSON $
-                                      Util.name database $
-                                        Util.volumeMount databaseDataPath
-                                          `merge` ANON{subPath = "upperdir" :: Text}
-                                  ]
-                              }
-                      , toJSON $
-                          Util.name (database <> "-data") $
-                            Util.container
-                              (Util.registry <> "gitbucket/mariadb-datadir:" <> mariadbVersion)
-                              ANON
-                                { securityContext = ANON{privileged = True}
-                                , lifecycle =
-                                    ANON
-                                      { preStop =
-                                          ANON{exec = ANON{command = ["umount", "/mnt/upperdir"] :: [Text]}}
-                                      }
-                                , readinessProbe = Util.execCommandProbe ["test", "-e", "/mnt/upperdir/test"]
-                                , volumeMounts =
-                                    [ Util.name database $
-                                        Util.volumeMount "/mnt"
-                                          `merge` ANON{mountPropagation = "Bidirectional" :: Text}
-                                    ]
-                                }
-                      ]
-                  , volumes =
-                      [ toJSON Util.persistentVolumeClaimVolume
-                      , toJSON $ Util.name home Util.emptyDirVolume
-                      , toJSON $ Util.name database Util.persistentVolumeClaimVolume
-                      ]
-                  , securityContext = ANON{fsGroup = fromEnum nonrootGid}
-                  }
-                [ Util.openebsLvmClaim "5Gi"
-                , Util.name database $ Util.openebsLvmClaim "1Gi"
-                ]
-          , Util.manifest $ Util.service ANON{ports = [Util.httpServicePort]}
-          , Util.manifest $ Util.ingressContourTls [Util.ingressRule "/"]
-          ]
+       in Util.issuer
+            <> [ Util.manifest Util.namespace
+               , Util.manifest $
+                  Util.statefulSet
+                    ANON
+                      { initContainers =
+                          [ toJSON $
+                              Util.name homeInit $
+                                Util.container
+                                  (Util.registry <> "gitbucket/home-init:latest")
+                                  ANON{volumeMounts = [Util.name home $ Util.volumeMount "/mnt/"]}
+                          ]
+                      , containers =
+                          [ toJSON $
+                              Util.container
+                                (Util.registry <> "gitbucket/main:" <> gitbucketVersion)
+                                ANON
+                                  { ports = [Util.containerPort 8080]
+                                  , livenessProbe = Util.httpGetProbe "/api/v3"
+                                  , readinessProbe = Util.httpGetProbe "/api/v3"
+                                  , volumeMounts =
+                                      [ toJSON $ Util.volumeMount homePath
+                                      , toJSON $
+                                          Util.name home $
+                                            Util.volumeMount (homePath <> "plugins")
+                                              `merge` ANON{subPath = "plugins" :: Text}
+                                      , toJSON $
+                                          Util.name home $
+                                            Util.volumeMount (homePath <> "database.conf")
+                                              `merge` ANON{subPath = "database.conf" :: Text}
+                                      , toJSON $
+                                          Util.name database $
+                                            Util.volumeMount databaseDataPath
+                                              `merge` ANON{subPath = "upperdir" :: Text}
+                                      ]
+                                  }
+                          , toJSON $
+                              Util.name (database <> "-data") $
+                                Util.container
+                                  (Util.registry <> "gitbucket/mariadb-datadir:" <> mariadbVersion)
+                                  ANON
+                                    { securityContext = ANON{privileged = True}
+                                    , lifecycle =
+                                        ANON
+                                          { preStop =
+                                              ANON{exec = ANON{command = ["umount", "/mnt/upperdir"] :: [Text]}}
+                                          }
+                                    , readinessProbe = Util.execCommandProbe ["test", "-e", "/mnt/upperdir/test"]
+                                    , volumeMounts =
+                                        [ Util.name database $
+                                            Util.volumeMount "/mnt"
+                                              `merge` ANON{mountPropagation = "Bidirectional" :: Text}
+                                        ]
+                                    }
+                          ]
+                      , volumes =
+                          [ toJSON Util.persistentVolumeClaimVolume
+                          , toJSON $ Util.name home Util.emptyDirVolume
+                          , toJSON $ Util.name database Util.persistentVolumeClaimVolume
+                          ]
+                      , securityContext = ANON{fsGroup = fromEnum nonrootGid}
+                      }
+                    [ Util.openebsLvmClaim "5Gi"
+                    , Util.name database $ Util.openebsLvmClaim "1Gi"
+                    ]
+               , Util.manifest $ Util.service ANON{ports = [Util.httpServicePort]}
+               , Util.manifest $ Util.ingressContourTls [Util.ingressRule "/"]
+               ]
 
 yamls :: [Yaml]
 yamls =
   mconcat
-    [ certManager
-    , dns
+    [ dns
     , gitbucket
     , kubernetesDashboard
     , openebs
