@@ -27,7 +27,6 @@ import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote (QuasiQuoter (QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType))
 import Language.Haskell.TH.Syntax (Lift (lift), qAddDependentFile)
 import Optics (ifoldrOf, over, preview)
-import Util ((<:>))
 
 notDefined :: String -> QuasiQuoter
 notDefined name =
@@ -39,7 +38,7 @@ notDefined name =
     }
  where
   notDefinedField :: String -> String -> TH.Q a
-  notDefinedField field _ = fail (field ++ " is not defined for" <:> name)
+  notDefinedField field _ = fail (field <> " is not defined for " <> name)
 
 yamlQQ :: QuasiQuoter
 yamlQQ = (notDefined "yamlQQ"){quoteExp = yamlExp}

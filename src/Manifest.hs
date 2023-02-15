@@ -22,9 +22,8 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Secret
 import TH (yamlQQ)
 import Text.Heredoc (here)
-import Util (nonrootGid)
-import Util.Manifest (Yaml)
-import qualified Util.Manifest as Util
+import Util (Yaml, nonrootGid)
+import qualified Util
 
 openebs :: [Yaml]
 openebs =
@@ -94,7 +93,7 @@ dns =
                   , volumes = [Util.configMapVolume]
                   }
           , Util.manifest $
-              Util.configMap (KeyMap.singleton "Corefile" ($(embedStringFile "src/manifest/dns/Corefile") :: Text))
+              Util.configMap (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
           , Util.manifest $
               Util.service $
                 ANON

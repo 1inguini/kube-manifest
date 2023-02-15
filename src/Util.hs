@@ -1,4 +1,4 @@
-module Util.Manifest (
+module Util (
   Manifest,
   Yaml,
   YamlType (..),
@@ -46,7 +46,16 @@ module Util.Manifest (
   volumeMount,
   workload,
   issuer,
+  rootGid,
+  rootUid,
+  rootOwn,
+  nonrootGid,
+  nonrootUid,
+  nonrootOwn,
 ) where
+
+import Secret (cloudflareOriginCAKey, host)
+import TH (deriveJSON, yamlQQ)
 
 import Control.Monad.State.Strict (MonadState, modify)
 import Data.Aeson (ToJSON (toJSON))
@@ -59,12 +68,7 @@ import Data.Record.Anon.Simple (Record, insert, merge, project)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import Optics (A_Setter, Is, Optic', over, set, view, (%))
-import Secret (cloudflareOriginCAKey, host)
-import TH (deriveJSON, yamlQQ)
-
--- import Data.
--- import Manifest.Io.K8s.Api.Core.V1 (Namespace)
--- import Manifest.Io.K8s.Apimachinery.Pkg.Apis.Meta.V1 (ObjectMeta (..))
+import System.Posix (GroupID, UserID)
 
 registry :: Text
 registry = "registry." <> host <> "/library/"
@@ -111,6 +115,22 @@ named = ANON{name = ?name}
 
 labelSelector :: (?app :: Text) => Record _
 labelSelector = ANON{selector = ANON{app = ?app}}
+
+type Owner = (UserID, GroupID)
+
+nonrootOwn :: Owner
+nonrootOwn = (nonrootUid, nonrootGid)
+nonrootUid :: UserID
+nonrootUid = 65532
+nonrootGid :: GroupID
+nonrootGid = 65532
+
+rootOwn :: Owner
+rootOwn = (rootUid, rootGid)
+rootUid :: UserID
+rootUid = 0
+rootGid :: GroupID
+rootGid = 0
 
 type ObjectMeta =
   [ "name" := Text
