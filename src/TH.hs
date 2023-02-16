@@ -1,15 +1,14 @@
 module TH (
+  deriveJSON,
   embedFromYamlAllFile,
   embedFromYamlFile,
-  embedYamlFile,
-  embedYamlAllFile,
-  embedModifedYamlFile,
-  deriveJSON,
   embedModifedYamlAllFile,
-  yamlQQ,
+  embedModifedYamlFile,
+  embedYamlAllFile,
+  embedYamlFile,
+  objQQ,
 ) where
 
-import Control.Monad (foldM)
 import Data.Aeson (Options (sumEncoding), ToJSON (toJSON))
 import Data.Aeson.Optics (members, _String)
 import qualified Data.Aeson.TH as Aeson
@@ -17,7 +16,7 @@ import qualified Data.List as List
 import Data.Maybe (fromMaybe)
 import Data.Record.Anon
 import qualified Data.Record.Anon.Advanced as Record.Advanced
-import Data.Record.Anon.Simple (Record, toAdvanced)
+import Data.Record.Anon.Simple (Record, project, toAdvanced)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -40,14 +39,14 @@ notDefined name =
   notDefinedField :: String -> String -> TH.Q a
   notDefinedField field _ = fail (field <> " is not defined for " <> name)
 
-yamlQQ :: QuasiQuoter
-yamlQQ = (notDefined "yamlQQ"){quoteExp = yamlExp}
+objQQ :: QuasiQuoter
+objQQ = (notDefined "objQQ"){quoteExp = objExp}
 
-yamlExp :: String -> TH.Q TH.Exp
-yamlExp str = do
-  val <- TH.runIO $ decodeThrow @_ @Yaml.Value $ cs str
-  case ifoldrOf members (const toRows) [] val of
-    [] -> [|val|]
+objExp :: String -> TH.Q TH.Exp
+objExp str = do
+  obj <- TH.runIO $ decodeThrow @_ @Yaml.Object $ cs str
+  case List.nub $ concatMap (`toRows` []) obj of
+    [] -> [|obj|]
     fields -> do
       row <-
         foldl
@@ -72,7 +71,7 @@ yamlExp str = do
                     Record.Advanced.toList $
                       Record.Advanced.cmap (Proxy :: Proxy ToJSON) (K . toJSON . unI) $
                         toAdvanced vars
-           in replace (project $(TH.varE vars)) val
+           in replace (project $(TH.varE vars)) <$> obj
           |]
  where
   prefix = "$"
@@ -80,7 +79,7 @@ yamlExp str = do
   toRows val acc = fromMaybe (ifoldrOf members (const toRows) acc val) $ do
     text <- preview _String val
     field <- Text.stripPrefix prefix text
-    pure . List.nub $ field : acc
+    pure $ field : acc
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =

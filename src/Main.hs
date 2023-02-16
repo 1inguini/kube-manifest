@@ -1,32 +1,23 @@
 module Main (main) where
 
-import Manifest (projects, yamls)
-import Util (Helm, Project, Yaml, YamlType (HelmValues, Manifest), defaultHelm, encodeAll)
-import qualified Util
+import Manifest (projects)
+import Util (Helm, Project, defaultHelm, encodeAll)
 
-import Control.Applicative ((<|>))
 import Control.Exception.Safe (throwString)
-import Control.Monad (unless, void)
-import Control.Monad.State (MonadState (get), execState)
+import Control.Monad (unless)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Optics (key, _Key, _Object, _String)
+import Data.Aeson.Optics (_String)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
-import Data.Foldable (foldlM, traverse_)
-import Data.Maybe (fromMaybe)
+import Data.Foldable (traverse_)
 import Data.Record.Anon
 import Data.Record.Anon.Simple (Record)
-import Data.String (IsString (fromString))
 import Data.String.Conversions (cs)
-import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.IO as Text
 import qualified Data.Yaml as Yaml
-import Optics (Lens', modifying, preview, view, (%), _head)
-import System.Directory (createDirectory, createDirectoryIfMissing, removeDirectoryRecursive)
+import Optics (Lens', preview, view)
+import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath ((</>))
-import System.Process (readProcess)
 
 -- processYaml :: [FilePath] -> Yaml -> IO [FilePath]
 -- processYaml written yaml =
@@ -114,10 +105,10 @@ generate = traverse_ processProject projects
 processProject :: Project -> IO ()
 processProject proj = do
   let werf = encodeAll $ view #project proj : view #images proj
-  projectName <- case Aeson.fromJSON @(Record '["project" := String]) $ view #project proj of
-    Aeson.Error e -> throwString e
-    Aeson.Success proj -> pure $ view #project proj
-  let dir = "project" </> projectName
+  projectName <- maybe (throwString "no field `project`") pure $ do
+    proj <- KeyMap.lookup "project" $ view #project proj
+    preview _String proj
+  let dir = "project" </> cs projectName
   removeDirectoryRecursive dir
   createDirectoryIfMissing True dir
   ByteString.writeFile (dir <> "werf.yaml") werf
