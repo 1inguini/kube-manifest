@@ -1,5 +1,7 @@
 module Util (
+  Helm,
   Manifest,
+  Project,
   Yaml,
   YamlType (..),
   annotate,
@@ -9,6 +11,7 @@ module Util (
   configMapVolume,
   container,
   containerPort,
+  defaultHelm,
   deployment,
   domain,
   emptyDirVolume,
@@ -20,6 +23,7 @@ module Util (
   ingressContourTls,
   ingressContourTlsAnnotations,
   ingressRule,
+  issuer,
   labelSelector,
   manifest,
   meta,
@@ -29,12 +33,18 @@ module Util (
   named,
   namespace,
   noNamespace,
+  nonrootGid,
+  nonrootOwn,
+  nonrootUid,
   object,
   openebsLvmClaim,
   persistentVolumeClaim,
   persistentVolumeClaimVolume,
   readWriteOnce,
   registry,
+  rootGid,
+  rootOwn,
+  rootUid,
   service,
   servicePort,
   setJSON,
@@ -45,13 +55,7 @@ module Util (
   v1,
   volumeMount,
   workload,
-  issuer,
-  rootGid,
-  rootUid,
-  rootOwn,
-  nonrootGid,
-  nonrootUid,
-  nonrootOwn,
+  encodeAll,
 ) where
 
 import Secret (cloudflareOriginCAKey, host)
@@ -63,10 +67,12 @@ import qualified Data.Aeson as Aeson
 import Data.Aeson.KeyMap (KeyMap)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (AsValue (_Object), key)
+import Data.ByteString (ByteString)
 import Data.Record.Anon (AllFields, Merge, RowHasField, pattern (:=))
 import Data.Record.Anon.Simple (Record, insert, merge, project)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
+import qualified Data.Yaml as Yaml
 import Optics (A_Setter, Is, Optic', over, set, view, (%))
 import System.Posix (GroupID, UserID)
 
@@ -439,6 +445,41 @@ type Yaml =
     [ "yamlType" := YamlType
     , "value" := Aeson.Value
     ]
+
+type Helm =
+  Record
+    [ "templates" := [Aeson.Value]
+    , "crds" := [Aeson.Value]
+    , "values" := Aeson.Value
+    , "valuesSchema" := Aeson.Value
+    , "chart" := Aeson.Value
+    , "readme" := Text
+    , "license" := Text
+    , "helmignore" := Text
+    ]
+
+type Project =
+  Record
+    [ "project" := Aeson.Value
+    , "images" := [Aeson.Value]
+    , "helm" := Helm
+    ]
+
+defaultHelm :: Helm
+defaultHelm =
+  ANON
+    { templates = []
+    , crds = []
+    , values = Aeson.Null
+    , valuesSchema = Aeson.Null
+    , chart = Aeson.Null
+    , readme = mempty
+    , license = mempty
+    , helmignore = mempty
+    }
+
+encodeAll :: [Aeson.Value] -> ByteString
+encodeAll = foldl (\acc doc -> acc <> "---\n" <> doc <> "\n") mempty . fmap Yaml.encode
 
 mkYaml :: YamlType -> Aeson.Value -> Yaml
 mkYaml ty value =

@@ -1,5 +1,6 @@
 module Manifest (
   yamls,
+  projects,
 )
 where
 
@@ -22,7 +23,7 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Secret
 import TH (yamlQQ)
 import Text.Heredoc (here)
-import Util (Yaml, nonrootGid)
+import Util (Project, Yaml, nonrootGid)
 import qualified Util
 
 openebs :: [Yaml]
@@ -283,3 +284,6 @@ yamls =
     , projectcontour
     , registry
     ]
+
+projects :: [Project]
+projects = []
