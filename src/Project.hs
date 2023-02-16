@@ -1,4 +1,4 @@
-module Manifest (
+module Project (
   yamls,
   projects,
 )
