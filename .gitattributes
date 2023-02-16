@@ -1,3 +1,4 @@
 secret/** filter=git-crypt diff=git-crypt
 manifest/** filter=git-crypt diff=git-crypt
+project/** filter=git-crypt diff=git-crypt
 values/** filter=git-crypt diff=git-crypt

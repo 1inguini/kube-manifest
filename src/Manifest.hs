@@ -26,7 +26,7 @@ import Text.Heredoc (here)
 import Util (Project, Yaml, defaultHelm, defineHelm, meta, nonrootGid, werfProject)
 import qualified Util
 
-openebs :: Project -- [Yaml]
+openebs :: Project
 openebs =
   let ?app = "openebs"
       ?name = "openebs-lvmpv"
@@ -59,25 +59,6 @@ annotations:
                     ]
                 }
         }
-
--- [ Util.manifest
---     [yamlQQ|
---       apiVersion: storage.k8s.io/v1
---       kind: StorageClass
---       metadata:
---         name: openebs-lvmpv
---         labels:
---           app: openebs
---         annotations:
---           storageclass.kubernetes.io/is-default-class: "true"
---       allowVolumeExpansion: true
---       parameters:
---         storage: "lvm"
---         volgroup: "openebs"
---         fstype: "ext4"
---       provisioner: local.csi.openebs.io
---     |]
--- ]
 
 -- -- config for coredns
 -- dns :: [Yaml]
@@ -317,4 +298,4 @@ yamls = []
 --   ]
 
 projects :: [Project]
-projects = []
+projects = [openebs]

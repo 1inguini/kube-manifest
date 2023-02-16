@@ -486,7 +486,7 @@ werfProject =
 project: $project
 configVersion: 1
 deploy:
-  namespace: [[ project ]]
+  namespace: $project
 |]
     ANON{project = ?app}
 
