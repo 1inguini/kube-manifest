@@ -104,7 +104,7 @@ generate :: IO ()
 generate = traverse_ processProject projects
 
 projectDir :: FilePath
-projectDir = "project"
+projectDir = "werf"
 
 processProject :: Project -> IO ()
 processProject proj = do
