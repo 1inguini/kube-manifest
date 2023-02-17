@@ -23,7 +23,7 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Secret
 import TH (objQQ)
 import Text.Heredoc (here)
-import Util (Project, Yaml, containerPort, defaultHelm, defineHelm, deployment, meta, nonrootGid, toObj, werfProject)
+import Util (Project, Yaml, configMapVolume, containerPort, defaultHelm, defineHelm, deployment, meta, nonrootGid, systemClusterCritical, toObj, werfProject)
 import qualified Util
 
 openebs :: Project
@@ -77,39 +77,44 @@ dns =
                   ANON
                     { templates =
                         [ deployment $
-                            toObj
-                              ANON
-                                { containers =
-                                    [ Util.container
-                                        "registry.k8s.io/coredns/coredns:v1.9.3"
-                                        $ toObj
-                                          ANON
-                                            { args = ["-conf", mountPath <> "Corefile"]
-                                            , command = ["/coredns"] :: [Text]
-                                            , ports =
-                                                ( containerPort 53 <> [objQQ|protocol: UDP|]
-                                                , metrics $ containerPort 9153
-                                                , health $ containerPort 8080
-                                                , ready $ containerPort 8081
-                                                )
-                                            , livenessProbe = health $ Util.httpGetProbe "health"
-                                            , readinessProbe = ready $ Util.httpGetProbe "ready"
-                                            , securityContext =
-                                                ANON
-                                                  { capabilities =
-                                                      [objQQ|
-add:
-  - NET_BIND_SERVICE
-drop:
-  - all
+                            [objQQ|
+containers:
+- $coredns
+priorityClassName: $critical
+volumes:
+- $configMapVolume
 |]
-                                                  , readOnlyRootFilesystem = True
-                                                  }
-                                            , volumeMounts = [Util.volumeMount mountPath]
-                                            }
-                                    ]
-                                , priorityClassName = Util.systemClusterCritical
-                                , volumes = [Util.configMapVolume]
+                              ANON
+                                { coredns =
+                                    Util.container
+                                      "registry.k8s.io/coredns/coredns:v1.9.3"
+                                      $ toObj
+                                        ANON
+                                          { args = ["-conf", mountPath <> "Corefile"]
+                                          , command = ["/coredns"] :: [Text]
+                                          , ports =
+                                              ( containerPort 53 <> [objQQ|protocol: UDP|]
+                                              , metrics $ containerPort 9153
+                                              , health $ containerPort 8080
+                                              , ready $ containerPort 8081
+                                              )
+                                          , livenessProbe = health $ Util.httpGetProbe "health"
+                                          , readinessProbe = ready $ Util.httpGetProbe "ready"
+                                          , securityContext =
+                                              ANON
+                                                { capabilities =
+                                                    [objQQ|
+add:
+- NET_BIND_SERVICE
+drop:
+- all
+|]
+                                                , readOnlyRootFilesystem = True
+                                                }
+                                          , volumeMounts = [Util.volumeMount mountPath]
+                                          }
+                                , critical = systemClusterCritical
+                                , configMapVolume = configMapVolume
                                 }
                         ]
                     }

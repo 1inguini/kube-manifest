@@ -24,6 +24,7 @@ import Data.Record.Anon.Simple (Record, project, toAdvanced)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Vector as Vector
 import Data.Yaml (decodeThrow)
 import qualified Data.Yaml as Yaml
 import qualified Language.Haskell.TH as TH
@@ -52,7 +53,7 @@ objQQ = (notDefined "objQQ"){quoteExp = objExp}
 objExp :: String -> TH.Q TH.Exp
 objExp str = do
   obj <- TH.runIO $ decodeThrow @_ @Yaml.Object $ cs str
-  case over both List.nub $ vars obj of
+  case over both List.nub $ objectSearch obj of
     ([], []) -> [|obj|]
     (vals, fields) -> do
       valTyVars <- traverse (\x -> (,) x <$> TH.newName "a") vals
@@ -110,32 +111,36 @@ objExp str = do
                         . Record.Advanced.cmap (Proxy :: Proxy ((~) Yaml.Object)) (K . unI)
                         . toAdvanced
                         $ project @_ @($fr) record
-                    step :: Yaml.Object -> Yaml.Object
-                    step = ifoldMapOf ifolded replace
-                    replace :: Key -> Yaml.Value -> Yaml.Object
-                    replace key (Yaml.Object obj) =
-                      KeyMap.singleton key . Yaml.Object $ step obj
-                    replace key str@(Yaml.String text) =
-                      KeyMap.singleton key $ fromMaybe str $ do
-                        var <- Text.stripPrefix prefix text
-                        lookup var valDict
-                    replace key Yaml.Null =
+                    objectReplace :: Yaml.Object -> Yaml.Object
+                    objectReplace = ifoldMapOf ifolded kvReplace
+                    kvReplace :: Key -> Yaml.Value -> Yaml.Object
+                    kvReplace key Yaml.Null =
                       fromMaybe (KeyMap.singleton key Yaml.Null) $ do
                         var <- Text.stripPrefix prefix $ Key.toText key
                         lookup var fieldDict
-                    replace key val = KeyMap.singleton key val
-                 in step obj
+                    kvReplace key val = KeyMap.singleton key $ valueReplace val
+                    valueReplace :: Yaml.Value -> Yaml.Value
+                    valueReplace (Yaml.Object obj) = Yaml.Object $ objectReplace obj
+                    valueReplace (Yaml.Array vec) = Yaml.Array $ valueReplace <$> vec
+                    valueReplace str@(Yaml.String text) = fromMaybe str $ do
+                      var <- Text.stripPrefix prefix text
+                      lookup var valDict
+                    valueReplace val = val
+                 in objectReplace obj
            in replace (project $(TH.varE vars)) obj
           |]
  where
   prefix = "$"
-  vars :: Yaml.Object -> ([Text], [Text])
-  vars = ifoldMapOf ifolded vars'
-  vars' :: Key -> Yaml.Value -> ([Text], [Text])
-  vars' _ (Yaml.Object obj) = vars obj
-  vars' _ (Yaml.String text) = (maybeToList $ Text.stripPrefix prefix text, mempty)
-  vars' key Yaml.Null = (mempty, maybeToList . Text.stripPrefix prefix $ Key.toText key)
-  vars' _ _ = mempty
+  objectSearch :: Yaml.Object -> ([Text], [Text])
+  objectSearch = ifoldMapOf ifolded keySearch
+  keySearch :: Key -> Yaml.Value -> ([Text], [Text])
+  keySearch key Yaml.Null = (mempty, maybeToList . Text.stripPrefix prefix $ Key.toText key)
+  keySearch _ val = valueSearch val
+  valueSearch :: Yaml.Value -> ([Text], [Text])
+  valueSearch (Yaml.Object obj) = objectSearch obj
+  valueSearch (Yaml.Array vec) = mconcat $ valueSearch <$> Vector.toList vec
+  valueSearch (Yaml.String text) = (maybeToList $ Text.stripPrefix prefix text, mempty)
+  valueSearch val = mempty
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =
