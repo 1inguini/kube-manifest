@@ -23,13 +23,12 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Secret
 import TH (objQQ)
 import Text.Heredoc (here)
-import Util (Project, Yaml, defaultHelm, defineHelm, meta, nonrootGid, werfProject)
+import Util (Project, Yaml, containerPort, defaultHelm, defineHelm, deployment, meta, nonrootGid, toObj, werfProject)
 import qualified Util
 
 openebs :: Project
 openebs =
   let ?app = "openebs"
-      ?name = "openebs-lvmpv"
    in ANON
         { project = werfProject
         , images = []
@@ -37,7 +36,8 @@ openebs =
             defineHelm
               ANON
                 { templates =
-                    [ [objQQ|
+                    [ let ?name = "openebs-lvmpv"
+                       in [objQQ|
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata: $meta
@@ -48,19 +48,73 @@ parameters:
   fstype: "ext4"
 provisioner: local.csi.openebs.io
 |]
-                        ANON
-                          { meta =
-                              meta
-                                <> [objQQ|
+                            ANON
+                              { meta =
+                                  meta
+                                    <> [objQQ|
 annotations:
   storageclass.kubernetes.io/is-default-class: "true"
 |]
-                          }
+                              }
                     ]
                 }
         }
 
--- -- config for coredns
+-- config for coredns
+dns :: Project
+dns =
+  let ?app = "dns"
+      ?name = "coredns"
+   in let mountPath = "/etc/coredns/"
+          health = Util.name "health"
+          ready = Util.name "ready"
+          metrics = Util.name "metrics"
+       in ANON
+            { project = werfProject
+            , images = []
+            , helm =
+                defineHelm
+                  ANON
+                    { templates =
+                        [ deployment $
+                            toObj
+                              ANON
+                                { containers =
+                                    [ Util.container
+                                        "registry.k8s.io/coredns/coredns:v1.9.3"
+                                        $ toObj
+                                          ANON
+                                            { args = ["-conf", mountPath <> "Corefile"]
+                                            , command = ["/coredns"] :: [Text]
+                                            , ports =
+                                                ( containerPort 53 <> [objQQ|protocol: UDP|]
+                                                , metrics $ containerPort 9153
+                                                , health $ containerPort 8080
+                                                , ready $ containerPort 8081
+                                                )
+                                            , livenessProbe = health $ Util.httpGetProbe "health"
+                                            , readinessProbe = ready $ Util.httpGetProbe "ready"
+                                            , securityContext =
+                                                ANON
+                                                  { capabilities =
+                                                      [objQQ|
+add:
+  - NET_BIND_SERVICE
+drop:
+  - all
+|]
+                                                  , readOnlyRootFilesystem = True
+                                                  }
+                                            , volumeMounts = [Util.volumeMount mountPath]
+                                            }
+                                    ]
+                                , priorityClassName = Util.systemClusterCritical
+                                , volumes = [Util.configMapVolume]
+                                }
+                        ]
+                    }
+            }
+
 -- dns :: [Yaml]
 -- dns =
 --   let ?namespace = "dns"
@@ -298,4 +352,7 @@ yamls = []
 --   ]
 
 projects :: [Project]
-projects = [openebs]
+projects =
+  [ openebs
+  , dns
+  ]

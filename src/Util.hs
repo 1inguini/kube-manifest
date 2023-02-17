@@ -11,9 +11,11 @@ module Util (
   container,
   containerPort,
   defaultHelm,
+  defineHelm,
   deployment,
   domain,
   emptyDirVolume,
+  encodeAll,
   execCommandProbe,
   helmValues,
   hostPathVolume,
@@ -50,12 +52,12 @@ module Util (
   statefulSet,
   systemClusterCritical,
   tcpSocketProbe,
+  toObj,
   v1,
   volumeMount,
-  workload,
-  encodeAll,
   werfProject,
-  defineHelm,
+  workload,
+  openebsLvmProvisioner,
 ) where
 
 import Secret (cloudflareOriginCAKey, host)
@@ -249,9 +251,9 @@ openebsLvmClaim size =
             { requests = ANON{storage = size}
             }
       }
- where
-  openebsLvmProvisioner :: Text
-  openebsLvmProvisioner = "openebs-lvmpv"
+
+openebsLvmProvisioner :: Text
+openebsLvmProvisioner = "openebs-lvmpv"
 
 service :: (?app :: Text, ?name :: Text) => Yaml.Object -> Yaml.Object
 service spec =
