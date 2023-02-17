@@ -296,9 +296,9 @@ workload ::
   podTemplateSpec ->
   Yaml.Object
 workload kind spec podTemplateSpec =
-  object kind
-    <> [objQQ|
+  [objQQ|
 apiVersion: apps/v1
+$object:  
 spec:
   replicas: 1
   selector:
@@ -309,17 +309,16 @@ spec:
     spec: $podTemplateSpec
   spec: $spec
 |]
-      ANON
-        { apiVersion = "apps/v1" :: Text
-        , name = ?name
-        , meta = meta
-        , podTemplateSpec = podTemplateSpec
-        , spec = spec
-        }
+    ANON
+      { object = object kind
+      , name = ?name
+      , meta = meta
+      , podTemplateSpec = podTemplateSpec
+      , spec = spec
+      }
 
 deployment :: (?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
-deployment =
-  workload "Deployment" ANON{strategy = Anon.insert #type ("Recreate" :: Text) ANON{}}
+deployment = workload "Deployment" [objQQ| strategy: { type: Recreate } |]
 
 statefulSet ::
   (?app :: Text, ?name :: Text) =>

@@ -76,46 +76,48 @@ dns =
                 defineHelm
                   ANON
                     { templates =
-                        [ deployment $
-                            [objQQ|
-containers:
-- $coredns
-priorityClassName: $critical
-volumes:
-- $configMapVolume
+                        [ -- deployment $
+                          [objQQ|
+$deployment:
+  containers:
+  - $coredns
+  priorityClassName: $critical
+  volumes:
+  - $configMapVolume
 |]
-                              ANON
-                                { coredns =
-                                    Util.container
-                                      "registry.k8s.io/coredns/coredns:v1.9.3"
-                                      $ toObj
-                                        ANON
-                                          { args = ["-conf", mountPath <> "Corefile"]
-                                          , command = ["/coredns"] :: [Text]
-                                          , ports =
-                                              ( containerPort 53 <> [objQQ|protocol: UDP|]
-                                              , metrics $ containerPort 9153
-                                              , health $ containerPort 8080
-                                              , ready $ containerPort 8081
-                                              )
-                                          , livenessProbe = health $ Util.httpGetProbe "health"
-                                          , readinessProbe = ready $ Util.httpGetProbe "ready"
-                                          , securityContext =
-                                              ANON
-                                                { capabilities =
-                                                    [objQQ|
+                            ANON
+                              { deployment = deployment
+                              , coredns =
+                                  Util.container
+                                    "registry.k8s.io/coredns/coredns:v1.9.3"
+                                    $ toObj
+                                      ANON
+                                        { args = ["-conf", mountPath <> "Corefile"]
+                                        , command = ["/coredns"] :: [Text]
+                                        , ports =
+                                            ( containerPort 53 <> [objQQ|protocol: UDP|]
+                                            , metrics $ containerPort 9153
+                                            , health $ containerPort 8080
+                                            , ready $ containerPort 8081
+                                            )
+                                        , livenessProbe = health $ Util.httpGetProbe "health"
+                                        , readinessProbe = ready $ Util.httpGetProbe "ready"
+                                        , securityContext =
+                                            ANON
+                                              { capabilities =
+                                                  [objQQ|
 add:
 - NET_BIND_SERVICE
 drop:
 - all
 |]
-                                                , readOnlyRootFilesystem = True
-                                                }
-                                          , volumeMounts = [Util.volumeMount mountPath]
-                                          }
-                                , critical = systemClusterCritical
-                                , configMapVolume = configMapVolume
-                                }
+                                              , readOnlyRootFilesystem = True
+                                              }
+                                        , volumeMounts = [Util.volumeMount mountPath]
+                                        }
+                              , critical = systemClusterCritical
+                              , configMapVolume = configMapVolume
+                              }
                         ]
                     }
             }

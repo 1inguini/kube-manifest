@@ -53,39 +53,36 @@ objQQ = (notDefined "objQQ"){quoteExp = objExp}
 objExp :: String -> TH.Q TH.Exp
 objExp str = do
   obj <- TH.runIO $ decodeThrow @_ @Yaml.Object $ cs str
-  case over both List.nub $ objectSearch obj of
-    ([], []) -> [|obj|]
-    (vals, fields) -> do
+  case (\(x, y, z) -> (List.nub x, List.nub y, List.nub z)) $ objectSearch obj of
+    ([], [], []) -> [|obj|]
+    (vals, fields, macros) -> do
       valTyVars <- traverse (\x -> (,) x <$> TH.newName "a") vals
-      valsRow <-
-        foldl
-          ( \acc (val, a) ->
-              [t|
-                (($(TH.litT . TH.strTyLit . cs $ val) := $(TH.varT a)) : $acc)
-                |]
-          )
-          TH.promotedNilT
-          valTyVars
-      fieldsRow <-
-        foldl
-          ( \acc field ->
-              [t|
-                (($(TH.litT . TH.strTyLit . cs $ field) := Yaml.Object) : $acc)
-                |]
-          )
-          TH.promotedNilT
-          fields
+      let prependVals acc =
+            foldl
+              (\acc (val, a) -> [t|(($(TH.litT . TH.strTyLit . cs $ val) ':= $(TH.varT a)) ': $acc)|])
+              acc
+              valTyVars
+          prependFields acc =
+            foldl
+              (\acc field -> [t|(($(TH.litT . TH.strTyLit . cs $ field) ':= Yaml.Object) ': $acc)|])
+              acc
+              fields
+          prependMacros acc =
+            foldl
+              ( \acc field ->
+                  [t|
+                    (($(TH.litT . TH.strTyLit . cs $ field) ':= (Yaml.Value -> Yaml.Object)) ': $acc)
+                    |]
+              )
+              acc
+              macros
+      valsRow <- prependVals TH.promotedNilT
+      fieldsRow <- prependFields TH.promotedNilT
+      macrosRow <- prependMacros TH.promotedNilT
       let vr = pure valsRow
           fr = pure fieldsRow
-      row <-
-        foldl
-          ( \acc field ->
-              [t|
-                (($(TH.litT . TH.strTyLit . cs $ field) := Yaml.Object) : $acc)
-                |]
-          )
-          vr
-          fields
+          mr = pure macrosRow
+      row <- prependVals . prependFields . prependMacros $ TH.promotedNilT
       let r = pure row
           sig =
             TH.forallT
@@ -111,6 +108,15 @@ objExp str = do
                         . Record.Advanced.cmap (Proxy :: Proxy ((~) Yaml.Object)) (K . unI)
                         . toAdvanced
                         $ project @_ @($fr) record
+                    macroDict :: [(Text, Yaml.Value -> Yaml.Object)]
+                    macroDict =
+                      fmap (first cs)
+                        . Record.Advanced.toList
+                        . Record.Advanced.cmap
+                          (Proxy :: Proxy ((~) (Yaml.Value -> Yaml.Object)))
+                          (K . unI)
+                        . toAdvanced
+                        $ project @_ @($mr) record
                     objectReplace :: Yaml.Object -> Yaml.Object
                     objectReplace = ifoldMapOf ifolded kvReplace
                     kvReplace :: Key -> Yaml.Value -> Yaml.Object
@@ -118,7 +124,12 @@ objExp str = do
                       fromMaybe (KeyMap.singleton key Yaml.Null) $ do
                         var <- Text.stripPrefix prefix $ Key.toText key
                         lookup var fieldDict
-                    kvReplace key val = KeyMap.singleton key $ valueReplace val
+                    kvReplace key val =
+                      let replaced = valueReplace val
+                       in fromMaybe (KeyMap.singleton key replaced) $ do
+                            var <- Text.stripPrefix prefix $ Key.toText key
+                            macro <- lookup var macroDict
+                            pure $ macro replaced
                     valueReplace :: Yaml.Value -> Yaml.Value
                     valueReplace (Yaml.Object obj) = Yaml.Object $ objectReplace obj
                     valueReplace (Yaml.Array vec) = Yaml.Array $ valueReplace <$> vec
@@ -131,16 +142,21 @@ objExp str = do
           |]
  where
   prefix = "$"
-  objectSearch :: Yaml.Object -> ([Text], [Text])
+  objectSearch ::
+    Yaml.Object ->
+    ( [Text] -- `a: $b`
+    , [Text] -- `$a: null`
+    , [Text] -- `$a: { b: c }`
+    )
   objectSearch = ifoldMapOf ifolded keySearch
-  keySearch :: Key -> Yaml.Value -> ([Text], [Text])
-  keySearch key Yaml.Null = (mempty, maybeToList . Text.stripPrefix prefix $ Key.toText key)
-  keySearch _ val = valueSearch val
-  valueSearch :: Yaml.Value -> ([Text], [Text])
+  keySearch :: Key -> Yaml.Value -> ([Text], [Text], [Text])
+  keySearch key Yaml.Null = (mempty, maybeToList . Text.stripPrefix prefix $ Key.toText key, mempty)
+  keySearch key val = valueSearch val <> (mempty, mempty, maybeToList . Text.stripPrefix prefix $ Key.toText key)
+  valueSearch :: Yaml.Value -> ([Text], [Text], [Text])
   valueSearch (Yaml.Object obj) = objectSearch obj
   valueSearch (Yaml.Array vec) = mconcat $ valueSearch <$> Vector.toList vec
-  valueSearch (Yaml.String text) = (maybeToList $ Text.stripPrefix prefix text, mempty)
-  valueSearch val = mempty
+  valueSearch (Yaml.String text) = (maybeToList $ Text.stripPrefix prefix text, mempty, mempty)
+  valueSearch _ = mempty
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =

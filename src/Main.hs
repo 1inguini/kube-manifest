@@ -33,6 +33,7 @@ processProject proj = do
     proj <- KeyMap.lookup "project" $ view #project proj
     preview _String proj
   let dir = projectDir </> cs projectName
+  _ <- try @_ @IOError $ removeDirectoryRecursive dir
   createDirectoryIfMissing True dir
   ByteString.writeFile (dir </> "werf.yaml") werf
   putStrLn $ "# wrote to: " <> dir </> "werf.yaml"
@@ -59,6 +60,5 @@ processHelm dir helm = do
 
 main :: IO ()
 main = do
-  _ <- try @_ @IOError $ removeDirectoryRecursive projectDir
   createDirectoryIfMissing True projectDir
   generate
