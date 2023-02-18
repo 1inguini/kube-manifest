@@ -18,6 +18,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding.Base64 (encodeBase64)
 import Optics (ix, modifying, over, review, set, (%))
+import System.FilePath ((</>))
 
 import qualified Data.Aeson.KeyMap as KeyMap
 import Secret
@@ -26,16 +27,21 @@ import Text.Heredoc (here)
 import Util (
   Project,
   Yaml,
+  configMap,
   configMapVolume,
   containerPort,
   defaultHelm,
   defineHelm,
   deployment,
+  httpGetProbe,
   meta,
   nonrootGid,
   openebsLvmProvisioner,
+  service,
+  servicePort,
   systemClusterCritical,
   toObj,
+  volumeMount,
   werfProject,
  )
 import qualified Util
@@ -94,44 +100,58 @@ dns =
                           [objQQ|
 $deployment:
   containers:
-  - $coredns
-  priorityClassName: $critical
+  - $coredns:
+    $corednsConf:
+  priorityClassName: $systemClusterCritical
   volumes:
   - $configMapVolume
 |]
                             ANON
                               { deployment = deployment
-                              , coredns =
-                                  Util.container
-                                    "registry.k8s.io/coredns/coredns:v1.9.3"
-                                    $ toObj
-                                      ANON
-                                        { args = ["-conf", mountPath <> "Corefile"]
-                                        , command = ["/coredns"] :: [Text]
-                                        , ports =
-                                            ( containerPort 53 <> [objQQ|protocol: UDP|]
-                                            , metrics $ containerPort 9153
-                                            , health $ containerPort 8080
-                                            , ready $ containerPort 8081
-                                            )
-                                        , livenessProbe = health $ Util.httpGetProbe "health"
-                                        , readinessProbe = ready $ Util.httpGetProbe "ready"
-                                        , securityContext =
-                                            ANON
-                                              { capabilities =
-                                                  [objQQ|
-add:
-- NET_BIND_SERVICE
-drop:
-- all
-|]
-                                              , readOnlyRootFilesystem = True
-                                              }
-                                        , volumeMounts = [Util.volumeMount mountPath]
-                                        }
-                              , critical = systemClusterCritical
+                              , systemClusterCritical = systemClusterCritical
                               , configMapVolume = configMapVolume
+                              , coredns = Util.container "registry.k8s.io/coredns/coredns:v1.9.3"
+                              , corednsConf =
+                                  toObj
+                                    ANON
+                                      { args = ["-conf", mountPath </> "Corefile"]
+                                      , command = ["/coredns"] :: [Text]
+                                      , ports =
+                                          ( containerPort 53 <> [objQQ|protocol: UDP|]
+                                          , metrics $ containerPort 9153
+                                          , health $ containerPort 8080
+                                          , ready $ containerPort 8081
+                                          )
+                                      , livenessProbe = health $ httpGetProbe "health"
+                                      , readinessProbe = ready $ httpGetProbe "ready"
+                                      , securityContext =
+                                          [objQQ|
+capabilities:
+  add:
+  - NET_BIND_SERVICE
+  drop:
+  - all
+readOnlyRootFilesystem: true
+|]
+                                      , volumeMounts = [volumeMount mountPath]
+                                      }
                               }
+                        , configMap
+                            (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
+                        , [objQQ|
+$service:
+  externalIPs:
+  - $externalIp
+  ports:
+  - $port:
+    protocol: UDP
+|]
+                            ANON
+                              { service = service
+                              , externalIp = externalIp
+                              , port = servicePort 53
+                              }
+                        , metrics $ service ANON{ports = [Util.servicePort 80]}
                         ]
                     }
             }

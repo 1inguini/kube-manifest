@@ -172,17 +172,6 @@ metadata: $meta
 |]
     ANON{kind = kind, meta = meta}
 
-type Object =
-  [ "apiVersion" := Text
-  , "kind" := Text
-  , "metadata" := Yaml.Object
-  ]
-
-type ObjectMeta =
-  [ "name" := Text
-  , "labels" := Record '["app" := Text]
-  ]
-
 -- annotate ::
 --   RowHasField "metadata" r (Record ObjectMeta) =>
 --   KeyMap Text ->
@@ -196,8 +185,8 @@ type ObjectMeta =
 configMap :: (?app :: Text, ?name :: Text) => ToJSON d => d -> Yaml.Object
 configMap d = object "ConfigMap" <> [objQQ|{ immutable: true, data: $d }|] ANON{d = d}
 
-container :: (?name :: Text) => Text -> Yaml.Object -> Yaml.Object
-container image rest =
+container :: (?name :: Text) => Text -> Yaml.Object
+container image =
   [objQQ|
 name: $name
 image: $image
@@ -209,7 +198,6 @@ imagePullPolicy: Always
       { name = ?name
       , image = image
       }
-    <> rest
 
 containerPort :: (?name :: Text) => Int -> Yaml.Object
 containerPort port = toObj ANON{containerPort = port, name = ?name}
@@ -255,10 +243,10 @@ openebsLvmClaim size =
 openebsLvmProvisioner :: Text
 openebsLvmProvisioner = "openebs-lvmpv"
 
-service :: (?app :: Text, ?name :: Text) => Yaml.Object -> Yaml.Object
+service :: (?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
 service spec =
   object "Service"
-    <> toObj ANON{spec = labelSelector <> spec}
+    <> toObj ANON{spec = over _Object (<> labelSelector) $ toJSON spec}
 
 servicePort :: (?name :: Text) => Int -> Yaml.Object
 servicePort port = toObj ANON{name = ?name, port = port, targetPort = ?name}
@@ -285,33 +273,32 @@ persistentVolumeClaim:
 |]
       ANON{name = ?name}
 
-volumeMount :: (?name :: Text) => Text -> Yaml.Object
+volumeMount :: (?name :: Text) => FilePath -> Yaml.Object
 volumeMount mountPath = toObj ANON{name = ?name, mountPath = mountPath}
 
 workload ::
   (?app :: Text, ?name :: Text) =>
-  (ToJSON spec, ToJSON podTemplateSpec) =>
+  (ToJSON podTemplateSpec) =>
   Text ->
-  spec ->
+  Yaml.Object ->
   podTemplateSpec ->
   Yaml.Object
 workload kind spec podTemplateSpec =
   [objQQ|
-apiVersion: apps/v1
-$object:  
+$object:
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: $name
+      app: $app
   template:
     metadata: $meta
     spec: $podTemplateSpec
-  spec: $spec
+  $spec:
 |]
     ANON
-      { object = object kind
-      , name = ?name
+      { object = [objQQ|apiVersion: apps/v1|] <> object kind
+      , app = ?app
       , meta = meta
       , podTemplateSpec = podTemplateSpec
       , spec = spec
@@ -323,17 +310,22 @@ deployment = workload "Deployment" [objQQ| strategy: { type: Recreate } |]
 statefulSet ::
   (?app :: Text, ?name :: Text) =>
   (ToJSON podTemplateSpec, ToJSON persistentVolumeClaim) =>
-  podTemplateSpec ->
   [persistentVolumeClaim] ->
+  podTemplateSpec ->
   Yaml.Object
-statefulSet podTemplateSpec persistentVolumeClaims =
+statefulSet persistentVolumeClaims podTemplateSpec =
   workload
     "StatefulSet"
-    ANON
-      { serviceName = ?name
-      , podManagementPolicy = "Parallel" :: Text
-      , volumeClaimTemplates = persistentVolumeClaims
-      }
+    ( [objQQ|
+serviceName: $name
+podManagementPolicy: Parallel
+volumeClaimTemplatesa: $persistentVolumeClaims
+|]
+        ANON
+          { name = ?name
+          , persistentVolumeClaims = persistentVolumeClaims
+          }
+    )
     podTemplateSpec
 
 data PathType

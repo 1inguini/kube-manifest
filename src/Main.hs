@@ -11,13 +11,10 @@ import Data.Aeson.Optics (_String)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Foldable (traverse_)
-import Data.Record.Anon
-import Data.Record.Anon.Simple (Record)
 import Data.String.Conversions (cs)
 import qualified Data.Yaml as Yaml
-import GHC.IO.Exception (IOException (IOError))
 import Optics (Lens', preview, view)
-import System.Directory (createDirectoryIfMissing, removeDirectory, removeDirectoryRecursive)
+import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath (dropFileName, (</>))
 
 generate :: IO ()
