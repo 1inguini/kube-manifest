@@ -23,7 +23,21 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Secret
 import TH (objQQ)
 import Text.Heredoc (here)
-import Util (Project, Yaml, configMapVolume, containerPort, defaultHelm, defineHelm, deployment, meta, nonrootGid, systemClusterCritical, toObj, werfProject)
+import Util (
+  Project,
+  Yaml,
+  configMapVolume,
+  containerPort,
+  defaultHelm,
+  defineHelm,
+  deployment,
+  meta,
+  nonrootGid,
+  openebsLvmProvisioner,
+  systemClusterCritical,
+  toObj,
+  werfProject,
+ )
 import qualified Util
 
 openebs :: Project
@@ -36,7 +50,7 @@ openebs =
             defineHelm
               ANON
                 { templates =
-                    [ let ?name = "openebs-lvmpv"
+                    [ let ?name = openebsLvmProvisioner
                        in [objQQ|
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
