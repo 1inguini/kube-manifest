@@ -11,6 +11,7 @@ module TH (
 ) where
 
 import Control.Arrow (Arrow (first))
+import Control.Monad (foldM)
 import Data.Aeson (Key, Options (sumEncoding), ToJSON (toJSON))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -55,107 +56,55 @@ objExp str = do
   obj <- TH.runIO $ decodeThrow @_ @Yaml.Object $ cs str
   case (\(x, y, z) -> (List.nub x, List.nub y, List.nub z)) $ objectSearch obj of
     ([], [], []) -> [|obj|]
-    (vals, fields, macros) -> do
-      valTyVars <- traverse (\x -> (,) x <$> TH.newName "a") vals
-      let prependVals acc =
-            foldl
-              (\acc (val, a) -> [t|(($(TH.litT . TH.strTyLit . cs $ val) ':= $(TH.varT a)) ': $acc)|])
-              acc
-              valTyVars
-          prependFields acc =
-            foldl
-              (\acc field -> [t|(($(TH.litT . TH.strTyLit . cs $ field) ':= Yaml.Object) ': $acc)|])
-              acc
-              fields
-          prependMacros acc =
-            foldl
-              ( \acc field ->
-                  [t|
-                    (($(TH.litT . TH.strTyLit . cs $ field) ':= (Yaml.Value -> Yaml.Object)) ': $acc)
-                    |]
-              )
-              acc
-              macros
-      valsRow <- prependVals TH.promotedNilT
-      fieldsRow <- prependFields TH.promotedNilT
-      macrosRow <- prependMacros TH.promotedNilT
-      let vr = pure valsRow
-          fr = pure fieldsRow
-          mr = pure macrosRow
-      row <- prependVals . prependFields . prependMacros $ TH.promotedNilT
-      let r = pure row
-          sig =
-            TH.forallT
-              ((\(_, a) -> TH.PlainTV a TH.SpecifiedSpec) <$> valTyVars)
-              (fmap @TH.Q (: []) [t|(AllFields $vr ToJSON)|])
-              [t|Record $r -> Yaml.Object -> Yaml.Object|]
-      vars <- TH.newName "vars"
-      TH.LamE [TH.VarP vars]
-        <$> [|
-          let replace :: $sig
-              replace record obj =
-                let valDict :: [(Text, Yaml.Value)]
-                    valDict =
-                      fmap (first cs)
-                        . Record.Advanced.toList
-                        . Record.Advanced.cmap (Proxy :: Proxy ToJSON) (K . toJSON . unI)
-                        . toAdvanced
-                        $ project @_ @($vr) record
-                    fieldDict :: [(Text, Yaml.Object)]
-                    fieldDict =
-                      fmap (first cs)
-                        . Record.Advanced.toList
-                        . Record.Advanced.cmap (Proxy :: Proxy ((~) Yaml.Object)) (K . unI)
-                        . toAdvanced
-                        $ project @_ @($fr) record
-                    macroDict :: [(Text, Yaml.Value -> Yaml.Object)]
-                    macroDict =
-                      fmap (first cs)
-                        . Record.Advanced.toList
-                        . Record.Advanced.cmap
-                          (Proxy :: Proxy ((~) (Yaml.Value -> Yaml.Object)))
-                          (K . unI)
-                        . toAdvanced
-                        $ project @_ @($mr) record
-                    objectReplace :: Yaml.Object -> Yaml.Object
-                    objectReplace = ifoldMapOf ifolded kvReplace
-                    kvReplace :: Key -> Yaml.Value -> Yaml.Object
-                    kvReplace key Yaml.Null =
-                      fromMaybe (KeyMap.singleton key Yaml.Null) $ do
+    (vals, fields, macros) ->
+      let valDictE = TH.listE $ (\x -> [|(x, toJSON $(TH.varE $ TH.mkName x))|]) <$> vals
+          fieldDictE = TH.listE $ (\x -> [|(x, $(TH.varE $ TH.mkName x))|]) <$> fields
+          macroDictE = TH.listE $ (\x -> [|(x, $(TH.varE $ TH.mkName x) . toJSON)|]) <$> macros
+       in [|
+            let valDict :: [(String, Yaml.Value)]
+                valDict = $valDictE
+                fieldDict :: [(String, Yaml.Object)]
+                fieldDict = $fieldDictE
+                macroDict :: [(String, Yaml.Value -> Yaml.Object)]
+                macroDict = $macroDictE
+                objectReplace :: Yaml.Object -> Yaml.Object
+                objectReplace = ifoldMapOf ifolded kvReplace
+                kvReplace :: Key -> Yaml.Value -> Yaml.Object
+                kvReplace key Yaml.Null =
+                  fromMaybe (KeyMap.singleton key Yaml.Null) $ do
+                    var <- Text.stripPrefix prefix $ Key.toText key
+                    lookup (cs var) fieldDict
+                kvReplace key val =
+                  let replaced = valueReplace val
+                   in fromMaybe (KeyMap.singleton key replaced) $ do
                         var <- Text.stripPrefix prefix $ Key.toText key
-                        lookup var fieldDict
-                    kvReplace key val =
-                      let replaced = valueReplace val
-                       in fromMaybe (KeyMap.singleton key replaced) $ do
-                            var <- Text.stripPrefix prefix $ Key.toText key
-                            macro <- lookup var macroDict
-                            pure $ macro replaced
-                    valueReplace :: Yaml.Value -> Yaml.Value
-                    valueReplace (Yaml.Object obj) = Yaml.Object $ objectReplace obj
-                    valueReplace (Yaml.Array vec) = Yaml.Array $ valueReplace <$> vec
-                    valueReplace str@(Yaml.String text) = fromMaybe str $ do
-                      var <- Text.stripPrefix prefix text
-                      lookup var valDict
-                    valueReplace val = val
-                 in objectReplace obj
-           in replace (project $(TH.varE vars)) obj
-          |]
+                        macro <- lookup (cs var) macroDict
+                        pure $ macro replaced
+                valueReplace :: Yaml.Value -> Yaml.Value
+                valueReplace (Yaml.Object obj) = Yaml.Object $ objectReplace obj
+                valueReplace (Yaml.Array vec) = Yaml.Array $ valueReplace <$> vec
+                valueReplace str@(Yaml.String text) = fromMaybe str $ do
+                  var <- Text.stripPrefix prefix text
+                  lookup (cs var) valDict
+                valueReplace val = val
+             in objectReplace obj
+            |]
  where
   prefix = "$"
   objectSearch ::
     Yaml.Object ->
-    ( [Text] -- `a: $b`
-    , [Text] -- `$a: null`
-    , [Text] -- `$a: { b: c }`
+    ( [String] -- `a: $b`
+    , [String] -- `$a: null`
+    , [String] -- `$a: { b: c }`
     )
   objectSearch = ifoldMapOf ifolded keySearch
-  keySearch :: Key -> Yaml.Value -> ([Text], [Text], [Text])
-  keySearch key Yaml.Null = (mempty, maybeToList . Text.stripPrefix prefix $ Key.toText key, mempty)
-  keySearch key val = valueSearch val <> (mempty, mempty, maybeToList . Text.stripPrefix prefix $ Key.toText key)
-  valueSearch :: Yaml.Value -> ([Text], [Text], [Text])
+  keySearch :: Key -> Yaml.Value -> ([String], [String], [String])
+  keySearch key Yaml.Null = (mempty, maybeToList . List.stripPrefix prefix $ Key.toString key, mempty)
+  keySearch key val = valueSearch val <> (mempty, mempty, maybeToList . List.stripPrefix prefix $ Key.toString key)
+  valueSearch :: Yaml.Value -> ([String], [String], [String])
   valueSearch (Yaml.Object obj) = objectSearch obj
   valueSearch (Yaml.Array vec) = mconcat $ valueSearch <$> Vector.toList vec
-  valueSearch (Yaml.String text) = (maybeToList $ Text.stripPrefix prefix text, mempty, mempty)
+  valueSearch (Yaml.String text) = (maybeToList $ List.stripPrefix prefix $ cs text, mempty, mempty)
   valueSearch _ = mempty
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
