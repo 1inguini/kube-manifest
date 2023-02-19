@@ -1,5 +1,4 @@
 module Project (
-  yamls,
   projects,
 )
 where
@@ -26,7 +25,6 @@ import TH (objQQ)
 import Text.Heredoc (here)
 import Util (
   Project,
-  Yaml,
   configMap,
   configMapVolume,
   containerPort,
@@ -34,6 +32,7 @@ import Util (
   defineHelm,
   deployment,
   httpGetProbe,
+  httpServicePort,
   meta,
   nonrootGid,
   openebsLvmProvisioner,
@@ -57,17 +56,13 @@ openebs =
               ANON
                 { templates =
                     [ let ?name = openebsLvmProvisioner
-                       in let annot =
-                                [objQQ|
-annotations:
-  storageclass.kubernetes.io/is-default-class: "true"
-|]
-                           in [objQQ|
+                       in [objQQ|
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   $meta:
-  $annot:
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
 allowVolumeExpansion: true
 parameters:
   storage: "lvm"
@@ -79,142 +74,78 @@ provisioner: local.csi.openebs.io
                 }
         }
 
--- -- config for coredns
--- dns :: Project
--- dns =
---   let ?app = "dns"
---       ?name = "coredns"
---    in let mountPath = "/etc/coredns/"
---           health = Util.name "health"
---           ready = Util.name "ready"
---           metrics = Util.name "metrics"
---        in ANON
---             { project = werfProject
---             , images = []
---             , helm =
---                 defineHelm
---                   ANON
---                     { templates =
---                         [ -- deployment $
---                           [objQQ|
-
-{- $deployment:
+-- config for coredns
+dns :: Project
+dns =
+  let ?app = "dns"
+      ?name = "coredns"
+   in let health = Util.name "health"
+          ready = Util.name "ready"
+          metrics = Util.name "metrics"
+          mountPath = "/etc/coredns/"
+       in ANON
+            { project = werfProject
+            , images = []
+            , helm =
+                defineHelm
+                  ANON
+                    { templates =
+                        [ let coredns = Util.container "registry.k8s.io/coredns/coredns:v1.9.3"
+                              coreFilePath = mountPath </> "Corefile"
+                              corednsConf =
+                                toObj
+                                  ANON
+                                    { ports =
+                                        [ containerPort 53 <> [objQQ|protocol: UDP|]
+                                        , metrics $ containerPort 9153
+                                        , health $ containerPort 8080
+                                        , ready $ containerPort 8081
+                                        ]
+                                    , livenessProbe = health $ httpGetProbe "health"
+                                    , readinessProbe = ready $ httpGetProbe "ready"
+                                    , volumeMounts = [volumeMount mountPath]
+                                    }
+                           in [objQQ|
+$deployment:
   containers:
   - $coredns:
+    args:
+    - -conf
+    - $coreFilePath
+    command:
+    - /coredns
+    securityContext:
+      capabilities:
+        add:
+        - NET_BIND_SERVICE
+        drop:
+        - all
+      readOnlyRootFilesystem: true
     $corednsConf:
   priorityClassName: $systemClusterCritical
   volumes:
   - $configMapVolume
 |]
-                            ANON
-                              { deployment = deployment
-                              , systemClusterCritical = systemClusterCritical
-                              , configMapVolume = configMapVolume
-                              , coredns = Util.container "registry.k8s.io/coredns/coredns:v1.9.3"
-                              , corednsConf =
-                                  toObj
-                                    ANON
-                                      { args = ["-conf", mountPath </> "Corefile"]
-                                      , command = ["/coredns"] :: [Text]
-                                      , ports =
-                                          ( containerPort 53 <> [objQQ|protocol: UDP|]
-                                          , metrics $ containerPort 9153
-                                          , health $ containerPort 8080
-                                          , ready $ containerPort 8081
-                                          )
-                                      , livenessProbe = health $ httpGetProbe "health"
-                                      , readinessProbe = ready $ httpGetProbe "ready"
-                                      , securityContext =
-                                          [objQQ|
-capabilities:
-  add:
-  - NET_BIND_SERVICE
-  drop:
-  - all
-readOnlyRootFilesystem: true
-|]
-                                      , volumeMounts = [volumeMount mountPath]
-                                      }
-                              }
-                        , configMap
-                            (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
-                        , [objQQ|
--}
-
-{- $service:
+                        , let port = servicePort 53
+                           in [objQQ|
+$service:
   externalIPs:
   - $externalIp
   ports:
   - $port:
     protocol: UDP
 |]
-                            ANON
-                              { service = service
-                              , externalIp = externalIp
-                              , port = servicePort 53
-                              }
-                        , metrics $ service ANON{ports = [Util.servicePort 80]}
+                        , configMap
+                            (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
+                        , metrics
+                            [objQQ|
+$service:
+  ports:
+  - $httpServicePort
+|]
                         ]
                     }
             }
--}
-
--- dns :: [Yaml]
--- dns =
---   let ?namespace = "dns"
---       ?app = "coredns"
---    in let mountPath = "/etc/coredns/"
---           health = Util.name "health"
---           ready = Util.name "ready"
---           metrics = Util.name "metrics"
---        in [ Util.manifest Util.namespace
---           , Util.manifest $
---               Util.deployment
---                 ANON
---                   { containers =
---                       [ Util.container
---                           "registry.k8s.io/coredns/coredns:v1.9.3"
---                           ANON
---                             { args = ["-conf", mountPath <> "Corefile"]
---                             , command = ["/coredns"] :: [Text]
---                             , ports =
---                                 ( Util.containerPort 53 `merge` ANON{protocol = "UDP" :: Text}
---                                 , metrics $ Util.containerPort 9153
---                                 , health $ Util.containerPort 8080
---                                 , ready $ Util.containerPort 8081
---                                 )
---                             , livenessProbe = health $ Util.httpGetProbe "health"
---                             , readinessProbe = ready $ Util.httpGetProbe "ready"
---                             , securityContext =
---                                 ANON
---                                   { capabilities =
---                                       [yamlQQ|
---                                         add:
---                                           - NET_BIND_SERVICE
---                                         drop:
---                                           - all
---                                       |]
---                                   , readOnlyRootFilesystem = True
---                                   }
---                             , volumeMounts = [Util.volumeMount mountPath]
---                             }
---                       ]
---                   , priorityClassName = Util.systemClusterCritical
---                   , volumes = [Util.configMapVolume]
---                   }
---           , Util.manifest $
---               Util.configMap (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
---           , Util.manifest $
---               Util.service $
---                 ANON
---                   { externalIPs = [Aeson.String externalIp]
---                   , ports = [Util.servicePort 53 `merge` ANON{protocol = [yamlQQ|UDP|]}]
---                   }
---           , Util.manifest $
---               metrics $
---                 Util.service $
---                   ANON{ports = [Util.servicePort 80]}
---           ]
 
 -- projectcontour :: [Yaml]
 -- projectcontour =
@@ -383,9 +314,6 @@ readOnlyRootFilesystem: true
 --                , Util.manifest $ Util.ingressContourTls [Util.ingressRule "/"]
 --                ]
 
-yamls :: [Yaml]
-yamls = []
-
 -- mconcat
 --   [ dns
 --   , gitbucket
@@ -398,5 +326,5 @@ yamls = []
 projects :: [Project]
 projects =
   [ openebs
-  -- , dns
+  , dns
   ]

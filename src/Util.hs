@@ -1,9 +1,6 @@
 module Util (
   Helm,
-  Manifest,
   Project,
-  Yaml,
-  YamlType (..),
   assignJSON,
   clusterIssuer,
   configMap,
@@ -17,7 +14,6 @@ module Util (
   emptyDirVolume,
   encodeAll,
   execCommandProbe,
-  helmValues,
   hostPathVolume,
   httpGetProbe,
   httpServicePort,
@@ -26,17 +22,15 @@ module Util (
   ingressRule,
   issuer,
   labelSelector,
-  manifest,
   meta,
   mirror,
-  mkYaml,
   name,
   named,
   noNamespace,
   nonrootGid,
   nonrootOwn,
   nonrootUid,
-  object,
+  v1Object,
   openebsLvmClaim,
   persistentVolumeClaim,
   persistentVolumeClaimVolume,
@@ -107,8 +101,8 @@ setJSON ::
   Aeson.Value
 setJSON l x = set l (toJSON x)
 
-setSpecTo :: Record object -> spec -> Record (Merge object '["spec" := spec])
-setSpecTo object spec = merge object ANON{spec = spec}
+setSpecTo :: Record v1Object -> spec -> Record (Merge v1Object '["spec" := spec])
+setSpecTo v1Object spec = merge v1Object ANON{spec = spec}
 
 assignJSON ::
   (Is k A_Setter, ToJSON a) =>
@@ -133,7 +127,11 @@ named :: (?name :: Text) => Yaml.Object
 named = toObj ANON{name = ?name}
 
 labelSelector :: (?app :: Text) => Yaml.Object
-labelSelector = [objQQ| selector: { app: $app } |] ANON{app = ?app}
+labelSelector =
+  [objQQ|
+selector:
+  app: $?app
+|]
 
 type Owner = (UserID, GroupID)
 
@@ -159,14 +157,16 @@ labels:
   app: $?app
 |]
 
-object :: (?app :: Text, ?name :: Text) => Text -> Yaml.Object
-object kind =
+object :: (?app :: Text, ?name :: Text) => Text -> Text -> Yaml.Object
+object ver kind =
   [objQQ|
-apiVersion: v1
+apiVersion: $ver
 kind: $kind
 metadata: $meta
 |]
-    ANON{kind = kind, meta = meta}
+
+v1Object :: (?app :: Text, ?name :: Text) => Text -> Yaml.Object
+v1Object = object "v1"
 
 -- annotate ::
 --   RowHasField "metadata" r (Record ObjectMeta) =>
@@ -179,21 +179,17 @@ metadata: $meta
 --     ANON{metadata = Anon.get #metadata object `merge` ANON{annotations = annotations}}
 
 configMap :: (?app :: Text, ?name :: Text) => ToJSON d => d -> Yaml.Object
-configMap d = object "ConfigMap" <> [objQQ|{ immutable: true, data: $d }|] ANON{d = d}
+configMap d = v1Object "ConfigMap" <> [objQQ|{ immutable: true, data: $d }|]
 
 container :: (?name :: Text) => Text -> Yaml.Object
 container image =
   [objQQ|
-name: $name
+name: $?name
 image: $image
 securityContext:
   allowPrivilegeEscalation: false
 imagePullPolicy: Always
 |]
-    ANON
-      { name = ?name
-      , image = image
-      }
 
 containerPort :: (?name :: Text) => Int -> Yaml.Object
 containerPort port = toObj ANON{containerPort = port, name = ?name}
@@ -210,7 +206,7 @@ execCommandProbe command = toObj ANON{exec = ANON{command = command}}
 -- namespace :: (?namespace :: Text, ?app :: Text) => Record _
 -- namespace =
 --   let ?name = ?namespace
---    in object "Namespace"
+--    in v1Object "Namespace"
 --         `merge` ANON
 --           { metadata = Anon.project meta :: Record ["name" := _, "labels" := _]
 --           }
@@ -219,7 +215,7 @@ noNamespace :: Text
 noNamespace = "_root"
 
 persistentVolumeClaim :: (?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
-persistentVolumeClaim spec = object "PersistentVolumeClaim" <> toObj ANON{spec = spec}
+persistentVolumeClaim spec = v1Object "PersistentVolumeClaim" <> toObj ANON{spec = spec}
 
 readWriteOnce :: Text
 readWriteOnce = "ReadWriteOnce"
@@ -241,14 +237,14 @@ openebsLvmProvisioner = "openebs-lvmpv"
 
 service :: (?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
 service spec =
-  object "Service"
+  v1Object "Service"
     <> toObj ANON{spec = over _Object (<> labelSelector) $ toJSON spec}
 
 servicePort :: (?name :: Text) => Int -> Yaml.Object
 servicePort port = toObj ANON{name = ?name, port = port, targetPort = ?name}
 
 httpServicePort :: (?name :: Text) => Yaml.Object
-httpServicePort = toObj ANON{name = ?name, port = 80 :: Int, targetPort = ?name}
+httpServicePort = servicePort 80
 
 configMapVolume :: (?name :: Text) => Yaml.Object
 configMapVolume = named <> toObj ANON{configMap = named}
@@ -264,10 +260,9 @@ persistentVolumeClaimVolume =
   named
     <> [objQQ|
 persistentVolumeClaim:
-  claimName: $name
+  claimName: $?name
   readOnly: false
 |]
-      ANON{name = ?name}
 
 volumeMount :: (?name :: Text) => FilePath -> Yaml.Object
 volumeMount mountPath = toObj ANON{name = ?name, mountPath = mountPath}
@@ -281,24 +276,19 @@ workload ::
   Yaml.Object
 workload kind spec podTemplateSpec =
   [objQQ|
-$object:
+$workload:
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: $app
+      app: $?app
   template:
     metadata: $meta
     spec: $podTemplateSpec
   $spec:
 |]
-    ANON
-      { object = [objQQ|apiVersion: apps/v1|] <> object kind
-      , app = ?app
-      , meta = meta
-      , podTemplateSpec = podTemplateSpec
-      , spec = spec
-      }
+ where
+  workload = object "apps/v1" kind
 
 deployment :: (?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
 deployment = workload "Deployment" [objQQ| strategy: { type: Recreate } |]
@@ -312,16 +302,11 @@ statefulSet ::
 statefulSet persistentVolumeClaims podTemplateSpec =
   workload
     "StatefulSet"
-    ( [objQQ|
-serviceName: $name
+    [objQQ|
+serviceName: $?name
 podManagementPolicy: Parallel
 volumeClaimTemplatesa: $persistentVolumeClaims
 |]
-        ANON
-          { name = ?name
-          , persistentVolumeClaims = persistentVolumeClaims
-          }
-    )
     podTemplateSpec
 
 data PathType
@@ -335,37 +320,25 @@ clusterIssuer = "1inguini-ca-cluster-issuer"
 
 issuer :: (?app :: Text) => [Yaml.Object]
 issuer =
-  [ [objQQ|
-apiVersion: v1
-kind: Secret
+  let ?name = "cloudflare-origin-ca"
+   in let secret = v1Object "Secret"
+          originIssuer = object "cert-manager.k8s.cloudflare.com/v1" "OriginIssuer"
+       in [ [objQQ|
+$secret:
 type: Opaque
-metadata:
-  name: cloudflare-origin-ca-key
-  labels:
-    app: $app
 stringData:
-  key: $key
+  key: $cloudflareOriginCAKey
 |]
-      ANON
-        { app = ?app
-        , key = Aeson.String cloudflareOriginCAKey
-        }
-  , [objQQ|
-apiVersion: cert-manager.k8s.cloudflare.com/v1
-kind: OriginIssuer
-metadata:
-  name: cloudflare-origin-issuer
-  labels:
-    app: $app
+          , [objQQ|
+$originIssuer:
 spec:
   requestType: OriginECC
   auth:
     serviceKeyRef:
-      name: cloudflare-origin-ca-key
+      name: $?name
       key: key
 |]
-      ANON{app = ?app}
-  ]
+          ]
 
 ingressContourTlsAnnotations :: Yaml.Object
 ingressContourTlsAnnotations =
@@ -396,20 +369,18 @@ ingressContourTls ::
   -- ] ->
   Yaml.Object
 ingressContourTls rules =
-  ingressContourTlsAnnotations
-    <> KeyMap.insert "apiVersion" "networking.k8s.io/v1" (object "Ingress")
-    <> [objQQ|
+  [objQQ|
+$ingress:
+$ingressContourTlsAnnotations:
 ingressClassName: contour
 rules: $rules
 tls:
-- secretName: $name
+- secretName: $?name
   hosts: $hosts
 |]
-      ANON
-        { rules = toJSON rules
-        , name = ?name
-        , hosts = view #host <$> rules
-        }
+ where
+  ingress = object "networking.k8s.io/v1" "Ingress"
+  hosts = view #host <$> rules
 
 ingressRule :: (?project :: Text, ?name :: Text) => Text -> Yaml.Object
 ingressRule path =
@@ -421,33 +392,9 @@ http:
     path: $path
     pathType: Prefix
 |]
-    ANON
-      { domain = domain
-      , backend = backend
-      , path = path
-      }
 
 backend :: (?name :: Text) => Yaml.Object
 backend = toObj ANON{service = ANON{name = ?name, port = named}}
-
-type Manifest = Record ["path" := FilePath, "objects" := [Yaml.Object]]
-
-data YamlType
-  = Manifest
-  | HelmValues
-      ( Record
-          '[ "chart" := String -- name of chart, like "harbor/harbor"
-           , "namespace" := Text
-           , "appLabel" := Text
-           ]
-      )
-  deriving (Show)
-
-type Yaml =
-  Record
-    [ "yamlType" := YamlType
-    , "value" := Yaml.Value
-    ]
 
 type HelmRow =
   [ "templates" := [Yaml.Object]
@@ -472,12 +419,11 @@ type Project =
 werfProject :: (?app :: Text) => Yaml.Object
 werfProject =
   [objQQ|
-project: $project
+project: $?app
 configVersion: 1
 deploy:
-  namespace: $project
+  namespace: $?app
 |]
-    ANON{project = ?app}
 
 defaultHelm :: Helm
 defaultHelm =
@@ -497,39 +443,5 @@ defineHelm = flip inject defaultHelm
 
 encodeAll :: [Yaml.Object] -> ByteString
 encodeAll = foldl (\acc doc -> acc <> "---\n" <> doc <> "\n") mempty . fmap Yaml.encode
-
-mkYaml :: YamlType -> Aeson.Value -> Yaml
-mkYaml ty value =
-  ANON
-    { yamlType = ty
-    , value = value
-    }
-
-manifest :: (?namespace :: Text, ?app :: Text) => ToJSON json => ((?name :: Text) => json) -> Yaml
-manifest =
-  let ?name = ?app
-   in mkYaml Manifest
-        . ( if ?namespace == noNamespace
-              then id
-              else over (key "metadata" % _Object) (KeyMap.insert "namespace" $ Aeson.String ?namespace)
-          )
-        . toJSON
-
-helmValues ::
-  (?namespace :: Text) =>
-  ToJSON json =>
-  Record '["chart" := String, "appLabel" := Text] ->
-  json ->
-  Yaml
-helmValues meta =
-  mkYaml
-    ( HelmValues
-        ANON
-          { chart = view #chart meta
-          , namespace = ?namespace
-          , appLabel = view #appLabel meta
-          }
-    )
-    . toJSON
 
 $(deriveJSON ''PathType)
