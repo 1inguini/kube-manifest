@@ -57,10 +57,17 @@ openebs =
               ANON
                 { templates =
                     [ let ?name = openebsLvmProvisioner
-                       in [objQQ|
+                       in let annot =
+                                [objQQ|
+annotations:
+  storageclass.kubernetes.io/is-default-class: "true"
+|]
+                           in [objQQ|
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
-metadata: $meta
+metadata:
+  $meta:
+  $annot:
 allowVolumeExpansion: true
 parameters:
   storage: "lvm"
@@ -68,37 +75,30 @@ parameters:
   fstype: "ext4"
 provisioner: local.csi.openebs.io
 |]
-                            ANON
-                              { meta =
-                                  meta
-                                    <> [objQQ|
-annotations:
-  storageclass.kubernetes.io/is-default-class: "true"
-|]
-                              }
                     ]
                 }
         }
 
--- config for coredns
-dns :: Project
-dns =
-  let ?app = "dns"
-      ?name = "coredns"
-   in let mountPath = "/etc/coredns/"
-          health = Util.name "health"
-          ready = Util.name "ready"
-          metrics = Util.name "metrics"
-       in ANON
-            { project = werfProject
-            , images = []
-            , helm =
-                defineHelm
-                  ANON
-                    { templates =
-                        [ -- deployment $
-                          [objQQ|
-$deployment:
+-- -- config for coredns
+-- dns :: Project
+-- dns =
+--   let ?app = "dns"
+--       ?name = "coredns"
+--    in let mountPath = "/etc/coredns/"
+--           health = Util.name "health"
+--           ready = Util.name "ready"
+--           metrics = Util.name "metrics"
+--        in ANON
+--             { project = werfProject
+--             , images = []
+--             , helm =
+--                 defineHelm
+--                   ANON
+--                     { templates =
+--                         [ -- deployment $
+--                           [objQQ|
+
+{- $deployment:
   containers:
   - $coredns:
     $corednsConf:
@@ -139,7 +139,9 @@ readOnlyRootFilesystem: true
                         , configMap
                             (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
                         , [objQQ|
-$service:
+-}
+
+{- $service:
   externalIPs:
   - $externalIp
   ports:
@@ -155,6 +157,7 @@ $service:
                         ]
                     }
             }
+-}
 
 -- dns :: [Yaml]
 -- dns =
@@ -395,5 +398,5 @@ yamls = []
 projects :: [Project]
 projects =
   [ openebs
-  , dns
+  -- , dns
   ]

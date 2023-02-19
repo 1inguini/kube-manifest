@@ -57,9 +57,11 @@ objExp str = do
   case (\(x, y, z) -> (List.nub x, List.nub y, List.nub z)) $ objectSearch obj of
     ([], [], []) -> [|obj|]
     (vals, fields, macros) ->
-      let valDictE = TH.listE $ (\x -> [|(x, toJSON $(TH.varE $ TH.mkName x))|]) <$> vals
-          fieldDictE = TH.listE $ (\x -> [|(x, $(TH.varE $ TH.mkName x))|]) <$> fields
-          macroDictE = TH.listE $ (\x -> [|(x, $(TH.varE $ TH.mkName x) . toJSON)|]) <$> macros
+      let varOrImp ('?' : x) = TH.implicitParamVarE x
+          varOrImp x = TH.varE $ TH.mkName x
+          valDictE = TH.listE $ (\x -> [|(x, toJSON $(varOrImp x))|]) <$> vals
+          fieldDictE = TH.listE $ (\x -> [|(x, $(varOrImp x))|]) <$> fields
+          macroDictE = TH.listE $ (\x -> [|(x, $(varOrImp x) . toJSON)|]) <$> macros
        in [|
             let valDict :: [(String, Yaml.Value)]
                 valDict = $valDictE

@@ -154,14 +154,10 @@ rootGid = 0
 meta :: (?app :: Text, ?name :: Text) => Yaml.Object
 meta =
   [objQQ|
-name: $name
+name: $?name
 labels:
-  app: $app
+  app: $?app
 |]
-    ANON
-      { name = ?name
-      , app = ?app
-      }
 
 object :: (?app :: Text, ?name :: Text) => Text -> Yaml.Object
 object kind =
