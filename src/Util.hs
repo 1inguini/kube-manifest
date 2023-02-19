@@ -416,13 +416,13 @@ type Project =
     , "helm" := Helm
     ]
 
-werfProject :: (?app :: Text) => Yaml.Object
-werfProject =
+werfProject :: Text -> Yaml.Object
+werfProject project =
   [objQQ|
-project: $?app
+project: $project
 configVersion: 1
 deploy:
-  namespace: $?app
+  namespace: $project
 |]
 
 defaultHelm :: Helm
@@ -442,6 +442,6 @@ defineHelm :: SubRow HelmRow r => Record r -> Helm
 defineHelm = flip inject defaultHelm
 
 encodeAll :: [Yaml.Object] -> ByteString
-encodeAll = foldl (\acc doc -> acc <> "---\n" <> doc <> "\n") mempty . fmap Yaml.encode
+encodeAll = foldl (\acc doc -> acc <> "---\n" <> doc) mempty . fmap Yaml.encode
 
 $(deriveJSON ''PathType)

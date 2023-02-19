@@ -28,13 +28,11 @@ import Util (
   configMap,
   configMapVolume,
   containerPort,
-  defaultHelm,
   defineHelm,
   deployment,
   httpGetProbe,
   httpServicePort,
   meta,
-  nonrootGid,
   openebsLvmProvisioner,
   service,
   servicePort,
@@ -49,7 +47,7 @@ openebs :: Project
 openebs =
   let ?app = "openebs"
    in ANON
-        { project = werfProject
+        { project = werfProject "openebs"
         , images = []
         , helm =
             defineHelm
@@ -77,14 +75,14 @@ provisioner: local.csi.openebs.io
 -- config for coredns
 dns :: Project
 dns =
-  let ?app = "dns"
+  let ?app = "coredns"
       ?name = "coredns"
    in let health = Util.name "health"
           ready = Util.name "ready"
           metrics = Util.name "metrics"
           mountPath = "/etc/coredns/"
        in ANON
-            { project = werfProject
+            { project = werfProject "dns"
             , images = []
             , helm =
                 defineHelm
@@ -146,6 +144,69 @@ $service:
                         ]
                     }
             }
+
+projectcontour :: Project
+projectcontour =
+  let ?app = "contour"
+   in ANON
+        { project = werfProject "projectcontour"
+        , images = []
+        , helm =
+            defineHelm
+              ANON
+                { chart =
+                    [objQQ|
+apiVersion: v2
+name: projectcontour
+dependencies:
+- name: contour
+  version: ~11.0.0
+  repository: https://charts.bitnami.com/bitnami
+|]
+                , values =
+                    let envoyMeta = let ?name = "envoy" in meta
+                     in [objQQ|
+contour:
+  envoy:
+    service:
+      type: ClusterIP
+      $envoyMeta:
+      externalTrafficPolicy: false
+      externalIPs:
+      - $externalIp
+      targetPorts:
+        http: 8080
+        https: 8443
+|]
+                }
+        }
+
+--                 , templates =
+--                     [ let ?name = "envoy"
+--                        in [objQQ|
+-- \$service:
+--   externalIPs:
+--   - $externalIp
+--   ports:
+--   - name: http
+--     port: 80
+--     targetPort: 8080
+--   - name: https
+--     port: 443
+--     targetPort: 8443
+-- \|]
+--                     , let ?name = "contour"
+--                        in [objQQ|
+-- kind: IngressClass
+-- apiVersion: networking.k8s.io/v1
+-- metadata:
+--   $meta:
+--   annotation:
+--     ingressclass.kubernetes.io/is-default-class: "true"
+-- spec:
+--   controller: "projectcontour.io/contour"
+-- \|]
+--                     ]
 
 -- projectcontour :: [Yaml]
 -- projectcontour =
@@ -326,5 +387,6 @@ $service:
 projects :: [Project]
 projects =
   [ openebs
+  , projectcontour
   , dns
   ]

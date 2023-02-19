@@ -50,6 +50,7 @@ processHelm dir helm = do
   mayWrite encodeAll #templates "templates/manifests.yaml"
   mayWrite encodeAll #crds "crds/crds.yaml"
   mayWrite Yaml.encode #values "values.yaml"
+  mayWrite Yaml.encode #chart "Chart.yaml"
   mayWrite (cs . Aeson.encode) #valuesSchema "values.schema.json"
   mayWrite cs #readme "README.md"
   mayWrite cs #license "LICENSE"
