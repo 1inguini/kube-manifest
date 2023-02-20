@@ -318,9 +318,12 @@ data PathType
 clusterIssuer :: Text
 clusterIssuer = "1inguini-ca-cluster-issuer"
 
+issuerName :: Text
+issuerName = "cloudflare-origin-ca"
+
 issuer :: (?app :: Text) => [Yaml.Object]
 issuer =
-  let ?name = "cloudflare-origin-ca"
+  let ?name = issuerName
    in let secret = v1Object "Secret"
           originIssuer = object "cert-manager.k8s.cloudflare.com/v1" "OriginIssuer"
        in [ [objQQ|
@@ -343,7 +346,7 @@ spec:
 ingressContourTlsAnnotations :: Yaml.Object
 ingressContourTlsAnnotations =
   [objQQ|
-cert-manager.io/issuer: cloudflare-origin-issuer
+cert-manager.io/issuer: $issuerName
 cert-manager.io/issuer-kind: OriginIssuer
 cert-manager.io/issuer-group: cert-manager.k8s.cloudflare.com
 ingress.kubernetes.io/force-ssl-redirect: "true"
@@ -409,21 +412,39 @@ type HelmRow =
 
 type Helm = Record HelmRow
 
-type Project =
-  Record
-    [ "project" := Yaml.Object
-    , "images" := [Yaml.Object]
-    , "helm" := Helm
-    ]
+type ProjectRow =
+  [ "project" := Yaml.Object
+  , "images" := [Yaml.Object]
+  , "helm" := Helm
+  ]
 
-werfProject :: Text -> Yaml.Object
-werfProject project =
+type Project = Record ProjectRow
+
+werffile :: (?project :: Text) => Yaml.Object
+werffile =
   [objQQ|
-project: $project
+project: $?project
 configVersion: 1
 deploy:
-  namespace: $project
+  namespace: $?project
 |]
+
+werfProject ::
+  SubRow ProjectRow r =>
+  Text ->
+  ((?project :: Text, ?app :: Text, ?name :: Text) => Record r) ->
+  Project
+werfProject projectName =
+  let ?project = projectName
+      ?app = projectName
+      ?name = projectName
+   in flip
+        inject
+        ANON
+          { project = werffile
+          , images = []
+          , helm = defaultHelm
+          }
 
 defaultHelm :: Helm
 defaultHelm =
