@@ -157,7 +157,6 @@ projectcontour =
                 { chart =
                     [objQQ|
 apiVersion: v2
-name: projectcontour
 dependencies:
 - name: contour
   version: ~11.0.0
@@ -181,85 +180,50 @@ contour:
                 }
         }
 
---                 , templates =
---                     [ let ?name = "envoy"
---                        in [objQQ|
--- \$service:
---   externalIPs:
---   - $externalIp
---   ports:
---   - name: http
---     port: 80
---     targetPort: 8080
---   - name: https
---     port: 443
---     targetPort: 8443
--- \|]
---                     , let ?name = "contour"
---                        in [objQQ|
--- kind: IngressClass
--- apiVersion: networking.k8s.io/v1
--- metadata:
---   $meta:
---   annotation:
---     ingressclass.kubernetes.io/is-default-class: "true"
--- spec:
---   controller: "projectcontour.io/contour"
--- \|]
---                     ]
-
--- projectcontour :: [Yaml]
--- projectcontour =
---   let ?namespace = "projectcontour"
---       ?app = "contour"
---    in [ let ?app = "envoy"
---          in Util.manifest $
---               Util.service
---                 ANON
---                   { externalIPs = [Aeson.String externalIp]
---                   , ports =
---                       [yamlQQ|
---                         - name: http
---                           port: 80
---                           targetPort: 8080
---                         - name: https
---                           port: 443
---                           targetPort: 8443
---                     |]
---                   }
---       , Util.manifest
---           $ Util.annotate
---             (KeyMap.singleton "ingressclass.kubernetes.io/is-default-class" "true")
---           $ Util.setSpecTo
---             (Anon.set #apiVersion "networking.k8s.io/v1" $ Util.object "IngressClass")
---             ANON{controller = "projectcontour.io/contour" :: Text}
---       ]
-
--- kubernetesDashboard :: [Yaml]
--- kubernetesDashboard =
---   let ?namespace = "kubernetes-dashboard"
---       ?app = "kubernetes-dashboard"
---    in [ Util.manifest $
---           let ?name = "admin-user"
---            in Util.object "ServiceAccount"
---       , Util.manifest
---           [yamlQQ|
---             apiVersion: rbac.authorization.k8s.io/v1
---             kind: ClusterRoleBinding
---             metadata:
---               name: admin-user
---               labels:
---                 app: kubernetes-dashboard
---             roleRef:
---               apiGroup: rbac.authorization.k8s.io
---               kind: ClusterRole
---               name: cluster-admin
---             subjects:
---               - kind: ServiceAccount
---                 name: admin-user
---                 namespace: kubernetes-dashboard
---           |]
---       ]
+kubernetesDashboard :: Project
+kubernetesDashboard =
+  let ?app = "kubernetes-dashboard"
+   in let admin = "cluster-admin"
+       in ANON
+            { project = werfProject ?app
+            , images = []
+            , helm =
+                defineHelm
+                  ANON
+                    { chart =
+                        [objQQ|
+apiVersion: v2
+dependencies:
+- name: kubernetes-dashboard
+  version: ~6.0.0
+  repository: https://kubernetes.github.io/dashboard
+|]
+                    , values =
+                        [objQQ|
+kubernetes-dashboard:
+  rbac:
+    clusterReadOnlyRole: true
+  serviceAccount:
+    name: $admin
+|]
+                    , templates =
+                        [ let ?name = admin
+                           in [objQQ|
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: $meta
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: $admin
+    namespace: kubernetes-dashboard
+|]
+                        ]
+                    }
+            }
 
 -- registry :: [Yaml]
 -- registry =
@@ -386,7 +350,8 @@ contour:
 
 projects :: [Project]
 projects =
-  [ openebs
+  [ kubernetesDashboard
+  , openebs
   , projectcontour
   , dns
   ]

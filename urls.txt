@@ -1,5 +1,4 @@
 https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
 https://openebs.github.io/charts/lvm-operator.yaml
 https://github.com/cert-manager/cert-manager/releases/download/v1.10.0//cert-manager.yaml
-https://projectcontour.io/quickstart/contour.yaml
 https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
