@@ -54,7 +54,15 @@ openebs =
       { helm =
           defineHelm
             ANON
-              { templates =
+              { chart =
+                  [objQQ|
+apiVersion: v2
+dependencies:
+- name: lvm-localpv 
+  version: ~1.0.1
+  repository: https://openebs.github.io/lvm-localpv
+|]
+              , templates =
                   [ let ?name = openebsLvmProvisioner
                      in [objQQ|
 apiVersion: storage.k8s.io/v1
