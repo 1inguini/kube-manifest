@@ -1,2 +1,1 @@
 https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
-https://github.com/cert-manager/cert-manager/releases/download/v1.10.0//cert-manager.yaml

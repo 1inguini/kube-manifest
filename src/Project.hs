@@ -188,6 +188,30 @@ contour:
                   }
           }
 
+certManager :: Project
+certManager =
+  werfProject
+    "cert-manager"
+    ANON
+      { helm =
+          defineHelm
+            ANON
+              { chart =
+                  [objQQ|
+apiVersion: v2
+dependencies:
+- name: cert-manager
+  version: ~1.11.0
+  repository: https://charts.jetstack.io
+|]
+              , values =
+                  [objQQ|
+cert-manager:
+  installCRDs: true
+|]
+              }
+      }
+
 kubernetesDashboard :: Project
 kubernetesDashboard =
   werfProject "kubernetes-dashboard" $
@@ -365,7 +389,8 @@ harbor:
 
 projects :: [Project]
 projects =
-  [ dns
+  [ certManager
+  , dns
   , kubernetesDashboard
   , openebs
   , projectcontour
