@@ -279,6 +279,7 @@ dependencies:
                           [objQQ|
 harbor:
   expose:
+    type: ingress
     ingress:
       annotations: $ingressContourTlsAnnotations
       hosts:
@@ -289,7 +290,6 @@ harbor:
       secret:
         secretName: $?app
         notarySecretName: $notarySecret
-  caSecretName: $?app
   externalURL: $url
   updateStrategy:
     type: Recreate
