@@ -38,7 +38,6 @@ import Util (
   httpGetProbe,
   httpServicePort,
   ingressContourTlsAnnotations,
-  issuer,
   meta,
   openebsLvmProvisioner,
   secret,
@@ -317,7 +316,6 @@ harbor:
   updateStrategy:
     type: Recreate
 |]
-                      , templates = issuer
                       }
               }
 

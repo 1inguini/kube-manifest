@@ -5,6 +5,7 @@ module Util (
   application,
   assignJSON,
   clusterIssuer,
+  concatApplication,
   configMap,
   configMapVolume,
   container,
@@ -21,8 +22,8 @@ module Util (
   ingressContourTls,
   ingressContourTlsAnnotations,
   ingressRule,
-  issuer,
   labelSelector,
+  mergeObject,
   meta,
   mirror,
   name,
@@ -40,6 +41,8 @@ module Util (
   rootGid,
   rootOwn,
   rootUid,
+  secret,
+  secret,
   service,
   servicePort,
   setJSON,
@@ -52,9 +55,6 @@ module Util (
   v1Object,
   volumeMount,
   workload,
-  mergeObject,
-  concatApplication,
-  secret,
 ) where
 
 import Secret (cloudflareOriginCAKey, host)
@@ -328,27 +328,6 @@ issuerName = "cloudflare-origin-ca"
 
 secret :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => Yaml.Object
 secret = v1Object "Secret"
-
-issuer :: (?subdomain :: Text, ?app :: Text) => [Yaml.Object]
-issuer =
-  let ?name = issuerName
-   in let originIssuer = object "cert-manager.k8s.cloudflare.com/v1" "OriginIssuer"
-       in [ [objQQ|
-$secret:
-type: Opaque
-stringData:
-  key: $cloudflareOriginCAKey
-|]
-          , [objQQ|
-$originIssuer:
-spec:
-  requestType: OriginECC
-  auth:
-    serviceKeyRef:
-      name: $?name
-      key: key
-|]
-          ]
 
 ingressContourTlsAnnotations :: Yaml.Object
 ingressContourTlsAnnotations =

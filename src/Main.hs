@@ -3,19 +3,19 @@ module Main (main) where
 import Project (project)
 import Util (Helm, Project, encodeAll)
 
-import Control.Exception.Safe (throwString, try)
-import Control.Monad (unless, when)
+import Control.Exception.Safe (throwString)
+import Control.Monad (unless)
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Optics (_String)
+import Data.Aeson.Optics (key, _String)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Foldable (traverse_)
 import Data.String.Conversions (cs)
 import qualified Data.Yaml as Yaml
-import Optics (Lens', preview, view)
-import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory, removeDirectoryRecursive, removeFile)
-import System.FilePath (dropFileName, (</>))
+import Optics (Ixed (ix), Lens', preview, view, (%))
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, listDirectory, removeDirectoryRecursive, removeFile)
+import System.FilePath (dropFileName, (<.>), (</>))
+import Text.Casing (fromHumps, toKebab)
 
 -- generate :: IO ()
 -- generate = traverse_ processProject projects
@@ -41,32 +41,50 @@ processProject proj = do
 processHelm :: FilePath -> Helm -> IO ()
 processHelm dir helm = do
   createDirectoryIfMissing True dir
+  traverse_
+    ( \f ->
+        let path = dir </> f
+         in do
+              isDir <- doesDirectoryExist path
+              if isDir then removeDirectoryRecursive path else removeFile path
+    )
+    =<< listDirectory dir
   let mayWrite ::
-        forall a. (Eq a, Monoid a) => (a -> ByteString) -> Lens' Helm a -> FilePath -> IO ()
-      mayWrite encode field subPath =
-        let val = view field helm
-            path = dir </> subPath
-            subdir = dropFileName path
+        forall a. (Eq a, Monoid a) => (a -> ByteString) -> a -> FilePath -> IO ()
+      mayWrite encode val subPath =
+        let path = dir </> subPath
          in unless ((mempty :: a) == val) $ do
-              createDirectoryIfMissing True subdir
-              traverse_
-                ( \f ->
-                    let path = subdir </> f
-                     in do
-                          isFile <- doesFileExist path
-                          when isFile $ removeFile path
-                )
-                =<< listDirectory subdir
+              createDirectoryIfMissing True $ dropFileName path
               ByteString.writeFile path $ encode val
               putStrLn $ "# wrote to: " <> path
-  mayWrite encodeAll #templates "templates/manifests.yaml"
-  mayWrite encodeAll #crds "crds/crds.yaml"
-  mayWrite Yaml.encode #values "values.yaml"
-  mayWrite Yaml.encode #chart "Chart.yaml"
-  mayWrite (cs . Aeson.encode) #valuesSchema "values.schema.json"
-  mayWrite cs #readme "README.md"
-  mayWrite cs #license "LICENSE"
-  mayWrite cs #helmignore ".helmignore"
+      writeField :: (Eq a, Monoid a) => (a -> ByteString) -> Lens' Helm a -> FilePath -> IO ()
+      writeField encode field = mayWrite encode (view field helm)
+      writeTemplates :: [Yaml.Object] -> IO ()
+      writeTemplates = traverse_ $ \yaml -> do
+        name <-
+          maybe (throwString "manifest has no name") (pure . cs) $
+            preview (ix "metadata" % key "name" % _String) yaml
+        kind <-
+          maybe
+            (throwString $ "manifest `" <> name <> "` has no kind")
+            (pure . toKebab . fromHumps . cs)
+            $ preview (ix "kind" % _String) yaml
+        mayWrite Yaml.encode yaml $ "templates" </> name </> kind <.> "yaml"
+      writeCrds :: [Yaml.Object] -> IO ()
+      writeCrds = traverse_ $ \crd -> do
+        name <-
+          maybe (throwString "CRD has no name") (pure . cs) $
+            preview (ix "metadata" % key "name" % _String) crd
+        mayWrite Yaml.encode crd $ "crds" </> name <.> "yaml"
+
+  writeTemplates $ view #templates helm
+  writeCrds $ view #crds helm
+  writeField Yaml.encode #values "values.yaml"
+  writeField Yaml.encode #chart "Chart.yaml"
+  writeField (cs . Aeson.encode) #valuesSchema "values.schema.json"
+  writeField cs #readme "README.md"
+  writeField cs #license "LICENSE"
+  writeField cs #helmignore ".helmignore"
 
 main :: IO ()
 main = do
