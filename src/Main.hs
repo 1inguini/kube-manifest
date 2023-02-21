@@ -1,10 +1,10 @@
 module Main (main) where
 
-import Project (projects)
-import Util (Helm, Project, defaultHelm, encodeAll)
+import Project (project)
+import Util (Helm, Project, encodeAll)
 
 import Control.Exception.Safe (throwString, try)
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (_String)
@@ -14,11 +14,11 @@ import Data.Foldable (traverse_)
 import Data.String.Conversions (cs)
 import qualified Data.Yaml as Yaml
 import Optics (Lens', preview, view)
-import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
+import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory, removeDirectoryRecursive, removeFile)
 import System.FilePath (dropFileName, (</>))
 
-generate :: IO ()
-generate = traverse_ processProject projects
+-- generate :: IO ()
+-- generate = traverse_ processProject projects
 
 projectDir :: FilePath
 projectDir = "werf"
@@ -26,25 +26,37 @@ projectDir = "werf"
 processProject :: Project -> IO ()
 processProject proj = do
   let werf = encodeAll $ view #project proj : view #images proj
-  projectName <- maybe (throwString "no field `project`") pure $ do
-    proj <- KeyMap.lookup "project" $ view #project proj
-    preview _String proj
-  let dir = projectDir </> cs projectName
-  _ <- try @_ @IOError $ removeDirectoryRecursive dir
+  -- projectName <- maybe (throwString "no field `project`") pure $ do
+  --   proj <- KeyMap.lookup "project" $ view #project proj
+  --   preview _String proj
+  -- let dir = projectDir </> cs projectName
+  let dir = projectDir
   createDirectoryIfMissing True dir
-  ByteString.writeFile (dir </> "werf.yaml") werf
-  putStrLn $ "# wrote to: " <> dir </> "werf.yaml"
+  let path = dir </> "werf.yaml"
+  removeFile path
+  ByteString.writeFile path werf
+  putStrLn $ "# wrote to: " <> path
   processHelm (dir </> ".helm") $ view #helm proj
 
 processHelm :: FilePath -> Helm -> IO ()
 processHelm dir helm = do
   createDirectoryIfMissing True dir
-  let mayWrite :: Eq a => (a -> ByteString) -> Lens' Helm a -> FilePath -> IO ()
+  let mayWrite ::
+        forall a. (Eq a, Monoid a) => (a -> ByteString) -> Lens' Helm a -> FilePath -> IO ()
       mayWrite encode field subPath =
         let val = view field helm
-         in unless (view field defaultHelm == val) $ do
-              let path = dir </> subPath
-              createDirectoryIfMissing True $ dropFileName path
+            path = dir </> subPath
+            subdir = dropFileName path
+         in unless ((mempty :: a) == val) $ do
+              createDirectoryIfMissing True subdir
+              traverse_
+                ( \f ->
+                    let path = subdir </> f
+                     in do
+                          isFile <- doesFileExist path
+                          when isFile $ removeFile path
+                )
+                =<< listDirectory subdir
               ByteString.writeFile path $ encode val
               putStrLn $ "# wrote to: " <> path
   mayWrite encodeAll #templates "templates/manifests.yaml"
@@ -59,4 +71,7 @@ processHelm dir helm = do
 main :: IO ()
 main = do
   createDirectoryIfMissing True projectDir
-  generate
+  processProject project
+
+-- createDirectoryIfMissing True projectDir
+-- generate

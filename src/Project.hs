@@ -1,5 +1,5 @@
 module Project (
-  projects,
+  project,
 )
 where
 
@@ -10,7 +10,7 @@ import Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (AsJSON (_JSON), key, _Object)
 import Data.FileEmbed (embedStringFile)
 import Data.Record.Anon
-import Data.Record.Anon.Simple (Record, inject, merge, project)
+import Data.Record.Anon.Simple (Record, inject, merge)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Scientific (Scientific)
 import Data.Text (Text)
@@ -24,7 +24,11 @@ import Secret
 import TH (objQQ)
 import Text.Heredoc (here)
 import Util (
+  Application,
+  Helm,
   Project,
+  application,
+  concatApplication,
   configMap,
   configMapVolume,
   containerPort,
@@ -37,18 +41,18 @@ import Util (
   issuer,
   meta,
   openebsLvmProvisioner,
+  secret,
   service,
   servicePort,
   systemClusterCritical,
   toObj,
   volumeMount,
-  werfProject,
  )
 import qualified Util
 
-openebs :: Project
+openebs :: Application
 openebs =
-  werfProject
+  application
     "openebs"
     ANON
       { helm =
@@ -83,9 +87,9 @@ provisioner: local.csi.openebs.io
       }
 
 -- config for coredns
-dns :: Project
+dns :: Application
 dns =
-  werfProject "dns" $
+  application "dns" $
     let ?app = "coredns"
         ?name = ?app
      in let health = Util.name "health"
@@ -154,9 +158,9 @@ $service:
                       }
               }
 
-projectcontour :: Project
+projectcontour :: Application
 projectcontour =
-  werfProject "projectcontour" $
+  application "projectcontour" $
     let ?app = "contour"
      in ANON
           { helm =
@@ -188,9 +192,9 @@ contour:
                   }
           }
 
-certManager :: Project
+certManager :: Application
 certManager =
-  werfProject
+  application
     "cert-manager"
     ANON
       { helm =
@@ -209,12 +213,31 @@ dependencies:
 cert-manager:
   installCRDs: true
 |]
+              , templates =
+                  [ [objQQ|
+$secret:
+type: Opaque
+stringData:
+  key: $cloudflareOriginCAKey
+|]
+                  , [objQQ|
+apiVersion: "cert-manager.k8s.cloudflare.com/v1"
+kind: "OriginIssuer"
+metadata: $meta
+spec:
+  requestType: OriginECC
+  auth:
+    serviceKeyRef:
+      name: $?name
+      key: key
+|]
+                  ]
               }
       }
 
-kubernetesDashboard :: Project
+kubernetesDashboard :: Application
 kubernetesDashboard =
-  werfProject "kubernetes-dashboard" $
+  application "kubernetes-dashboard" $
     let admin = "cluster-admin"
      in ANON
           { helm =
@@ -255,9 +278,9 @@ subjects:
                   }
           }
 
-registry :: Project
+registry :: Application
 registry =
-  werfProject "registry" $
+  application "registry" $
     let ?app = "harbor" :: Text
         ?name = ?app
      in let notaryDomain = "notary." <> domain
@@ -387,12 +410,15 @@ harbor:
 --   , registry
 --   ]
 
-projects :: [Project]
-projects =
-  [ certManager
-  , dns
-  , kubernetesDashboard
-  , openebs
-  , projectcontour
-  , registry
-  ]
+project :: Project
+project =
+  Anon.applyPending $
+    Anon.insert #project [objQQ|a: b|] $
+      concatApplication
+        [ certManager
+        , dns
+        , kubernetesDashboard
+        , openebs
+        , projectcontour
+        , registry
+        ]

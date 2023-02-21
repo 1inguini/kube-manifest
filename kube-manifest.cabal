@@ -47,6 +47,7 @@ common common
     TypeApplications
     TypeFamilies
     TypeOperators
+    UndecidableInstances
 
   build-depends:
     , aeson
@@ -78,13 +79,6 @@ common common
     , vector
     , yaml
 
-  -- Modules included in this executable, other than Main.
-  other-modules:
-    Project
-    Secret
-    TH
-    Util
-
   ghc-options:
     -threaded -rtsopts "-with-rtsopts=-N -I0 -qg"
     -fplugin=Data.Record.Anon.Plugin -fconstraint-solver-iterations=10
@@ -97,7 +91,14 @@ common common
 executable manifest
   import:         common
   main-is:        Main.hs
-  hs-source-dirs: secret src
+  hs-source-dirs: src secret
+
+  -- Modules included in this executable, other than Main.
+  other-modules:
+    Project
+    Secret
+    TH
+    Util
 
 test-suite kube-manifest-test
   import:           common
