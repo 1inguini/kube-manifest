@@ -39,7 +39,12 @@ notDefined name =
   notDefinedField field _ = fail (field <> " is not defined for " <> name)
 
 here :: QuasiQuoter
-here = (notDefined "here"){quoteExp = lift}
+here =
+  (notDefined "here")
+    { quoteExp = \s -> lift $ case s of
+        '\n' : s -> s
+        s -> s
+    }
 
 objQQ :: QuasiQuoter
 objQQ = (notDefined "objQQ"){quoteExp = objExp}

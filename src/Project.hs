@@ -1,5 +1,5 @@
 module Project (
-  projects,
+  project,
 )
 where
 
@@ -10,7 +10,7 @@ import Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (AsJSON (_JSON), key, _Object)
 import Data.FileEmbed (embedStringFile)
 import Data.Record.Anon
-import Data.Record.Anon.Simple (Record, inject, merge, project)
+import Data.Record.Anon.Simple (Record, inject, merge)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Scientific (Scientific)
 import Data.Text (Text)
@@ -24,7 +24,12 @@ import Secret
 import TH (objQQ)
 import Text.Heredoc (here)
 import Util (
+  Application,
+  Helm,
   Project,
+  application,
+  cloudflareOriginCACertificate,
+  concatApplication,
   configMap,
   configMapVolume,
   containerPort,
@@ -34,21 +39,21 @@ import Util (
   httpGetProbe,
   httpServicePort,
   ingressContourTlsAnnotations,
-  issuer,
+  issuerName,
   meta,
   openebsLvmProvisioner,
+  secret,
   service,
   servicePort,
   systemClusterCritical,
   toObj,
   volumeMount,
-  werfProject,
  )
 import qualified Util
 
-openebs :: Project
+openebs :: Application
 openebs =
-  werfProject
+  application
     "openebs"
     ANON
       { helm =
@@ -83,36 +88,34 @@ provisioner: local.csi.openebs.io
       }
 
 -- config for coredns
-dns :: Project
+dns :: Application
 dns =
-  werfProject "dns" $
-    let ?app = "coredns"
-        ?name = ?app
-     in let health = Util.name "health"
-            ready = Util.name "ready"
-            metrics = Util.name "metrics"
-            mountPath = "/etc/coredns/"
-         in ANON
-              { helm =
-                  defineHelm
-                    ANON
-                      { templates =
-                          [ let coredns = Util.container "registry.k8s.io/coredns/coredns:v1.9.3"
-                                coreFilePath = mountPath </> "Corefile"
-                                corednsConf =
-                                  toObj
-                                    ANON
-                                      { ports =
-                                          [ containerPort 53 <> [objQQ|protocol: UDP|]
-                                          , metrics $ containerPort 9153
-                                          , health $ containerPort 8080
-                                          , ready $ containerPort 8081
-                                          ]
-                                      , livenessProbe = health $ httpGetProbe "health"
-                                      , readinessProbe = ready $ httpGetProbe "ready"
-                                      , volumeMounts = [volumeMount mountPath]
-                                      }
-                             in [objQQ|
+  application "coredns" $
+    let health = Util.name $ ?app <> "-" <> "health"
+        ready = Util.name $ ?app <> "-" <> "ready"
+        metrics = Util.name $ ?app <> "-" <> "metrics"
+        mountPath = "/etc/coredns/"
+     in ANON
+          { helm =
+              defineHelm
+                ANON
+                  { templates =
+                      [ let coredns = Util.container "registry.k8s.io/coredns/coredns:v1.9.3"
+                            coreFilePath = mountPath </> "Corefile"
+                            corednsConf =
+                              toObj
+                                ANON
+                                  { ports =
+                                      [ containerPort 53 <> [objQQ|protocol: UDP|]
+                                      , metrics $ containerPort 9153
+                                      , health $ containerPort 8080
+                                      , ready $ containerPort 8081
+                                      ]
+                                  , livenessProbe = health $ httpGetProbe "health"
+                                  , readinessProbe = ready $ httpGetProbe "ready"
+                                  , volumeMounts = [volumeMount mountPath]
+                                  }
+                         in [objQQ|
 $deployment:
   containers:
   - $coredns:
@@ -133,8 +136,8 @@ $deployment:
   volumes:
   - $configMapVolume
 |]
-                          , let port = servicePort 53
-                             in [objQQ|
+                      , let port = servicePort 53
+                         in [objQQ|
 $service:
   externalIPs:
   - $externalIp
@@ -142,21 +145,21 @@ $service:
   - $port:
     protocol: UDP
 |]
-                          , configMap
-                              (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
-                          , metrics
-                              [objQQ|
+                      , configMap
+                          (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
+                      , metrics
+                          [objQQ|
 $service:
   ports:
   - $httpServicePort
 |]
-                          ]
-                      }
-              }
+                      ]
+                  }
+          }
 
-projectcontour :: Project
+projectcontour :: Application
 projectcontour =
-  werfProject "projectcontour" $
+  application "projectcontour" $
     let ?app = "contour"
      in ANON
           { helm =
@@ -188,9 +191,9 @@ contour:
                   }
           }
 
-certManager :: Project
+certManager :: Application
 certManager =
-  werfProject
+  application
     "cert-manager"
     ANON
       { helm =
@@ -209,12 +212,33 @@ dependencies:
 cert-manager:
   installCRDs: true
 |]
+              , templates =
+                  let ?name = issuerName
+                   in [ [objQQ|
+$secret:
+type: Opaque
+stringData:
+  key: $cloudflareOriginCAKey
+  ca.crt: $cloudflareOriginCACertificate
+|]
+                      , [objQQ|
+apiVersion: cert-manager.k8s.cloudflare.com/v1
+kind: OriginIssuer
+metadata: $meta
+spec:
+  requestType: OriginECC
+  auth:
+    serviceKeyRef:
+      name: $?name
+      key: key
+|]
+                      ]
               }
       }
 
-kubernetesDashboard :: Project
+kubernetesDashboard :: Application
 kubernetesDashboard =
-  werfProject "kubernetes-dashboard" $
+  application "kubernetes-dashboard" $
     let admin = "cluster-admin"
      in ANON
           { helm =
@@ -255,13 +279,14 @@ subjects:
                   }
           }
 
-registry :: Project
+registry :: Application
 registry =
-  werfProject "registry" $
+  application "registry" $
     let ?app = "harbor" :: Text
         ?name = ?app
      in let notaryDomain = "notary." <> domain
-            notarySecret = "notary" :: Text
+            notarySecret = ?app <> "-notary"
+            coreSecret = ?app
             url = "https://" <> domain
          in ANON
               { helm =
@@ -288,13 +313,18 @@ harbor:
     tls:
       certSource: secret
       secret:
-        secretName: $?app
+        secretName: $coreSecret
         notarySecretName: $notarySecret
+    internalTLS:
+      enabled: false
+  caBundleSecretName: $issuerName
+  caSecretName: $issuerName
   externalURL: $url
   updateStrategy:
     type: Recreate
+  notary:
+    enabled: false
 |]
-                      , templates = issuer
                       }
               }
 
@@ -387,12 +417,20 @@ harbor:
 --   , registry
 --   ]
 
-projects :: [Project]
-projects =
-  [ certManager
-  , dns
-  , kubernetesDashboard
-  , openebs
-  , projectcontour
-  , registry
-  ]
+project :: Project
+project =
+  Anon.applyPending
+    $ Anon.insert
+      #project
+      [objQQ|
+configVersion: 1
+project: oneinguini
+|]
+    $ concatApplication
+      [ certManager
+      , dns
+      , kubernetesDashboard
+      , openebs
+      , projectcontour
+      , registry
+      ]
