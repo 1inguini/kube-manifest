@@ -39,14 +39,6 @@ processProject proj = do
 processHelm :: FilePath -> Helm -> IO ()
 processHelm dir helm = do
   createDirectoryIfMissing True dir
-  traverse_
-    ( \f ->
-        let path = dir </> f
-         in do
-              isDir <- doesDirectoryExist path
-              if isDir then removeDirectoryRecursive path else removeFile path
-    )
-    =<< listDirectory dir
   let mayWrite ::
         forall a. (Eq a, Monoid a) => (a -> ByteString) -> a -> FilePath -> IO ()
       mayWrite encode val subPath =
@@ -69,11 +61,11 @@ processHelm dir helm = do
             $ preview (ix "kind" % _String) yaml
         mayWrite Yaml.encode yaml $ "templates" </> name </> kind <.> "yaml"
       writeCrds :: [Yaml.Object] -> IO ()
-      writeCrds = traverse_ $ \crd -> do
+      writeCrds = traverse_ $ \yaml -> do
         name <-
           maybe (throwString "CRD has no name") (pure . cs) $
-            preview (ix "metadata" % key "name" % _String) crd
-        mayWrite Yaml.encode crd $ "crds" </> name <.> "yaml"
+            preview (ix "metadata" % key "name" % _String) yaml
+        mayWrite Yaml.encode yaml $ "crds" </> name <.> "yaml"
 
   writeTemplates $ view #templates helm
   writeCrds $ view #crds helm
