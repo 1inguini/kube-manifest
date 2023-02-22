@@ -7,7 +7,6 @@ module Util (
   configMapVolume,
   container,
   containerPort,
-  defaultHelm,
   defineHelm,
   deployment,
   domain,
@@ -68,7 +67,7 @@ import Data.Aeson.Optics (AsValue (_Object), key)
 import Data.ByteString (ByteString)
 import Data.Record.Anon (AllFields, K (K), KnownFields, Merge, Proxy (..), RowHasField, SubRow, unI, pattern (:=))
 import qualified Data.Record.Anon.Advanced as Record.Advanced
-import Data.Record.Anon.Simple (Record, inject, insert, merge)
+import Data.Record.Anon.Simple (Record, fromAdvanced, inject, insert, merge, toAdvanced)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
 import qualified Data.Yaml as Yaml
@@ -443,24 +442,27 @@ werfProject projectName =
         ANON
           { project = werffile
           , images = []
-          , helm = defaultHelm
+          , helm = mempty
           }
 
-defaultHelm :: Helm
-defaultHelm =
-  ANON
-    { templates = mempty
-    , crds = mempty
-    , values = mempty
-    , valuesSchema = mempty
-    , chart = mempty
-    , readme = mempty
-    , license = mempty
-    , helmignore = mempty
-    }
+mergeYaml :: Yaml.Value -> Yaml.Value -> Yaml.Value
+mergeYaml (Yaml.Array x) (Yaml.Array y) = Yaml.Array $ x <> y
+mergeYaml (Yaml.Object x) (Yaml.Object y) = Yaml.Object $ mergeObject x y
+mergeYaml x _ = x
+
+mergeObject :: Yaml.Object -> Yaml.Object -> Yaml.Object
+mergeObject = KeyMap.unionWith mergeYaml
+
+instance (AllFields r Semigroup, KnownFields r) => Semigroup (Record r) where
+  (<>) x y =
+    fromAdvanced $
+      Record.Advanced.czipWith (Proxy :: Proxy Semigroup) (<>) (toAdvanced x) (toAdvanced y)
+
+instance (AllFields r Semigroup, AllFields r Monoid, KnownFields r) => Monoid (Record r) where
+  mempty = fromAdvanced $ Record.Advanced.cpure (Proxy :: Proxy Monoid) mempty
 
 defineHelm :: SubRow HelmRow r => Record r -> Helm
-defineHelm = flip inject defaultHelm
+defineHelm = flip inject mempty
 
 encodeAll :: [Yaml.Object] -> ByteString
 encodeAll = foldl (\acc doc -> acc <> "---\n" <> doc) mempty . fmap Yaml.encode

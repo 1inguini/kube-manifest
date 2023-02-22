@@ -47,6 +47,7 @@ common common
     TypeApplications
     TypeFamilies
     TypeOperators
+    UndecidableInstances
 
   build-depends:
     , aeson
