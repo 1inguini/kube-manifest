@@ -88,34 +88,32 @@ provisioner: local.csi.openebs.io
 -- config for coredns
 dns :: Application
 dns =
-  application "dns" $
-    let ?app = "coredns"
-        ?name = ?app
-     in let health = Util.name "health"
-            ready = Util.name "ready"
-            metrics = Util.name "metrics"
-            mountPath = "/etc/coredns/"
-         in ANON
-              { helm =
-                  defineHelm
-                    ANON
-                      { templates =
-                          [ let coredns = Util.container "registry.k8s.io/coredns/coredns:v1.9.3"
-                                coreFilePath = mountPath </> "Corefile"
-                                corednsConf =
-                                  toObj
-                                    ANON
-                                      { ports =
-                                          [ containerPort 53 <> [objQQ|protocol: UDP|]
-                                          , metrics $ containerPort 9153
-                                          , health $ containerPort 8080
-                                          , ready $ containerPort 8081
-                                          ]
-                                      , livenessProbe = health $ httpGetProbe "health"
-                                      , readinessProbe = ready $ httpGetProbe "ready"
-                                      , volumeMounts = [volumeMount mountPath]
-                                      }
-                             in [objQQ|
+  application "coredns" $
+    let health = Util.name $ ?app <> "-" <> "health"
+        ready = Util.name $ ?app <> "-" <> "ready"
+        metrics = Util.name $ ?app <> "-" <> "metrics"
+        mountPath = "/etc/coredns/"
+     in ANON
+          { helm =
+              defineHelm
+                ANON
+                  { templates =
+                      [ let coredns = Util.container "registry.k8s.io/coredns/coredns:v1.9.3"
+                            coreFilePath = mountPath </> "Corefile"
+                            corednsConf =
+                              toObj
+                                ANON
+                                  { ports =
+                                      [ containerPort 53 <> [objQQ|protocol: UDP|]
+                                      , metrics $ containerPort 9153
+                                      , health $ containerPort 8080
+                                      , ready $ containerPort 8081
+                                      ]
+                                  , livenessProbe = health $ httpGetProbe "health"
+                                  , readinessProbe = ready $ httpGetProbe "ready"
+                                  , volumeMounts = [volumeMount mountPath]
+                                  }
+                         in [objQQ|
 $deployment:
   containers:
   - $coredns:
@@ -136,8 +134,8 @@ $deployment:
   volumes:
   - $configMapVolume
 |]
-                          , let port = servicePort 53
-                             in [objQQ|
+                      , let port = servicePort 53
+                         in [objQQ|
 $service:
   externalIPs:
   - $externalIp
@@ -145,17 +143,17 @@ $service:
   - $port:
     protocol: UDP
 |]
-                          , configMap
-                              (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
-                          , metrics
-                              [objQQ|
+                      , configMap
+                          (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
+                      , metrics
+                          [objQQ|
 $service:
   ports:
   - $httpServicePort
 |]
-                          ]
-                      }
-              }
+                      ]
+                  }
+          }
 
 projectcontour :: Application
 projectcontour =
@@ -220,8 +218,8 @@ stringData:
   key: $cloudflareOriginCAKey
 |]
                   , [objQQ|
-apiVersion: "cert-manager.k8s.cloudflare.com/v1"
-kind: "OriginIssuer"
+apiVersion: cert-manager.k8s.cloudflare.com/v1
+kind: OriginIssuer
 metadata: $meta
 spec:
   requestType: OriginECC
@@ -410,13 +408,18 @@ harbor:
 
 project :: Project
 project =
-  Anon.applyPending $
-    Anon.insert #project [objQQ|a: b|] $
-      concatApplication
-        [ certManager
-        , dns
-        , kubernetesDashboard
-        , openebs
-        , projectcontour
-        , registry
-        ]
+  Anon.applyPending
+    $ Anon.insert
+      #project
+      [objQQ|
+configVersion: 1
+project: oneinguini
+|]
+    $ concatApplication
+      [ certManager
+      , dns
+      , kubernetesDashboard
+      , openebs
+      , projectcontour
+      , registry
+      ]
