@@ -1,11 +1,12 @@
 module Main (main) where
 
 import Project (projects)
-import Util (Helm, Project, defaultHelm, encodeAll)
+import Util (Helm, Project, encodeAll)
 
 import Control.Exception.Safe (throwString, try)
 import Control.Monad (unless)
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (key, _String)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
@@ -13,7 +14,7 @@ import Data.Foldable (traverse_)
 import Data.String.Conversions (cs)
 import qualified Data.Yaml as Yaml
 import Optics (Ixed (ix), Lens', preview, view, (%))
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, listDirectory, removeDirectoryRecursive, removeFile)
+import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath (dropFileName, (<.>), (</>))
 import Text.Casing (fromHumps, toKebab)
 
