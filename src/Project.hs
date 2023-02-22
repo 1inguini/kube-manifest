@@ -28,6 +28,7 @@ import Util (
   Helm,
   Project,
   application,
+  cloudflareOriginCACertificate,
   concatApplication,
   configMap,
   configMapVolume,
@@ -38,6 +39,7 @@ import Util (
   httpGetProbe,
   httpServicePort,
   ingressContourTlsAnnotations,
+  issuerName,
   meta,
   openebsLvmProvisioner,
   secret,
@@ -211,13 +213,15 @@ cert-manager:
   installCRDs: true
 |]
               , templates =
-                  [ [objQQ|
+                  let ?name = issuerName
+                   in [ [objQQ|
 $secret:
 type: Opaque
 stringData:
   key: $cloudflareOriginCAKey
+  ca.crt: $cloudflareOriginCACertificate
 |]
-                  , [objQQ|
+                      , [objQQ|
 apiVersion: cert-manager.k8s.cloudflare.com/v1
 kind: OriginIssuer
 metadata: $meta
@@ -228,7 +232,7 @@ spec:
       name: $?name
       key: key
 |]
-                  ]
+                      ]
               }
       }
 
@@ -281,7 +285,8 @@ registry =
     let ?app = "harbor" :: Text
         ?name = ?app
      in let notaryDomain = "notary." <> domain
-            notarySecret = "notary" :: Text
+            notarySecret = ?app <> "-notary"
+            coreSecret = ?app
             url = "https://" <> domain
          in ANON
               { helm =
@@ -308,11 +313,17 @@ harbor:
     tls:
       certSource: secret
       secret:
-        secretName: $?app
+        secretName: $coreSecret
         notarySecretName: $notarySecret
+    internalTLS:
+      enabled: false
+  caBundleSecretName: $issuerName
+  caSecretName: $issuerName
   externalURL: $url
   updateStrategy:
     type: Recreate
+  notary:
+    enabled: false
 |]
                       }
               }
