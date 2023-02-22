@@ -445,14 +445,6 @@ werfProject projectName =
           , helm = mempty
           }
 
-mergeYaml :: Yaml.Value -> Yaml.Value -> Yaml.Value
-mergeYaml (Yaml.Array x) (Yaml.Array y) = Yaml.Array $ x <> y
-mergeYaml (Yaml.Object x) (Yaml.Object y) = Yaml.Object $ mergeObject x y
-mergeYaml x _ = x
-
-mergeObject :: Yaml.Object -> Yaml.Object -> Yaml.Object
-mergeObject = KeyMap.unionWith mergeYaml
-
 instance (AllFields r Semigroup, KnownFields r) => Semigroup (Record r) where
   (<>) x y =
     fromAdvanced $

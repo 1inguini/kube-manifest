@@ -10,20 +10,13 @@ module TH (
   here,
 ) where
 
-import Control.Arrow (Arrow (first))
-import Control.Monad (foldM)
 import Data.Aeson (Key, Options (sumEncoding), ToJSON (toJSON))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Optics (members, _Object, _String)
 import qualified Data.Aeson.TH as Aeson
 import qualified Data.List as List
 import Data.Maybe (fromMaybe, maybeToList)
-import Data.Record.Anon
-import qualified Data.Record.Anon.Advanced as Record.Advanced
-import Data.Record.Anon.Simple (Record, project, toAdvanced)
 import Data.String.Conversions (cs)
-import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 import Data.Yaml (decodeThrow)
@@ -31,7 +24,7 @@ import qualified Data.Yaml as Yaml
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote (QuasiQuoter (QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType))
 import Language.Haskell.TH.Syntax (Lift (lift), qAddDependentFile)
-import Optics (both, ifoldMapOf, ifolded, ifoldrOf, over, preview)
+import Optics (ifoldMapOf, ifolded, ifoldlOf')
 
 notDefined :: String -> QuasiQuoter
 notDefined name =
@@ -70,7 +63,7 @@ objExp str = do
                 macroDict :: [(String, Yaml.Value -> Yaml.Object)]
                 macroDict = $macroDictE
                 objectReplace :: Yaml.Object -> Yaml.Object
-                objectReplace = ifoldMapOf ifolded kvReplace
+                objectReplace = ifoldlOf' ifolded (\k acc -> mergeObject acc . kvReplace k) mempty
                 kvReplace :: Key -> Yaml.Value -> Yaml.Object
                 kvReplace key Yaml.Null =
                   fromMaybe (KeyMap.singleton key Yaml.Null) $ do
@@ -108,6 +101,14 @@ objExp str = do
   valueSearch (Yaml.Array vec) = mconcat $ valueSearch <$> Vector.toList vec
   valueSearch (Yaml.String text) = (maybeToList $ List.stripPrefix prefix $ cs text, mempty, mempty)
   valueSearch _ = mempty
+
+mergeYaml :: Yaml.Value -> Yaml.Value -> Yaml.Value
+mergeYaml (Yaml.Array x) (Yaml.Array y) = Yaml.Array $ x <> y
+mergeYaml (Yaml.Object x) (Yaml.Object y) = Yaml.Object $ mergeObject x y
+mergeYaml x _ = x
+
+mergeObject :: Yaml.Object -> Yaml.Object -> Yaml.Object
+mergeObject = KeyMap.unionWith mergeYaml
 
 getYamlFile :: forall a. Yaml.FromJSON a => FilePath -> TH.Q a
 getYamlFile path =
