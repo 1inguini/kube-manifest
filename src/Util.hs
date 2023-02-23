@@ -43,7 +43,6 @@ module Util (
   rootOwn,
   rootUid,
   secret,
-  secret,
   service,
   servicePort,
   setJSON,
@@ -57,6 +56,11 @@ module Util (
   volumeMount,
   workload,
   cloudflareOriginCACertificate,
+  image,
+  nobodyGid,
+  nobodyUid,
+  nobodyOwn,
+  directory,
 ) where
 
 import Secret (cloudflareOriginCAKey, host)
@@ -67,17 +71,17 @@ import Control.Monad.State.Strict (MonadState, modify)
 import Data.Aeson (ToJSON (toJSON))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
-import Data.Aeson.KeyMap (KeyMap)
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Optics (AsValue (_Object), key)
+import Data.Aeson.Optics (AsValue (_Object))
 import Data.ByteString (ByteString)
 import Data.Record.Anon (AllFields, K (K), KnownFields, Merge, Proxy (..), RowHasField, SubRow, unI, pattern (:=))
 import qualified Data.Record.Anon.Advanced as Record.Advanced
 import Data.Record.Anon.Simple (Record, fromAdvanced, inject, insert, merge, toAdvanced)
 import qualified Data.Record.Anon.Simple as Anon
+import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Yaml as Yaml
-import Optics (A_Setter, Is, Optic', over, set, view, (%))
+import Optics (A_Setter, Is, Optic', over, set, view)
 import System.Posix (GroupID, UserID)
 
 registry :: Text
@@ -154,6 +158,13 @@ rootUid :: UserID
 rootUid = 0
 rootGid :: GroupID
 rootGid = 0
+
+nobodyOwn :: Owner
+nobodyOwn = (nobodyUid, nobodyGid)
+nobodyUid :: UserID
+nobodyUid = 65534
+nobodyGid :: GroupID
+nobodyGid = 65534
 
 meta :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => Yaml.Object
 meta =
@@ -455,6 +466,12 @@ application subdomain =
 --     , license = mempty
 --     , helmignore = mempty
 --     }
+
+image :: (?name :: Text) => Yaml.Object
+image = [objQQ|image: $?name|]
+
+directory :: (?name :: Text) => FilePath
+directory = "/" <> cs ?name
 
 mergeYaml :: Yaml.Value -> Yaml.Value -> Yaml.Value
 mergeYaml (Yaml.Array x) (Yaml.Array y) = Yaml.Array $ x <> y

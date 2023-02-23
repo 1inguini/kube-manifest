@@ -1,25 +1,24 @@
-module Project (
-  project,
-)
-where
+module Project (project) where
 
 import Control.Monad.State.Strict (MonadState, execState, modify)
 import Data.Aeson (toJSON)
 import qualified Data.Aeson as Aeson
 import Data.Aeson.KeyMap as KeyMap
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (AsJSON (_JSON), key, _Object)
-import Data.FileEmbed (embedStringFile)
+import Data.FileEmbed (embedFile, embedStringFile)
+import Data.Map as Map
 import Data.Record.Anon
 import Data.Record.Anon.Simple (Record, inject, merge)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Scientific (Scientific)
+import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding.Base64 (encodeBase64)
 import Optics (ix, modifying, over, review, set, (%))
 import System.FilePath ((</>))
 
-import qualified Data.Aeson.KeyMap as KeyMap
 import Secret
 import TH (objQQ)
 import Text.Heredoc (here)
@@ -35,12 +34,18 @@ import Util (
   containerPort,
   defineHelm,
   deployment,
+  directory,
   domain,
   httpGetProbe,
   httpServicePort,
+  image,
   ingressContourTlsAnnotations,
   issuerName,
   meta,
+  nobodyGid,
+  nobodyUid,
+  nonrootGid,
+  nonrootUid,
   openebsLvmProvisioner,
   secret,
   service,
@@ -50,6 +55,27 @@ import Util (
   volumeMount,
  )
 import qualified Util
+
+general :: Application
+general = application "oneingini" ANON{helm = defineHelm ANON{chart = [objQQ| apiVersion: v2|]}}
+
+nonroot :: Application
+nonroot =
+  application
+    "nonroot"
+    $ ANON
+      { images =
+          [ [objQQ|
+$image:
+git:
+- add: $directory
+  to: /etc
+docker:
+  USER: nonroot
+  WORKDIR: /home/nonroot
+|]
+          ]
+      }
 
 openebs :: Application
 openebs =
@@ -61,7 +87,6 @@ openebs =
             ANON
               { chart =
                   [objQQ|
-apiVersion: v2
 dependencies:
 - name: lvm-localpv 
   version: ~1.0.1
@@ -167,7 +192,6 @@ projectcontour =
                 ANON
                   { chart =
                       [objQQ|
-apiVersion: v2
 dependencies:
 - name: contour
   version: ~11.0.0
@@ -201,7 +225,6 @@ certManager =
             ANON
               { chart =
                   [objQQ|
-apiVersion: v2
 dependencies:
 - name: cert-manager
   version: ~1.11.0
@@ -246,7 +269,6 @@ kubernetesDashboard =
                 ANON
                   { chart =
                       [objQQ|
-apiVersion: v2
 dependencies:
 - name: kubernetes-dashboard
   version: ~6.0.0
@@ -427,7 +449,8 @@ configVersion: 1
 project: oneinguini
 |]
     $ concatApplication
-      [ certManager
+      [ general
+      , certManager
       , dns
       , kubernetesDashboard
       , openebs
