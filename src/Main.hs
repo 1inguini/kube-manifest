@@ -10,12 +10,11 @@ import Data.Aeson.Optics (key, _String)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Foldable (traverse_)
-import Data.Map (Map)
 import Data.String.Conversions (cs)
 import qualified Data.Yaml as Yaml
-import Optics (Ixed (ix), Lens', ifolded, itraverseOf_, preview, view, (%))
+import Optics (Ixed (ix), Lens', preview, view, (%))
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, listDirectory, removeDirectoryRecursive, removeFile)
-import System.FilePath (dropDrive, dropFileName, (<.>), (</>))
+import System.FilePath (dropFileName, (<.>), (</>))
 import Text.Casing (fromHumps, toKebab)
 
 -- generate :: IO ()

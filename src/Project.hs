@@ -316,13 +316,19 @@ cockroachdb:
   tls:
     enabled: true
     certs:
+      provided: true
       selfSigner:
-        enabled: false
-      certManager: true
-      useCertManagerV1CRDs: true
-      certManagerIssuer:
-        kind: Issuer
-        name: $localIssuerName
+        enabled: true
+        # caProvided: true
+        # caSecret: $localIssuerName
+      # tlsSecret: true
+      # selfSigner:
+      #   enabled: false
+      # certManager: true
+      # useCertManagerV1CRDs: true
+      # certManagerIssuer:
+      #   kind: Issuer
+      #   name: $localIssuerName
 |]
               }
       }
@@ -351,6 +357,7 @@ kubernetes-dashboard:
     name: $admin
   settings:
     itemsPerPage: 100
+    labelsLimit: 3
     # Number of seconds between every auto-refresh of logs
     logsAutoRefreshTimeInterval: 5
     # Number of seconds between every auto-refresh of every resource. Set 0 to disable
