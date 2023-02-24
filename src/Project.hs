@@ -23,6 +23,7 @@ import Util (
   httpServicePort,
   image,
   ingressContourTlsAnnotations,
+  issuer,
   issuerName,
   labels,
   localIssuerName,
@@ -220,35 +221,15 @@ cert-manager:
   installCRDs: true
 |]
               , templates =
-                  let ?name = issuerName
+                  let ?name = localIssuerName
                    in [ [objQQ|
-$secret:
-type: Opaque
-stringData:
-  key: $cloudflareOriginCAKey
-  ca.crt: $cloudflareOriginCACertificate
-|]
-                      , [objQQ|
-apiVersion: cert-manager.k8s.cloudflare.com/v1
-kind: OriginIssuer
-metadata: $meta
-spec:
-  requestType: OriginECC
-  auth:
-    serviceKeyRef:
-      name: $?name
-      key: key
-|]
-                      ]
-                        <> let ?name = localIssuerName
-                            in [ [objQQ|
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata: $meta
 spec:
   selfSigned: {}
 |]
-                               , [objQQ|
+                      , [objQQ|
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata: $meta
@@ -267,7 +248,7 @@ spec:
     kind: Issuer
     group: cert-manager.io
 |]
-                               ]
+                      ]
               }
       }
 
@@ -449,6 +430,7 @@ harbor:
   notary:
     enabled: false
 |]
+                      , templates = issuer
                       }
               }
 

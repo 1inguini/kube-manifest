@@ -61,9 +61,10 @@ module Util (
   volumeMount,
   werfProject,
   workload,
+  issuer,
 ) where
 
-import Secret (host)
+import Secret (cloudflareOriginCAKey, host)
 import TH (deriveJSON, here, objQQ)
 
 import Control.Arrow (first)
@@ -344,6 +345,29 @@ localIssuerName = "selfsigned-ca"
 
 issuerName :: Text
 issuerName = "cloudflare-origin-ca"
+
+issuer :: (?project :: Text, ?app :: Text) => [Yaml.Object]
+issuer =
+  let ?name = issuerName
+   in [ [objQQ|
+$secret:
+type: Opaque
+stringData:
+  key: $cloudflareOriginCAKey
+  ca.crt: $cloudflareOriginCACertificate
+|]
+      , [objQQ|
+apiVersion: cert-manager.k8s.cloudflare.com/v1
+kind: OriginIssuer
+metadata: $meta
+spec:
+  requestType: OriginECC
+  auth:
+    serviceKeyRef:
+      name: $?name
+      key: key
+|]
+      ]
 
 cloudflareOriginCACertificate :: Text
 cloudflareOriginCACertificate =
