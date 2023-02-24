@@ -1,33 +1,19 @@
 module Project (project) where
 
-import Control.Monad.State.Strict (MonadState, execState, modify)
-import Data.Aeson (toJSON)
-import qualified Data.Aeson as Aeson
 import Data.Aeson.KeyMap as KeyMap
-import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Optics (AsJSON (_JSON), key, _Object)
-import Data.FileEmbed (embedFile, embedStringFile)
-import Data.Map as Map
-import Data.Record.Anon
-import Data.Record.Anon.Simple (Record, inject, merge)
+import Data.FileEmbed (embedStringFile)
 import qualified Data.Record.Anon.Simple as Anon
-import Data.Scientific (Scientific)
-import Data.String.Conversions (cs)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import Data.Text.Encoding.Base64 (encodeBase64)
-import Optics (ix, modifying, over, review, set, (%))
 import System.FilePath ((</>))
 
 import Secret
 import TH (objQQ)
-import Text.Heredoc (here)
 import Util (
   Application,
-  Helm,
   Project,
   application,
   cloudflareOriginCACertificate,
+  clusterDomain,
   concatApplication,
   configMap,
   configMapVolume,
@@ -41,11 +27,9 @@ import Util (
   image,
   ingressContourTlsAnnotations,
   issuerName,
+  labels,
+  localIssuerName,
   meta,
-  nobodyGid,
-  nobodyUid,
-  nonrootGid,
-  nonrootUid,
   openebsLvmProvisioner,
   secret,
   service,
@@ -88,7 +72,7 @@ openebs =
               { chart =
                   [objQQ|
 dependencies:
-- name: lvm-localpv 
+- name: lvm-localpv
   version: ~1.0.1
   repository: https://openebs.github.io/lvm-localpv
 |]
@@ -116,9 +100,9 @@ provisioner: local.csi.openebs.io
 dns :: Application
 dns =
   application "coredns" $
-    let health = Util.name $ ?app <> "-" <> "health"
-        ready = Util.name $ ?app <> "-" <> "ready"
-        metrics = Util.name $ ?app <> "-" <> "metrics"
+    let health = Util.name "health"
+        ready = Util.name "ready"
+        metrics = Util.name "metrics"
         mountPath = "/etc/coredns/"
      in ANON
           { helm =
@@ -256,6 +240,90 @@ spec:
       key: key
 |]
                       ]
+                        <> let ?name = localIssuerName
+                            in [ [objQQ|
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata: $meta
+spec:
+  selfSigned: {}
+|]
+                               , [objQQ|
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: $meta
+spec:
+  duration: 2160h # 90d
+  renewBefore: 360h # 15d
+  isCA: true
+  secretName: $?name
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+  - $clusterDomain
+  issuerRef:
+    name: $?name
+    kind: Issuer
+    group: cert-manager.io
+|]
+                               ]
+              }
+      }
+
+cockroachdbName :: Text
+cockroachdbName = "cockroachdb"
+
+cockroachdb :: Application
+cockroachdb =
+  application
+    cockroachdbName
+    ANON
+      { helm =
+          defineHelm
+            ANON
+              { chart =
+                  [objQQ|
+dependencies:
+- name: cockroachdb
+  version: ~10.0.5
+  repository: https://charts.cockroachdb.com/
+|]
+              , values =
+                  [objQQ|
+cockroachdb:
+  clusterDomain: $clusterDomain
+  statefulset:
+    labels:
+      $labels:
+      app.kubernetes.io/component: $?app
+  service:
+    public:
+      labels:
+        $labels:
+        app.kubernetes.io/component: $?app
+    discovery:
+      labels:
+        $labels:
+        app.kubernetes.io/component: $?app
+    storage:
+      persistentVolume:
+        labels: $labels
+    init:
+      labels:
+        $labels:
+        app.kubernetes.io/component: init
+  tls:
+    enabled: true
+    certs:
+      selfSigner:
+        enabled: false
+      certManager: true
+      useCertManagerV1CRDs: true
+      certManagerIssuer:
+        kind: Issuer
+        name: $localIssuerName
+|]
               }
       }
 
@@ -281,6 +349,14 @@ kubernetes-dashboard:
     clusterReadOnlyRole: true
   serviceAccount:
     name: $admin
+  settings:
+    itemsPerPage: 100
+    # Number of seconds between every auto-refresh of logs
+    logsAutoRefreshTimeInterval: 5
+    # Number of seconds between every auto-refresh of every resource. Set 0 to disable
+    resourceAutoRefreshTimeInterval: 5
+    # Hide all access denied warnings in the notification panel
+    disableAccessDeniedNotifications: false
 |]
                   , templates =
                       [ let ?name = admin
@@ -295,9 +371,28 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: $admin
-    namespace: kubernetes-dashboard
+    namespace: $projectName
 |]
                       ]
+                  }
+          }
+
+authentication :: Application
+authentication =
+  let cockroachdb = projectName <> "-" <> cockroachdbName <> "-public"
+   in application
+        "authentication"
+        ANON
+          { helm =
+              defineHelm
+                ANON
+                  { chart =
+                      [objQQ|
+dependencies:
+- name: zitadel
+  version: ~4.1.4
+  repository: https://charts.zitadel.com
+|]
                   }
           }
 
@@ -439,6 +534,9 @@ harbor:
 --   , registry
 --   ]
 
+projectName :: Text
+projectName = "oneinguini"
+
 project :: Project
 project =
   Anon.applyPending
@@ -446,11 +544,12 @@ project =
       #project
       [objQQ|
 configVersion: 1
-project: oneinguini
+project: $projectName
 |]
     $ concatApplication
       [ general
       , certManager
+      , cockroachdb
       , dns
       , kubernetesDashboard
       , openebs

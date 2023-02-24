@@ -4,7 +4,8 @@ module Util (
   Project,
   application,
   assignJSON,
-  clusterIssuer,
+  cloudflareOriginCACertificate,
+  localIssuerName,
   concatApplication,
   configMap,
   configMapVolume,
@@ -12,6 +13,7 @@ module Util (
   containerPort,
   defineHelm,
   deployment,
+  directory,
   domain,
   emptyDirVolume,
   encodeAll,
@@ -19,17 +21,22 @@ module Util (
   hostPathVolume,
   httpGetProbe,
   httpServicePort,
+  image,
   ingressContourTls,
   ingressContourTlsAnnotations,
   ingressRule,
   issuerName,
   labelSelector,
+  labels,
   mergeObject,
   meta,
   mirror,
   name,
   named,
   noNamespace,
+  nobodyGid,
+  nobodyOwn,
+  nobodyUid,
   nonrootGid,
   nonrootOwn,
   nonrootUid,
@@ -55,12 +62,7 @@ module Util (
   v1Object,
   volumeMount,
   workload,
-  cloudflareOriginCACertificate,
-  image,
-  nobodyGid,
-  nobodyUid,
-  nobodyOwn,
-  directory,
+  clusterDomain,
 ) where
 
 import Secret (cloudflareOriginCAKey, host)
@@ -90,8 +92,8 @@ registry = "registry." <> host <> "/library/"
 mirror :: (a -> a -> b) -> a -> b
 mirror f a = f a a
 
-name :: Text -> ((?name :: Text) => a) -> a
-name name x = let ?name = name in x
+name :: (?app :: Text) => Text -> ((?name :: Text) => a) -> a
+name name x = let ?name = ?app <> "-" <> name in x
 
 -- addSuffix :: (?name :: Text) => Text -> ((?name :: Text) => a) -> a
 -- addSuffix suffix x = let ?name = ?name <> "-" <> suffix in x
@@ -129,6 +131,9 @@ toObj =
     . Record.Advanced.cmap (Proxy :: Proxy ToJSON) (K . toJSON . unI)
     . Anon.toAdvanced
 
+clusterDomain :: Text
+clusterDomain = "cluster.local"
+
 domain :: (?subdomain :: Text) => Text
 domain = ?subdomain <> "." <> host
 
@@ -138,9 +143,7 @@ named = toObj ANON{name = ?name}
 labelSelector :: (?subdomain :: Text, ?app :: Text) => Yaml.Object
 labelSelector =
   [objQQ|
-selector:
-  app: $?app
-  subdomain: $?subdomain
+selector: $labels
 |]
 
 type Owner = (UserID, GroupID)
@@ -166,13 +169,18 @@ nobodyUid = 65534
 nobodyGid :: GroupID
 nobodyGid = 65534
 
+labels :: (?subdomain :: Text, ?app :: Text) => Yaml.Object
+labels =
+  [objQQ|
+app: $?app
+subdomain: $?subdomain
+|]
+
 meta :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => Yaml.Object
 meta =
   [objQQ|
 name: $?name
-labels:
-  app: $?app
-  subdomain: $?subdomain
+labels: $labels
 |]
 
 object :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => Text -> Text -> Yaml.Object
@@ -333,8 +341,8 @@ data PathType
   | ImplementationSpecific
   deriving (Show)
 
-clusterIssuer :: Text
-clusterIssuer = "1inguini-ca-cluster-issuer"
+localIssuerName :: Text
+localIssuerName = "selfsigned-ca"
 
 issuerName :: Text
 issuerName = "cloudflare-origin-ca"
