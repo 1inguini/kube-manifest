@@ -1,12 +1,9 @@
 module Util (
-  Application,
   Helm,
   Project,
-  application,
   assignJSON,
   cloudflareOriginCACertificate,
-  localIssuerName,
-  concatApplication,
+  clusterDomain,
   configMap,
   configMapVolume,
   container,
@@ -28,6 +25,7 @@ module Util (
   issuerName,
   labelSelector,
   labels,
+  localIssuerName,
   mergeObject,
   meta,
   mirror,
@@ -61,11 +59,11 @@ module Util (
   v1,
   v1Object,
   volumeMount,
+  werfProject,
   workload,
-  clusterDomain,
 ) where
 
-import Secret (cloudflareOriginCAKey, host)
+import Secret (host)
 import TH (deriveJSON, here, objQQ)
 
 import Control.Arrow (first)
@@ -92,8 +90,8 @@ registry = "registry." <> host <> "/library/"
 mirror :: (a -> a -> b) -> a -> b
 mirror f a = f a a
 
-name :: (?app :: Text) => Text -> ((?name :: Text) => a) -> a
-name name x = let ?name = ?app <> "-" <> name in x
+name :: Text -> ((?name :: Text) => a) -> a
+name name x = let ?name = name in x
 
 -- addSuffix :: (?name :: Text) => Text -> ((?name :: Text) => a) -> a
 -- addSuffix suffix x = let ?name = ?name <> "-" <> suffix in x
@@ -134,13 +132,13 @@ toObj =
 clusterDomain :: Text
 clusterDomain = "cluster.local"
 
-domain :: (?subdomain :: Text) => Text
-domain = ?subdomain <> "." <> host
+domain :: (?project :: Text) => Text
+domain = ?project <> "." <> host
 
 named :: (?name :: Text) => Yaml.Object
 named = toObj ANON{name = ?name}
 
-labelSelector :: (?subdomain :: Text, ?app :: Text) => Yaml.Object
+labelSelector :: (?project :: Text, ?app :: Text) => Yaml.Object
 labelSelector =
   [objQQ|
 selector: $labels
@@ -169,21 +167,21 @@ nobodyUid = 65534
 nobodyGid :: GroupID
 nobodyGid = 65534
 
-labels :: (?subdomain :: Text, ?app :: Text) => Yaml.Object
+labels :: (?project :: Text, ?app :: Text) => Yaml.Object
 labels =
   [objQQ|
 app: $?app
-subdomain: $?subdomain
+project: $?project
 |]
 
-meta :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => Yaml.Object
+meta :: (?project :: Text, ?app :: Text, ?name :: Text) => Yaml.Object
 meta =
   [objQQ|
 name: $?name
 labels: $labels
 |]
 
-object :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => Text -> Text -> Yaml.Object
+object :: (?project :: Text, ?app :: Text, ?name :: Text) => Text -> Text -> Yaml.Object
 object ver kind =
   [objQQ|
 apiVersion: $ver
@@ -191,7 +189,7 @@ kind: $kind
 metadata: $meta
 |]
 
-v1Object :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => Text -> Yaml.Object
+v1Object :: (?project :: Text, ?app :: Text, ?name :: Text) => Text -> Yaml.Object
 v1Object = object "v1"
 
 -- annotate ::
@@ -204,7 +202,7 @@ v1Object = object "v1"
 --     object
 --     ANON{metadata = Anon.get #metadata object `merge` ANON{annotations = annotations}}
 
-configMap :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => ToJSON d => d -> Yaml.Object
+configMap :: (?project :: Text, ?app :: Text, ?name :: Text) => ToJSON d => d -> Yaml.Object
 configMap d = v1Object "ConfigMap" <> [objQQ|{ immutable: true, data: $d }|]
 
 container :: (?name :: Text) => Text -> Yaml.Object
@@ -240,13 +238,13 @@ execCommandProbe command = toObj ANON{exec = ANON{command = command}}
 noNamespace :: Text
 noNamespace = "_root"
 
-persistentVolumeClaim :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
+persistentVolumeClaim :: (?project :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
 persistentVolumeClaim spec = v1Object "PersistentVolumeClaim" <> toObj ANON{spec = spec}
 
 readWriteOnce :: Text
 readWriteOnce = "ReadWriteOnce"
 
-openebsLvmClaim :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => Text -> Yaml.Object
+openebsLvmClaim :: (?project :: Text, ?app :: Text, ?name :: Text) => Text -> Yaml.Object
 openebsLvmClaim size =
   persistentVolumeClaim
     ANON
@@ -261,7 +259,7 @@ openebsLvmClaim size =
 openebsLvmProvisioner :: Text
 openebsLvmProvisioner = "openebs-lvmpv"
 
-service :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
+service :: (?project :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
 service spec =
   v1Object "Service"
     <> toObj ANON{spec = over _Object (<> labelSelector) $ toJSON spec}
@@ -294,7 +292,7 @@ volumeMount :: (?name :: Text) => FilePath -> Yaml.Object
 volumeMount mountPath = toObj ANON{name = ?name, mountPath = mountPath}
 
 workload ::
-  (?subdomain :: Text, ?app :: Text, ?name :: Text) =>
+  (?project :: Text, ?app :: Text, ?name :: Text) =>
   (ToJSON podTemplateSpec) =>
   Text ->
   Yaml.Object ->
@@ -316,11 +314,11 @@ spec:
  where
   workload = object "apps/v1" kind
 
-deployment :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
+deployment :: (?project :: Text, ?app :: Text, ?name :: Text) => ToJSON spec => spec -> Yaml.Object
 deployment = workload "Deployment" [objQQ| strategy: { type: Recreate } |]
 
 statefulSet ::
-  (?subdomain :: Text, ?app :: Text, ?name :: Text) =>
+  (?project :: Text, ?app :: Text, ?name :: Text) =>
   (ToJSON podTemplateSpec, ToJSON persistentVolumeClaim) =>
   [persistentVolumeClaim] ->
   podTemplateSpec ->
@@ -368,7 +366,7 @@ XYZZ9m2c3fKwIenMMojL1eqydsgqj/wK4p5kagQ=
 -----END CERTIFICATE-----
 |]
 
-secret :: (?subdomain :: Text, ?app :: Text, ?name :: Text) => Yaml.Object
+secret :: (?project :: Text, ?app :: Text, ?name :: Text) => Yaml.Object
 secret = v1Object "Secret"
 
 ingressContourTlsAnnotations :: Yaml.Object
@@ -381,7 +379,7 @@ ingress.kubernetes.io/force-ssl-redirect: "true"
 |]
 
 ingressContourTls ::
-  (?subdomain :: Text, ?app :: Text, ?name :: Text) =>
+  (?project :: Text, ?app :: Text, ?name :: Text) =>
   (AllFields r ToJSON, KnownFields r, RowHasField "host" r Text) =>
   [Record r] ->
   -- [ Record
@@ -413,7 +411,7 @@ tls:
   ingress = object "networking.k8s.io/v1" "Ingress"
   hosts = view #host <$> rules
 
-ingressRule :: (?subdomain :: Text, ?project :: Text, ?name :: Text) => Text -> Yaml.Object
+ingressRule :: (?project :: Text, ?name :: Text) => Text -> Yaml.Object
 ingressRule path =
   [objQQ|
 host: $domain
@@ -440,27 +438,34 @@ type HelmRow =
 
 type Helm = Record HelmRow
 
-type ApplicationRow =
-  [ "images" := [Yaml.Object]
+type ProjectRow =
+  [ "project" := Yaml.Object
+  , "images" := [Yaml.Object]
   , "helm" := Helm
   ]
 
-type Application = Record ApplicationRow
-
-type ProjectRow = "project" := Yaml.Object : ApplicationRow
-
 type Project = Record ProjectRow
 
-application ::
-  SubRow ApplicationRow r =>
+werfProject ::
+  SubRow ProjectRow r =>
   Text ->
-  ((?subdomain :: Text, ?app :: Text, ?name :: Text) => Record r) ->
-  Application
-application subdomain =
-  let ?subdomain = subdomain
-      ?app = subdomain
-      ?name = subdomain
-   in flip inject mempty
+  ((?project :: Text, ?app :: Text, ?name :: Text) => Record r) ->
+  Project
+werfProject project =
+  let ?project = project
+      ?app = project
+      ?name = project
+   in flip
+        inject
+        ANON
+          { project =
+              [objQQ|
+configVersion: 1
+project: $project
+|]
+          , images = mempty
+          , helm = mempty
+          }
 
 -- defaultHelm :: Helm
 -- defaultHelm =
@@ -489,27 +494,27 @@ mergeYaml x _ = x
 mergeObject :: Yaml.Object -> Yaml.Object -> Yaml.Object
 mergeObject = KeyMap.unionWith mergeYaml
 
-appendApplication :: Application -> Application -> Application
-appendApplication x y =
-  ANON
-    { images = view #images x <> view #images y
-    , helm = appendHelm (view #helm x) (view #helm y)
-    }
- where
-  appendHelm x y =
-    ANON
-      { templates = view #templates x <> view #templates y
-      , crds = view #crds x <> view #crds y
-      , values = mergeObject (view #values x) (view #values y)
-      , valuesSchema = mergeObject (view #valuesSchema x) (view #valuesSchema y)
-      , chart = mergeObject (view #chart x) (view #chart y)
-      , readme = view #readme x <> view #readme y
-      , license = view #license x <> view #license y
-      , helmignore = view #helmignore x <> view #helmignore y
-      }
+-- appendApplication :: Project -> Project -> Project
+-- appendApplication x y =
+--   ANON
+--     { images = view #images x <> view #images y
+--     , helm = appendHelm (view #helm x) (view #helm y)
+--     }
+--  where
+--   appendHelm x y =
+--     ANON
+--       { templates = view #templates x <> view #templates y
+--       , crds = view #crds x <> view #crds y
+--       , values = mergeObject (view #values x) (view #values y)
+--       , valuesSchema = mergeObject (view #valuesSchema x) (view #valuesSchema y)
+--       , chart = mergeObject (view #chart x) (view #chart y)
+--       , readme = view #readme x <> view #readme y
+--       , license = view #license x <> view #license y
+--       , helmignore = view #helmignore x <> view #helmignore y
+--       }
 
-concatApplication :: [Application] -> Application
-concatApplication = foldl appendApplication mempty
+-- concatApplication :: [Project] -> Project
+-- concatApplication = foldl appendApplication mempty
 
 instance (AllFields r Semigroup, KnownFields r) => Semigroup (Record r) where
   (<>) x y =

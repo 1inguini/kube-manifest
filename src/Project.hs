@@ -1,4 +1,4 @@
-module Project (project) where
+module Project (projects) where
 
 import Data.Aeson.KeyMap as KeyMap
 import Data.FileEmbed (embedStringFile)
@@ -9,12 +9,9 @@ import System.FilePath ((</>))
 import Secret
 import TH (objQQ)
 import Util (
-  Application,
   Project,
-  application,
   cloudflareOriginCACertificate,
   clusterDomain,
-  concatApplication,
   configMap,
   configMapVolume,
   containerPort,
@@ -37,15 +34,16 @@ import Util (
   systemClusterCritical,
   toObj,
   volumeMount,
+  werfProject,
  )
 import qualified Util
 
-general :: Application
-general = application "oneingini" ANON{helm = defineHelm ANON{chart = [objQQ| apiVersion: v2|]}}
+general :: Project
+general = werfProject "oneingini" ANON{helm = defineHelm ANON{chart = [objQQ| apiVersion: v2|]}}
 
-nonroot :: Application
+nonroot :: Project
 nonroot =
-  application
+  werfProject
     "nonroot"
     $ ANON
       { images =
@@ -61,9 +59,9 @@ docker:
           ]
       }
 
-openebs :: Application
+openebs :: Project
 openebs =
-  application
+  werfProject
     "openebs"
     ANON
       { helm =
@@ -97,34 +95,36 @@ provisioner: local.csi.openebs.io
       }
 
 -- config for coredns
-dns :: Application
+dns :: Project
 dns =
-  application "coredns" $
-    let health = Util.name "health"
-        ready = Util.name "ready"
-        metrics = Util.name "metrics"
-        mountPath = "/etc/coredns/"
-     in ANON
-          { helm =
-              defineHelm
-                ANON
-                  { templates =
-                      [ let coredns = Util.container "registry.k8s.io/coredns/coredns:v1.9.3"
-                            coreFilePath = mountPath </> "Corefile"
-                            corednsConf =
-                              toObj
-                                ANON
-                                  { ports =
-                                      [ containerPort 53 <> [objQQ|protocol: UDP|]
-                                      , metrics $ containerPort 9153
-                                      , health $ containerPort 8080
-                                      , ready $ containerPort 8081
-                                      ]
-                                  , livenessProbe = health $ httpGetProbe "health"
-                                  , readinessProbe = ready $ httpGetProbe "ready"
-                                  , volumeMounts = [volumeMount mountPath]
-                                  }
-                         in [objQQ|
+  werfProject "dns" $
+    let ?name = "coredns"
+        ?app = "coredns"
+     in let health = Util.name "health"
+            ready = Util.name "ready"
+            metrics = Util.name "metrics"
+            mountPath = "/etc/coredns/"
+         in ANON
+              { helm =
+                  defineHelm
+                    ANON
+                      { templates =
+                          [ let coredns = Util.container "registry.k8s.io/coredns/coredns:v1.9.3"
+                                coreFilePath = mountPath </> "Corefile"
+                                corednsConf =
+                                  toObj
+                                    ANON
+                                      { ports =
+                                          [ containerPort 53 <> [objQQ|protocol: UDP|]
+                                          , metrics $ containerPort 9153
+                                          , health $ containerPort 8080
+                                          , ready $ containerPort 8081
+                                          ]
+                                      , livenessProbe = health $ httpGetProbe "health"
+                                      , readinessProbe = ready $ httpGetProbe "ready"
+                                      , volumeMounts = [volumeMount mountPath]
+                                      }
+                             in [objQQ|
 $deployment:
   containers:
   - $coredns:
@@ -145,8 +145,8 @@ $deployment:
   volumes:
   - $configMapVolume
 |]
-                      , let port = servicePort 53
-                         in [objQQ|
+                          , let port = servicePort 53
+                             in [objQQ|
 $service:
   externalIPs:
   - $externalIp
@@ -154,21 +154,21 @@ $service:
   - $port:
     protocol: UDP
 |]
-                      , configMap
-                          (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
-                      , metrics
-                          [objQQ|
+                          , configMap
+                              (KeyMap.singleton "Corefile" ($(embedStringFile "src/dns/Corefile") :: Text))
+                          , metrics
+                              [objQQ|
 $service:
   ports:
   - $httpServicePort
 |]
-                      ]
-                  }
-          }
+                          ]
+                      }
+              }
 
-projectcontour :: Application
+projectcontour :: Project
 projectcontour =
-  application "projectcontour" $
+  werfProject "projectcontour" $
     let ?app = "contour"
      in ANON
           { helm =
@@ -199,9 +199,9 @@ contour:
                   }
           }
 
-certManager :: Application
+certManager :: Project
 certManager =
-  application
+  werfProject
     "cert-manager"
     ANON
       { helm =
@@ -274,9 +274,9 @@ spec:
 cockroachdbName :: Text
 cockroachdbName = "cockroachdb"
 
-cockroachdb :: Application
+cockroachdb :: Project
 cockroachdb =
-  application
+  werfProject
     cockroachdbName
     ANON
       { helm =
@@ -333,9 +333,9 @@ cockroachdb:
               }
       }
 
-kubernetesDashboard :: Application
+kubernetesDashboard :: Project
 kubernetesDashboard =
-  application "kubernetes-dashboard" $
+  werfProject "kubernetes-dashboard" $
     let admin = "cluster-admin"
      in ANON
           { helm =
@@ -384,10 +384,10 @@ subjects:
                   }
           }
 
-authentication :: Application
+authentication :: Project
 authentication =
   let cockroachdb = projectName <> "-" <> cockroachdbName <> "-public"
-   in application
+   in werfProject
         "authentication"
         ANON
           { helm =
@@ -403,9 +403,9 @@ dependencies:
                   }
           }
 
-registry :: Application
+registry :: Project
 registry =
-  application "registry" $
+  werfProject "registry" $
     let ?app = "harbor" :: Text
         ?name = ?app
      in let notaryDomain = "notary." <> domain
@@ -544,22 +544,14 @@ harbor:
 projectName :: Text
 projectName = "oneinguini"
 
-project :: Project
-project =
-  Anon.applyPending
-    $ Anon.insert
-      #project
-      [objQQ|
-configVersion: 1
-project: $projectName
-|]
-    $ concatApplication
-      [ general
-      , certManager
-      , cockroachdb
-      , dns
-      , kubernetesDashboard
-      , openebs
-      , projectcontour
-      , registry
-      ]
+projects :: [Project]
+projects =
+  [ general
+  , certManager
+  , cockroachdb
+  , dns
+  , kubernetesDashboard
+  , openebs
+  , projectcontour
+  , registry
+  ]

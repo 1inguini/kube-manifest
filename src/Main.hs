@@ -1,11 +1,12 @@
 module Main (main) where
 
-import Project (project)
+import Project (projects)
 import Util (Helm, Project, encodeAll)
 
-import Control.Exception.Safe (throwString)
+import Control.Exception.Safe (throwString, try)
 import Control.Monad (unless)
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Optics (key, _String)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
@@ -13,12 +14,12 @@ import Data.Foldable (traverse_)
 import Data.String.Conversions (cs)
 import qualified Data.Yaml as Yaml
 import Optics (Ixed (ix), Lens', preview, view, (%))
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, listDirectory, removeDirectoryRecursive, removeFile)
+import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive, removeFile)
 import System.FilePath (dropFileName, (<.>), (</>))
 import Text.Casing (fromHumps, toKebab)
 
--- generate :: IO ()
--- generate = traverse_ processProject projects
+generate :: IO ()
+generate = traverse_ processProject projects
 
 projectDir :: FilePath
 projectDir = "werf"
@@ -26,14 +27,13 @@ projectDir = "werf"
 processProject :: Project -> IO ()
 processProject proj = do
   let werf = encodeAll $ view #project proj : view #images proj
-  -- projectName <- maybe (throwString "no field `project`") pure $ do
-  --   proj <- KeyMap.lookup "project" $ view #project proj
-  --   preview _String proj
-  -- let dir = projectDir </> cs projectName
-  let dir = projectDir
+  projectName <- maybe (throwString "no field `project`") pure $ do
+    proj <- KeyMap.lookup "project" $ view #project proj
+    preview _String proj
+  let dir = projectDir </> cs projectName
+  _ <- try @_ @IOError $ removeDirectoryRecursive dir
   createDirectoryIfMissing True dir
   let path = dir </> "werf.yaml"
-  removeFile path
   ByteString.writeFile path werf
   putStrLn $ "# wrote to: " <> path
   processHelm (dir </> ".helm") $ view #helm proj
@@ -41,14 +41,6 @@ processProject proj = do
 processHelm :: FilePath -> Helm -> IO ()
 processHelm dir helm = do
   createDirectoryIfMissing True dir
-  traverse_
-    ( \f ->
-        let path = dir </> f
-         in do
-              isDir <- doesDirectoryExist path
-              if isDir then removeDirectoryRecursive path else removeFile path
-    )
-    =<< listDirectory dir
   let mayWrite ::
         forall a. (Eq a, Monoid a) => (a -> ByteString) -> a -> FilePath -> IO ()
       mayWrite encode val subPath =
@@ -89,7 +81,7 @@ processHelm dir helm = do
 main :: IO ()
 main = do
   createDirectoryIfMissing True projectDir
-  processProject project
+  generate
 
 -- createDirectoryIfMissing True projectDir
 -- generate
