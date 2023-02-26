@@ -150,11 +150,11 @@ embedFromYamlAllFile ::
   TH.Q TH.Exp
 embedFromYamlAllFile = embedFrom getYamlAllFile
 
-embedYamlFile :: FilePath -> TH.Q TH.Exp
-embedYamlFile path = embedFromYamlFile @Yaml.Value path pure
+embedYamlFile :: forall a. (Yaml.FromJSON a, Lift a) => FilePath -> TH.Q TH.Exp
+embedYamlFile path = embedFromYamlFile @a path pure
 
-embedYamlAllFile :: FilePath -> TH.Q TH.Exp
-embedYamlAllFile path = embedFromYamlAllFile @Yaml.Value path pure
+embedYamlAllFile :: forall a. (Yaml.FromJSON a, Lift a) => FilePath -> TH.Q TH.Exp
+embedYamlAllFile path = embedFromYamlAllFile @a path pure
 
 embedModifedYamlFile ::
   forall a b.

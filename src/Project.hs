@@ -4,10 +4,11 @@ import Data.Aeson.KeyMap as KeyMap
 import Data.FileEmbed (embedStringFile)
 import qualified Data.Record.Anon.Simple as Anon
 import Data.Text (Text)
+import Data.Yaml as Yaml
 import System.FilePath ((</>))
 
 import Secret
-import TH (objQQ)
+import TH (embedFromYamlAllFile, embedYamlAllFile, objQQ)
 import Util (
   Project,
   cloudflareOriginCACertificate,
@@ -39,9 +40,6 @@ import Util (
  )
 import qualified Util
 
-general :: Project
-general = werfProject "oneingini" ANON{helm = defineHelm ANON{chart = [objQQ| apiVersion: v2|]}}
-
 nonroot :: Project
 nonroot =
   werfProject
@@ -70,6 +68,7 @@ openebs =
             ANON
               { chart =
                   [objQQ|
+apiVersion: v2
 dependencies:
 - name: lvm-localpv
   version: ~1.0.1
@@ -177,6 +176,7 @@ projectcontour =
                 ANON
                   { chart =
                       [objQQ|
+apiVersion: v2
 dependencies:
 - name: contour
   version: ~11.0.0
@@ -210,6 +210,7 @@ certManager =
             ANON
               { chart =
                   [objQQ|
+apiVersion: v2
 dependencies:
 - name: cert-manager
   version: ~1.11.0
@@ -252,68 +253,6 @@ spec:
               }
       }
 
-cockroachdbName :: Text
-cockroachdbName = "cockroachdb"
-
-cockroachdb :: Project
-cockroachdb =
-  werfProject
-    cockroachdbName
-    ANON
-      { helm =
-          defineHelm
-            ANON
-              { chart =
-                  [objQQ|
-dependencies:
-- name: cockroachdb
-  version: ~10.0.5
-  repository: https://charts.cockroachdb.com/
-|]
-              , values =
-                  [objQQ|
-cockroachdb:
-  clusterDomain: $clusterDomain
-  statefulset:
-    labels:
-      $labels:
-      app.kubernetes.io/component: $?app
-  service:
-    public:
-      labels:
-        $labels:
-        app.kubernetes.io/component: $?app
-    discovery:
-      labels:
-        $labels:
-        app.kubernetes.io/component: $?app
-    storage:
-      persistentVolume:
-        labels: $labels
-    init:
-      labels:
-        $labels:
-        app.kubernetes.io/component: init
-  tls:
-    enabled: true
-    certs:
-      provided: true
-      selfSigner:
-        enabled: true
-        # caProvided: true
-        # caSecret: $localIssuerName
-      # tlsSecret: true
-      # selfSigner:
-      #   enabled: false
-      # certManager: true
-      # useCertManagerV1CRDs: true
-      # certManagerIssuer:
-      #   kind: Issuer
-      #   name: $localIssuerName
-|]
-              }
-      }
-
 kubernetesDashboard :: Project
 kubernetesDashboard =
   werfProject "kubernetes-dashboard" $
@@ -324,6 +263,7 @@ kubernetesDashboard =
                 ANON
                   { chart =
                       [objQQ|
+apiVersion: v2
 dependencies:
 - name: kubernetes-dashboard
   version: ~6.0.0
@@ -365,24 +305,26 @@ subjects:
                   }
           }
 
-authentication :: Project
-authentication =
-  let cockroachdb = projectName <> "-" <> cockroachdbName <> "-public"
-   in werfProject
-        "authentication"
-        ANON
-          { helm =
-              defineHelm
-                ANON
-                  { chart =
-                      [objQQ|
-dependencies:
-- name: zitadel
-  version: ~4.1.4
-  repository: https://charts.zitadel.com
-|]
-                  }
-          }
+-- authentication :: Project
+-- authentication =
+--   let cockroachdb = projectName <> "-" <> cockroachdbName <> "-public"
+--    in werfProject
+--         "authentication"
+--         ANON
+--           { helm =
+--               defineHelm
+--                 ANON
+--                   { chart =
+--                       [objQQ|
+-- apiVersion: v2
+-- dependencies:
+-- - name: zitadel
+--   version: ~4.1.4
+--   repository: https://charts.zitadel.com
+
+--   | ]
+-- }
+-- }
 
 registry :: Project
 registry =
@@ -528,8 +470,7 @@ projectName = "oneinguini"
 
 projects :: [Project]
 projects =
-  [ general
-  , certManager
+  [ certManager
   , cockroachdb
   , dns
   , kubernetesDashboard
