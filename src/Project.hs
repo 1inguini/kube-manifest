@@ -363,13 +363,13 @@ zitadel:
           Options: ""
           User:
             SSL:
-              Mode: enable
+              Mode: require
               RootCert: /.secrets/ca.crt
               Cert: /.secrets/tls.crt
               Key: /.secrets/tls.key
           Admin:
             SSL:
-              Mode: enable
+              Mode: require
               RootCert: /.secrets/ca.crt
               Cert: /.secrets/tls.crt
               Key: /.secrets/tls.key
@@ -449,6 +449,8 @@ spec:
   certificates:
     clientCASecret: $?name
     replicationTLSSecret: $?name
+    serverCASecret: $?name
+    serverTLSSecret: $?name
   bootstrap:
     initdb:
       database: zitadel
