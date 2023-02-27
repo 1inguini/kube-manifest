@@ -387,29 +387,30 @@ zitadel:
     annotation: $ingressContourTlsAnnotations
     hosts:
       - host: $domain
-        paths: /
-        pathType: Prefix
+        paths:
+          - path: /
+            pathType: Prefix
   env:
-  - name: ZITADEL_DATABASE_POSTGRES_USER_USERNAME
-    valueFrom:
-      secretKeyRef:
-        name: $dbUser
-        key: username
-  - name: ZITADEL_DATABASE_POSTGRES_USER_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: $dbUser
-        key: password
-  - name: ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME
-    valueFrom:
-      secretKeyRef:
-        name: $dbAdmin
-        key: username
-  - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: $dbAdmin
-        key: password
+    - name: ZITADEL_DATABASE_POSTGRES_USER_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: $dbUser
+          key: username
+    - name: ZITADEL_DATABASE_POSTGRES_USER_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: $dbUser
+          key: password
+    - name: ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: $dbAdmin
+          key: username
+    - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: $dbAdmin
+          key: password
   # metrics:
   #   enabled: true
   #   serviceMonitor:
