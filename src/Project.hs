@@ -166,6 +166,25 @@ $service:
                       }
               }
 
+postgresql :: Project
+postgresql =
+  werfProject
+    "cnpg-system"
+    ANON
+      { helm =
+          defineHelm
+            ANON
+              { chart =
+                  [objQQ|
+apiVersion: v2
+dependencies:
+- name: cloudnative-pg
+  version: ~0.17.0
+  repository: https://cloudnative-pg.github.io/charts
+|]
+              }
+      }
+
 projectcontour :: Project
 projectcontour =
   werfProject "projectcontour" $
@@ -471,7 +490,7 @@ projectName = "oneinguini"
 projects :: [Project]
 projects =
   [ certManager
-  , cockroachdb
+  , postgresql
   , dns
   , kubernetesDashboard
   , openebs
