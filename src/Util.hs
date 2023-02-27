@@ -334,12 +334,6 @@ volumeClaimTemplatesa: $persistentVolumeClaims
 |]
     podTemplateSpec
 
-data PathType
-  = Exact
-  | Prefix
-  | ImplementationSpecific
-  deriving (Show)
-
 localIssuerName :: Text
 localIssuerName = "selfsigned-ca"
 
@@ -553,5 +547,3 @@ defineHelm = flip inject mempty
 
 encodeAll :: [Yaml.Object] -> ByteString
 encodeAll = foldl (\acc doc -> acc <> "---\n" <> doc) mempty . fmap Yaml.encode
-
-$(deriveJSON ''PathType)

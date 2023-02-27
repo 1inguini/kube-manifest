@@ -244,7 +244,7 @@ cert-manager:
                   let ?name = localIssuerName
                    in [ [objQQ|
 apiVersion: cert-manager.io/v1
-kind: Issuer
+kind: ClusterIssuer
 metadata: $meta
 spec:
   selfSigned: {}
@@ -265,7 +265,7 @@ spec:
   - $clusterDomain
   issuerRef:
     name: $?name
-    kind: Issuer
+    kind: ClusterIssuer
     group: cert-manager.io
 |]
                       ]
@@ -324,26 +324,142 @@ subjects:
                   }
           }
 
--- authentication :: Project
--- authentication =
---   let cockroachdb = projectName <> "-" <> cockroachdbName <> "-public"
---    in werfProject
---         "authentication"
---         ANON
---           { helm =
---               defineHelm
---                 ANON
---                   { chart =
---                       [objQQ|
--- apiVersion: v2
--- dependencies:
--- - name: zitadel
---   version: ~4.1.4
---   repository: https://charts.zitadel.com
-
---   | ]
--- }
--- }
+authentication :: Project
+authentication =
+  let db = "database"
+      dbService = db <> "-rw"
+      dbUser = db <> "-app"
+      dbAdmin = db <> "-superuser"
+   in werfProject
+        "auth"
+        $ let ?app = "zitadel"
+           in ANON
+                { helm =
+                    defineHelm
+                      ANON
+                        { chart =
+                            [objQQ|
+apiVersion: v2
+dependencies:
+- name: zitadel
+  version: ~4.1.4
+  repository: https://charts.zitadel.com
+  |]
+                        , values =
+                            [objQQ|
+zitadel:
+  configmapConfig:
+    ExternalSecure: true
+    ExternalDomain: $domain
+    Database:
+      postgres:
+        Host: $dbService
+        Port: 5432
+        Database: $?app
+        MaxOpenConns: 20
+        MaxConnLifetime: 30m
+        MaxConnIdleTime: 30m
+        Options: ""
+        User:
+          SSL:
+            Mode: enable
+            RootCert: /.secrets/ca.crt
+            Cert: /.secrets/tls.crt
+            Key: /.secrets/tls.key
+        Admin:
+          SSL:
+            Mode: enable
+            RootCert: /.secrets/ca.crt
+            Cert: /.secrets/tls.crt
+            Key: /.secrets/tls.key
+    Machine:
+      Identification:
+        Hostname:
+          Enabled: true
+        Webhook:
+          Enabled: false
+  masterkey: $zitadelMasterkey
+  dbSslRootCrtSecret: $localIssuerName
+  dbSslClientCrtSecret: $localIssuerName
+  ingress:
+    enabled: true
+    annotation: $ingressContourTlsAnnotations
+    hosts:
+      - host: $domain
+        paths: /
+        pathType: Prefix
+  env:
+  - name: ZITADEL_DATABASE_POSTGRES_USER_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: $dbUser
+        key: username
+  - name: ZITADEL_DATABASE_POSTGRES_USER_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: $dbUser
+        key: password
+  - name: ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: $dbAdmin
+        key: username
+  - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: $dbAdmin
+        key: password
+  # metrics:
+  #   enabled: true
+  #   serviceMonitor:
+  #     enabled: true
+|]
+                        , templates =
+                            issuer
+                              <> Util.name
+                                db
+                                [ [objQQ|
+$secret:
+metadata:
+  labels:
+    cnpg.io/reload: ""
+|]
+                                , [objQQ|
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: $meta
+spec:
+  secretName: $?name
+  usages:
+    - client auth
+  commonName: streaming_replica
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: $localIssuerName
+|]
+                                , let grant = "GRANT CONNECT,CREATE ON DATABASE " <> ?app <> " TO " <> ?app
+                                   in [objQQ|
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: $meta
+spec:
+  instances: 3
+  certificates:
+    clientCASecret: $?name
+    replicationTLSSecret: $?name
+  bootstrap:
+    initdb:
+      database: $?app
+      owner: $?app
+      postInitSQL:
+        - $grant
+  storage:
+    size: 1Gi
+|]
+                                ]
+                        }
+                }
 
 registry :: Project
 registry =
@@ -489,7 +605,8 @@ projectName = "oneinguini"
 
 projects :: [Project]
 projects =
-  [ certManager
+  [ authentication
+  , certManager
   , postgresql
   , dns
   , kubernetesDashboard
