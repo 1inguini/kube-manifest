@@ -348,39 +348,40 @@ dependencies:
                         , values =
                             [objQQ|
 zitadel:
-  configmapConfig:
-    ExternalSecure: true
-    ExternalDomain: $domain
-    Database:
-      postgres:
-        Host: $dbService
-        Port: 5432
-        Database: $?app
-        MaxOpenConns: 20
-        MaxConnLifetime: 30m
-        MaxConnIdleTime: 30m
-        Options: ""
-        User:
-          SSL:
-            Mode: enable
-            RootCert: /.secrets/ca.crt
-            Cert: /.secrets/tls.crt
-            Key: /.secrets/tls.key
-        Admin:
-          SSL:
-            Mode: enable
-            RootCert: /.secrets/ca.crt
-            Cert: /.secrets/tls.crt
-            Key: /.secrets/tls.key
-    Machine:
-      Identification:
-        Hostname:
-          Enabled: true
-        Webhook:
-          Enabled: false
-  masterkey: $zitadelMasterkey
-  dbSslRootCrtSecret: $localIssuerName
-  dbSslClientCrtSecret: $localIssuerName
+  zitadel:
+    configmapConfig:
+      ExternalSecure: true
+      ExternalDomain: $domain
+      Database:
+        postgres:
+          Host: $dbService
+          Port: 5432
+          Database: zitadel
+          MaxOpenConns: 20
+          MaxConnLifetime: 30m
+          MaxConnIdleTime: 30m
+          Options: ""
+          User:
+            SSL:
+              Mode: enable
+              RootCert: /.secrets/ca.crt
+              Cert: /.secrets/tls.crt
+              Key: /.secrets/tls.key
+          Admin:
+            SSL:
+              Mode: enable
+              RootCert: /.secrets/ca.crt
+              Cert: /.secrets/tls.crt
+              Key: /.secrets/tls.key
+      Machine:
+        Identification:
+          Hostname:
+            Enabled: true
+          Webhook:
+            Enabled: false
+    masterkey: $zitadelMasterkey
+    dbSslRootCrtSecret: $db
+    dbSslClientCrtSecret: $db
   ingress:
     enabled: true
     annotation: $ingressContourTlsAnnotations
@@ -435,11 +436,10 @@ spec:
   commonName: streaming_replica
   issuerRef:
     group: cert-manager.io
-    kind: Issuer
+    kind: ClusterIssuer
     name: $localIssuerName
 |]
-                                , let grant = "GRANT CONNECT,CREATE ON DATABASE " <> ?app <> " TO " <> ?app
-                                   in [objQQ|
+                                , [objQQ|
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata: $meta
@@ -450,10 +450,8 @@ spec:
     replicationTLSSecret: $?name
   bootstrap:
     initdb:
-      database: $?app
-      owner: $?app
-      postInitSQL:
-        - $grant
+      database: zitadel
+      owner: zitadel
   storage:
     size: 1Gi
 |]
